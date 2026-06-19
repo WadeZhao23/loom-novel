@@ -58,6 +58,32 @@ def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Pro
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
 
 
+def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
+    """编辑棒的流式过滤:只把哨兵【之前】的干净改稿流给前端,哨兵及其后的留痕不外流。
+
+    哨兵可能被切成多个 delta,故按累计串判断、并留一个尾窗防止半截哨兵漏判。
+    """
+    st = {"buf": "", "emitted": 0, "cut": False}
+
+    def cb(delta: str) -> None:
+        if st["cut"]:
+            return
+        st["buf"] += delta
+        idx = st["buf"].find(EDIT_NOTE_SENTINEL)
+        if idx == -1:
+            clean = st["buf"][: max(0, len(st["buf"]) - len(EDIT_NOTE_SENTINEL))]
+        else:
+            clean = st["buf"][:idx]
+        new = clean[st["emitted"]:]
+        if new:
+            progress({"type": "agent_chunk", "role": "编辑", "delta": new})
+            st["emitted"] += len(new)
+        if idx != -1:
+            st["cut"] = True
+
+    return cb
+
+
 @dataclass
 class Agent:
     name: str
@@ -182,10 +208,10 @@ def run_pipeline(
         parts.append(f"## 你的任务\n产出【{agent.produces}】。只输出这一项,不要解释你在做什么。")
 
         max_chars = _SHORT.get(role, config.chapter_chars)
-        output = backend.complete(
-            agent.system_prompt, "\n\n".join(parts), max_chars=max_chars,
-            on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),
-        )
+        # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
+        chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
+                    else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
+        output = backend.complete(agent.system_prompt, "\n\n".join(parts), max_chars=max_chars, on_chunk=chunk_cb)
         if role == "编辑":
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:

@@ -62,12 +62,18 @@ class DeepSeekBackend:
                     model=self.model, messages=messages, max_tokens=max_tokens,
                     temperature=0.9, stream=True,
                 )
-                parts = []
+                parts, buf = [], ""
                 for ev in stream:
                     delta = (ev.choices[0].delta.content or "") if ev.choices else ""
-                    if delta:
-                        parts.append(delta)
-                        on_chunk(delta)
+                    if not delta:
+                        continue
+                    parts.append(delta)
+                    buf += delta
+                    if len(buf) >= 8 or buf[-1] in "。\n!?!?…":  # 攒几字/到句末再发,别一 token 一行
+                        on_chunk(buf)
+                        buf = ""
+                if buf:
+                    on_chunk(buf)
                 return "".join(parts).strip()
             resp = self._client.chat.completions.create(
                 model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,

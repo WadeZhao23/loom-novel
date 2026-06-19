@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import Backend, LoomBackendError
-from .state import mark_learned, set_fingerprint_source
+from .state import mark_learned, set_fingerprint_source, unmark_learned
 
 Progress = Callable[[dict], None]
 
@@ -195,24 +195,39 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
 
 
 def revert_learn(project_root: Path, chapter_n: int) -> Path | None:
-    """一键撤销第 N 章那次 learn:把指纹还原到 learn 前。撤完即清备份(撤销是一次性的)。"""
+    """一键撤销第 N 章【最近一次】learn:把指纹还原到那次 learn 前(只撤一层),并清掉该章 learned 标记。
+
+    撤完即清备份(撤销是一次性的);同章学过多次时,撤的是最近那次。
+    """
     backup = project_root / "外置大脑" / ".指纹历史" / f"第{chapter_n}章-learn前.md"
     if not backup.exists():
         return None
     fp_path = project_root / FINGERPRINT_REL
     fp_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
     backup.unlink()
+    unmark_learned(project_root, chapter_n)  # 状态同步:撤了就别再假显「已学」
     return fp_path
 
 
+def _is_rule(line: str) -> bool:
+    """是不是一条真规则/anchor 例句(排除页眉说明 blockquote 与占位行,免得当噪声报给作者)。"""
+    s = line.strip()
+    if not s.startswith(("-", ">")):
+        return False
+    body = s.lstrip("->").strip()
+    if not body or body.startswith("("):  # 占位:- (待填充) / > (还没有…)
+        return False
+    return not any(k in s for k in ("中性默认指纹", "文风规则化描述", "喂样本", "先写一章"))
+
+
 def changed_rules(old_fp: str, new_fp: str) -> dict:
-    """新旧指纹的行级变化(只看规则/anchor 行),给作者一眼看清这次 learn 学到/改了什么。"""
+    """新旧指纹的行级变化(只看真规则/anchor 行),给作者一眼看清这次 learn 学到/改了什么。"""
     old_lines, new_lines = old_fp.splitlines(), new_fp.splitlines()
     sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     added, removed = [], []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag in ("replace", "delete"):
-            removed += [l.strip() for l in old_lines[i1:i2] if l.strip().startswith(("-", ">"))]
+            removed += [l.strip() for l in old_lines[i1:i2] if _is_rule(l)]
         if tag in ("replace", "insert"):
-            added += [l.strip() for l in new_lines[j1:j2] if l.strip().startswith(("-", ">"))]
+            added += [l.strip() for l in new_lines[j1:j2] if _is_rule(l)]
     return {"added": added, "removed": removed}

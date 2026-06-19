@@ -40,3 +40,12 @@ def mark_learned(project_root: Path, chapter_n: int) -> None:
     learned.add(chapter_n)
     st["learned"] = sorted(learned)
     save_state(project_root, st)
+
+
+def unmark_learned(project_root: Path, chapter_n: int) -> None:
+    """撤销某章的 learn 时清掉标记,免得状态假显「已学」。"""
+    st = load_state(project_root)
+    learned = set(st.get("learned", []))
+    learned.discard(chapter_n)
+    st["learned"] = sorted(learned)
+    save_state(project_root, st)
