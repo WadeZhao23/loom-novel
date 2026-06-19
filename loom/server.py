@@ -111,6 +111,24 @@ def doctor(root: str):
     return report(run_checks(Path(root)))
 
 
+@app.post("/api/export")
+def export(b: RootBody):
+    from .archive import export_text
+    try:
+        return export_text(Path(b.root).expanduser())
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/backup")
+def backup(b: RootBody):
+    from .archive import backup_project
+    try:
+        return backup_project(Path(b.root).expanduser())
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 # ----------------------------- 文件 -----------------------------
 class FileBody(BaseModel):
     root: str

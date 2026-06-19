@@ -49,6 +49,8 @@ function bind() {
   $("btn-save-backend").onclick = saveBackend;
   $("provider").onchange = () => { if ($("provider").value === "deepseek") $("model").value = "deepseek-chat"; };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
+  $("btn-export").onclick = exportBook;
+  $("btn-backup").onclick = backupBook;
   $("btn-seed").onclick = () => { $("seed-error").textContent = ""; $("seed-overlay").classList.remove("hidden"); };
   $("seed-cancel").onclick = () => $("seed-overlay").classList.add("hidden");
   $("seed-go").onclick = doSeed;
@@ -91,6 +93,20 @@ function enterProject(d) {
 async function refresh() {
   DATA = await jreq("GET", `/api/project/state?root=${encodeURIComponent(DATA.root)}`);
   render();
+}
+
+// ---------- 备份 / 导出(纯本地) ----------
+async function exportBook() {
+  try {
+    const d = await jreq("POST", "/api/export", { root: DATA.root });
+    toast(`已导出 ${d.chapters} 章 → ${d.path}`);
+  } catch (e) { toast(e.message, true); }
+}
+async function backupBook() {
+  try {
+    const d = await jreq("POST", "/api/backup", { root: DATA.root });
+    toast(`已备份整本 → ${d.path}(拷到云盘/U盘才算真备份)`);
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- 启动自检(只读) ----------
