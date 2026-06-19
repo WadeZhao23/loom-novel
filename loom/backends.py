@@ -28,6 +28,24 @@ class LoomBackendError(RuntimeError):
         self.code = code
 
 
+def _deepseek_error(e: Exception) -> LoomBackendError:
+    """把 DeepSeek/OpenAI SDK 的异常映射成可操作的友好错误(鉴权/余额/限流/通用)。"""
+    msg = str(e)
+    status = getattr(e, "status_code", None)
+    if status is None:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+    low = msg.lower()
+    if status == 401 or "authentication" in low or "invalid api key" in low:
+        code = "deepseek_auth_failed"
+    elif status == 402 or "insufficient balance" in low or "余额" in msg:
+        code = "deepseek_insufficient_balance"
+    elif status == 429 or "rate limit" in low or "too many requests" in low:
+        code = "deepseek_rate_limited"
+    else:
+        return LoomBackendError(render("deepseek_call_failed", detail=msg), code="deepseek_call_failed")
+    return LoomBackendError(render(code), code=code)
+
+
 class Backend(Protocol):
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None) -> str:
@@ -78,8 +96,8 @@ class DeepSeekBackend:
             resp = self._client.chat.completions.create(
                 model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
             )
-        except Exception as e:  # 网络/限流/鉴权 —— 统一收口成友好错误
-            raise LoomBackendError(f"调用 DeepSeek 失败:{e}") from e
+        except Exception as e:  # 网络/限流/鉴权/余额 —— 映射成可操作的友好错误
+            raise _deepseek_error(e) from e
         return (resp.choices[0].message.content or "").strip()
 
 

@@ -18,6 +18,7 @@ PROJECT_ROOT = os.path.dirname(SPECPATH)  # spec 在 packaging/ 下,上一级就
 datas = [
     (os.path.join(PROJECT_ROOT, "loom", "templates"), "loom/templates"),
     (os.path.join(PROJECT_ROOT, "loom", "webui"), "loom/webui"),
+    (os.path.join(PROJECT_ROOT, "loom", "sample"), "loom/sample"),
 ]
 binaries = []
 hiddenimports = collect_submodules("loom")

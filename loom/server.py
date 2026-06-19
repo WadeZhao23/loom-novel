@@ -89,6 +89,17 @@ def create_project(b: CreateBody):
     return _state(root)
 
 
+class ParentBody(BaseModel):
+    parent: str
+
+
+@app.post("/api/sample/open")
+def sample_open(b: ParentBody):
+    """拷一份内置样例书到 parent 并打开,让陌生作者先看一本跑通的书。"""
+    from .scaffold import open_sample
+    return _state(open_sample(Path(b.parent).expanduser()))
+
+
 @app.post("/api/project/open")
 def open_project(b: RootBody):
     root = Path(b.root).expanduser()

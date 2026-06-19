@@ -136,6 +136,13 @@ button.danger:hover { background: #a23f28; border-color: #a23f28; }
 .learn-changes .rem { background: #f6e9e3; color: var(--danger); text-decoration: line-through; }
 .book-actions { display: flex; gap: 8px; margin-top: 10px; }
 .book-actions .mini { flex: 1; }
+.welcome-intro { margin: 4px 0 20px; padding: 14px 16px; background: var(--green-tint);
+  border: 1px solid var(--line); border-radius: 12px; }
+.welcome-intro p { margin: 0 0 12px; font-size: 13px; line-height: 1.8; color: var(--ink-soft); }
+.welcome-intro .primary { width: 100%; }
+.welcome-help { margin-top: 16px; font-size: 13px; color: var(--ink-soft); }
+.welcome-help summary { cursor: pointer; color: var(--ink); }
+.welcome-help ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.8; }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

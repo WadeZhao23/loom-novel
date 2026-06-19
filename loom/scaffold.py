@@ -11,8 +11,20 @@ from pathlib import Path
 from .fingerprint import neutral_default
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+SAMPLE_DIR = Path(__file__).parent / "sample"  # 内置样例书《重生记忆》(2 章 + 进化过的指纹)
 HIGHLIGHT = "外置大脑/写作指纹.md"  # 全片卖点
 GENRE_DIR = "skills/题材"  # 题材库目录(相对项目根)
+
+
+def open_sample(parent: Path | None = None) -> Path:
+    """把内置样例书拷一份到 parent(默认当前目录),返回项目根;已存在就直接用那份。
+
+    样例不带 .env(不含任何 key):打开是给陌生作者「看一本跑通的书」;想续写,填你自己的 DeepSeek key。
+    """
+    target = (parent or Path.cwd()) / "Loom样例-重生记忆"
+    if not target.exists():
+        shutil.copytree(SAMPLE_DIR, target)
+    return target
 
 # 别名归一:键=别名,值=正式题材文件名(不含 .md)
 GENRE_ALIASES = {
