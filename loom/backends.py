@@ -11,10 +11,18 @@ import subprocess
 from typing import Protocol
 
 from .config import Config
+from .errors import render
 
 
 class LoomBackendError(RuntimeError):
-    """后端层的友好错误(CLI 会把它打成一行提示,而不是抛栈)。"""
+    """后端层的友好错误(CLI 会把它打成多段提示,而不是抛栈)。
+
+    可选 code 指向 errors.py 的错误目录;不传时退化成普通字符串错误,向后兼容。
+    """
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class Backend(Protocol):
@@ -29,13 +37,12 @@ class DeepSeekBackend:
         self.model = config.model or "deepseek-chat"
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
-            raise LoomBackendError(
-                "没读到 DEEPSEEK_API_KEY。去项目根的 .env 里填一行:\n"
-                "    DEEPSEEK_API_KEY=sk-你的key\n"
-                "key 在 https://platform.deepseek.com 申请。"
-            )
+            raise LoomBackendError(render("deepseek_key_missing"), code="deepseek_key_missing")
         # 延迟 import,免得没装 openai 时连 --help 都跑不起来
-        from openai import OpenAI
+        try:
+            from openai import OpenAI
+        except ModuleNotFoundError as e:
+            raise LoomBackendError(render("openai_not_installed"), code="openai_not_installed") from e
 
         self._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
@@ -62,9 +69,7 @@ class ClaudeCodeBackend:
 
     def __init__(self, config: Config) -> None:
         if shutil.which("claude") is None:
-            raise LoomBackendError(
-                "没找到 `claude` 命令。装 Claude Code 后再把 loom.toml 的 provider 改成 claude。"
-            )
+            raise LoomBackendError(render("claude_not_found"), code="claude_not_found")
 
     # 护栏:逼 `claude -p` 当"纯文本补全",别当 Claude Code agent(去找文件/反问/解释)
     _GUARD = (
@@ -80,6 +85,8 @@ class ClaudeCodeBackend:
         cmd = ["claude", "-p", prompt, "--model", "haiku", "--allowed-tools", ""]
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+        except subprocess.TimeoutExpired as e:
+            raise LoomBackendError(render("claude_timeout", detail="timeout=240s"), code="claude_timeout") from e
         except Exception as e:
             raise LoomBackendError(f"调用 claude 失败:{e}") from e
         if out.returncode != 0:

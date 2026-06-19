@@ -153,6 +153,28 @@ def status() -> None:
     console.print(table)
 
 
+@app.command(help="启动自检:检查 key/后端命令/agent/外置大脑齐不齐。")
+def doctor() -> None:
+    from .doctor import run_checks
+
+    try:
+        root = find_project_root()
+    except FileNotFoundError as e:
+        _die(str(e))
+    checks = run_checks(root)
+    if all(c.ok for c in checks):
+        console.print("[bold green]✓ 环境就绪,可以开写。[/bold green]")
+        raise typer.Exit(0)
+    table = Table(title="启动自检 · 待修复")
+    for col in ("检查项", "缺什么", "怎么补"):
+        table.add_column(col)
+    for c in checks:
+        if not c.ok:
+            table.add_row(f"[red]✗ {c.name}[/red]", c.missing, c.fix)
+    console.print(table)
+    raise typer.Exit(1)
+
+
 @app.command(help="离线拆一本参考书,抽可迁移框架(产物是候选,不进流水线)。")
 def deconstruct(source: Path = typer.Argument(..., help="参考书文本路径"),
                 name: str = typer.Option(None, "--名", "--name")) -> None:
