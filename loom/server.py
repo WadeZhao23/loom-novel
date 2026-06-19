@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from .agents import run_pipeline
 from .backends import LoomBackendError, get_backend
 from .config import Config, key_is_set, load_config, save_config, set_env_key
+from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
 from .scaffold import init as scaffold_init
@@ -28,9 +29,8 @@ WEBUI_DIR = Path(__file__).parent / "webui"
 app = FastAPI(title="Loom")
 
 # ---- 编辑器允许读写的文件(外置大脑可改、skills/agents 只读展示) ----
-_BRAIN = ["世界观.md", "人物卡.md", "卡章纲.md", "写作指纹.md"]
-_SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md"]
-_AGENTS = ["设定师.md", "大纲师.md", "写手.md", "编辑.md", "润色师.md"]
+# 外置大脑四件套 / 5 个 agent 的清单单一真相在 doctor.py(BRAIN_FILES/AGENT_FILES)。
+_SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md", "金手指.md"]
 
 
 def _is_project(p: Path) -> bool:
@@ -53,9 +53,9 @@ def _state(root: Path) -> dict:
         "backend": {"provider": cfg.provider, "model": cfg.model, "chapter_chars": cfg.chapter_chars,
                     "key_set": key_is_set(root)},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": f"外置大脑/{n}", "name": n[:-3]} for n in _BRAIN],
+        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES],
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
-        "agents": [{"rel": f"agents/{n}", "name": n[:-3]} for n in _AGENTS],
+        "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
         "chapters": chs,
         "next_chapter": (chapters[-1] + 1) if chapters else 1,
     }
@@ -94,6 +94,12 @@ def open_project(b: RootBody):
 @app.get("/api/project/state")
 def project_state(root: str):
     return _state(Path(root))
+
+
+@app.get("/api/doctor")
+def doctor(root: str):
+    """只读启动自检:检查 key/后端命令/agent/外置大脑齐不齐。"""
+    return report(run_checks(Path(root)))
 
 
 # ----------------------------- 文件 -----------------------------

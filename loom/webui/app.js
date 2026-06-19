@@ -31,6 +31,7 @@ function bind() {
   $("btn-create").onclick = createProject;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
   $("btn-close-proj").onclick = () => { localStorage.removeItem("loom_root"); showWelcome(); };
+  $("btn-doctor").onclick = runDoctor;
   $("btn-save-backend").onclick = saveBackend;
   $("provider").onchange = () => { if ($("provider").value === "deepseek") $("model").value = "deepseek-chat"; };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
@@ -74,6 +75,16 @@ function enterProject(d) {
 async function refresh() {
   DATA = await jreq("GET", `/api/project/state?root=${encodeURIComponent(DATA.root)}`);
   render();
+}
+
+// ---------- 启动自检(只读) ----------
+async function runDoctor() {
+  try {
+    const d = await jreq("GET", `/api/doctor?root=${encodeURIComponent(DATA.root)}`);
+    const bad = d.checks.filter((c) => !c.ok);
+    if (!bad.length) { toast("环境就绪,可以开写"); return; }
+    bad.forEach((c) => toast(`✗ ${c.name}:${c.missing} → ${c.fix}`, true));
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- 渲染 ----------

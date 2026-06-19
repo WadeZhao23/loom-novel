@@ -67,7 +67,8 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 def load_agent(project_root: Path, role: str) -> Agent:
     path = project_root / "agents" / f"{role}.md"
     if not path.exists():
-        raise FileNotFoundError(f"缺 agent 提示词:{path}(项目骨架是不是被改坏了?)")
+        from .errors import render
+        raise FileNotFoundError(render("agent_prompt_missing", detail=str(path)))
     meta, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
     return Agent(
         name=meta.get("name", role) or role,

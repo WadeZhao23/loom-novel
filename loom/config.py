@@ -23,9 +23,8 @@ def find_project_root(start: Path | None = None) -> Path:
     for d in [here, *here.parents]:
         if (d / "loom.toml").exists():
             return d
-    raise FileNotFoundError(
-        "没找到 loom.toml —— 你是不是不在 loom 项目目录里?先 `loom init <书名>` 再 `cd` 进去。"
-    )
+    from .errors import render
+    raise FileNotFoundError(render("project_root_not_found"))
 
 
 def load_config(project_root: Path) -> Config:
