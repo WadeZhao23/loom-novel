@@ -125,6 +125,19 @@
     </div>
   </div>
 
+  <!-- learn 结果:看清这次学到了什么,可一键撤销 -->
+  <div id="learn-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3>这次 learn 学到了什么</h3>
+      <p class="hint">下面是写作指纹这次的变化。若有"形对神错"——句式像你、但内容是你不会写的(比如把剧情/议论当文风),撤销它;或保留后去编辑器手删那一条。</p>
+      <div id="learn-changes" class="learn-changes"></div>
+      <div class="row-end">
+        <button id="learn-revert" class="danger">撤销这次 learn</button>
+        <button id="learn-keep" class="primary">保留,去看指纹</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
   <script src="/app.js"></script>

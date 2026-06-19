@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null;            // 当前项目 state
 let CUR = null;             // 当前打开的文件 {rel, editable, chapter}
+let _lastLearnChapter = null;  // 最近一次 learn 的章号(供撤销)
 
 // ---------- 小工具 ----------
 async function jreq(method, url, body) {
@@ -53,6 +54,8 @@ function bind() {
   $("seed-go").onclick = doSeed;
   $("btn-save-file").onclick = saveFile;
   $("btn-learn").onclick = () => CUR && learn(CUR.chapter);
+  $("learn-keep").onclick = () => { $("learn-overlay").classList.add("hidden"); openFile("外置大脑/写作指纹.md", true, null); };
+  $("learn-revert").onclick = revertLearn;
   $("run-close").onclick = closeRun;
 }
 
@@ -180,8 +183,30 @@ async function doSeed() {
 // ---------- learn ----------
 async function learn(n) {
   try {
-    await jreq("POST", "/api/learn", { root: DATA.root, chapter: n });
-    toast(`已把第${n}章手改学进指纹,并把写后摘要补进卡章纲`);
+    const d = await jreq("POST", "/api/learn", { root: DATA.root, chapter: n });
+    _lastLearnChapter = n;
+    toast(`第${n}章手改已学,写后摘要已补进卡章纲`);
+    await refresh();
+    showLearnChanges(d.changes || { added: [], removed: [] });
+  } catch (e) { toast(e.message, true); }
+}
+function showLearnChanges(changes) {
+  const box = $("learn-changes"); box.innerHTML = "";
+  const add = changes.added || [], rem = changes.removed || [];
+  if (!add.length && !rem.length) {
+    box.innerHTML = '<div class="hint">这次没有明显的规则变化。</div>';
+  } else {
+    rem.forEach((l) => { const e = document.createElement("div"); e.className = "chg rem"; e.textContent = "− " + l; box.appendChild(e); });
+    add.forEach((l) => { const e = document.createElement("div"); e.className = "chg add"; e.textContent = "+ " + l; box.appendChild(e); });
+  }
+  $("learn-overlay").classList.remove("hidden");
+}
+async function revertLearn() {
+  if (_lastLearnChapter == null) return;
+  try {
+    await jreq("POST", "/api/learn/revert", { root: DATA.root, chapter: _lastLearnChapter });
+    toast("已撤销这次 learn,指纹还原");
+    $("learn-overlay").classList.add("hidden");
     await refresh();
     openFile("外置大脑/写作指纹.md", true, null);
   } catch (e) { toast(e.message, true); }

@@ -127,11 +127,21 @@ def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, 
 
 @app.command(help="把你对第 N 章的手改蒸馏进指纹。")
 def learn(chapter: int = typer.Argument(...)) -> None:
+    from .fingerprint import changed_rules
     from .fingerprint import learn as do_learn
 
     try:
         root = find_project_root()
+        fp = root / "外置大脑" / "写作指纹.md"
+        old = fp.read_text(encoding="utf-8") if fp.exists() else ""
         do_learn(root, chapter, get_backend(load_config(root)), _render)
+        ch = changed_rules(old, fp.read_text(encoding="utf-8"))
+        if ch["added"] or ch["removed"]:
+            console.print("\n[bold]本次指纹变化[/bold] [dim](学歪了?在 app 里点撤销,或删 外置大脑/.指纹历史/)[/dim]")
+            for l in ch["removed"]:
+                console.print(f"  [red]− {l}[/red]")
+            for l in ch["added"]:
+                console.print(f"  [green]+ {l}[/green]")
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 

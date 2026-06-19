@@ -178,6 +178,10 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         f"请按两步走(先判定改写/改情节,再只学改写)输出更新后的【完整新指纹】。"
     )
     new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=1800)
+    # 备份 learn 前的指纹,供作者一键撤销(人兜"形对神错"——自动打分兜不住)
+    hist = project_root / "外置大脑" / ".指纹历史"
+    hist.mkdir(parents=True, exist_ok=True)
+    (hist / f"第{chapter_n}章-learn前.md").write_text(old_fp, encoding="utf-8")
     fp_path.write_text(new_fp.strip() + "\n", encoding="utf-8")
     mark_learned(project_root, chapter_n)
     # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
@@ -188,3 +192,27 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         progress({"type": "warn", "message": f"写后摘要没补成(不影响指纹):{e}"})
     progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n})
     return fp_path
+
+
+def revert_learn(project_root: Path, chapter_n: int) -> Path | None:
+    """一键撤销第 N 章那次 learn:把指纹还原到 learn 前。撤完即清备份(撤销是一次性的)。"""
+    backup = project_root / "外置大脑" / ".指纹历史" / f"第{chapter_n}章-learn前.md"
+    if not backup.exists():
+        return None
+    fp_path = project_root / FINGERPRINT_REL
+    fp_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+    backup.unlink()
+    return fp_path
+
+
+def changed_rules(old_fp: str, new_fp: str) -> dict:
+    """新旧指纹的行级变化(只看规则/anchor 行),给作者一眼看清这次 learn 学到/改了什么。"""
+    old_lines, new_lines = old_fp.splitlines(), new_fp.splitlines()
+    sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    added, removed = [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "delete"):
+            removed += [l.strip() for l in old_lines[i1:i2] if l.strip().startswith(("-", ">"))]
+        if tag in ("replace", "insert"):
+            added += [l.strip() for l in new_lines[j1:j2] if l.strip().startswith(("-", ">"))]
+    return {"added": added, "removed": removed}
