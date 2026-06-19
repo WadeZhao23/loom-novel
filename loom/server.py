@@ -22,6 +22,7 @@ from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
+from .scaffold import available_genres
 from .scaffold import init as scaffold_init
 from .state import load_state
 
@@ -66,16 +67,22 @@ def _state(root: Path) -> dict:
 class CreateBody(BaseModel):
     name: str
     parent: str
+    genre: str | None = None
 
 
 class RootBody(BaseModel):
     root: str
 
 
+@app.get("/api/genres")
+def genres():
+    return {"genres": available_genres()}
+
+
 @app.post("/api/project/create")
 def create_project(b: CreateBody):
     try:
-        root = scaffold_init(b.name, Path(b.parent).expanduser())
+        root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     return _state(root)

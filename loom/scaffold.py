@@ -12,15 +12,55 @@ from .fingerprint import neutral_default
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 HIGHLIGHT = "外置大脑/写作指纹.md"  # 全片卖点
+GENRE_DIR = "skills/题材"  # 题材库目录(相对项目根)
+
+# 别名归一:键=别名,值=正式题材文件名(不含 .md)
+GENRE_ALIASES = {
+    "玄幻": "修仙", "修真": "修仙", "玄幻修仙": "修仙",
+    "都市修真": "都市异能",
+    "游戏电竞": "电竞", "电竞文": "电竞",
+    "直播": "直播文", "主播": "直播文", "直播带货": "直播文",
+    "克系": "克苏鲁", "克系悬疑": "克苏鲁",
+}
 
 
-def init(name: str, parent: Path | None = None) -> Path:
-    """在 parent(默认当前目录)下建一个名为 name 的项目骨架,返回项目根路径。"""
+def _resolve_genre(genre: str | None) -> str | None:
+    """归一题材名;命中不到模板就返回 None(永不报错,守离线铁律)。"""
+    if not genre:
+        return None
+    name = GENRE_ALIASES.get(genre.strip(), genre.strip())
+    return name if (TEMPLATES_DIR / GENRE_DIR / f"{name}.md").exists() else None
+
+
+def available_genres() -> list[str]:
+    """题材库里有哪些题材(供 CLI/WebUI 列选项)。"""
+    d = TEMPLATES_DIR / GENRE_DIR
+    return sorted(p.stem for p in d.glob("*.md") if p.stem != "README")
+
+
+def init(name: str, parent: Path | None = None, genre: str | None = None) -> Path:
+    """在 parent(默认当前目录)下建一个名为 name 的项目骨架,返回项目根路径。
+
+    genre 命中题材库时,只把那一份题材速查拷进项目(没选/拼错则不拷,行为与不选一致)。
+    """
     target = (parent or Path.cwd()) / name
     if target.exists() and any(target.iterdir()):
         raise FileExistsError(f"目录 {target} 已存在且非空,换个名字或先清空。")
 
-    shutil.copytree(TEMPLATES_DIR, target, dirs_exist_ok=True)
+    # 全拷骨架,但排除整个题材目录(37 份不一把铺,按选中题材单拷)
+    def _ignore(dir_path: str, names: list[str]) -> set[str]:
+        if Path(dir_path).resolve() == (TEMPLATES_DIR / "skills").resolve():
+            return {"题材"} & set(names)
+        return set()
+
+    shutil.copytree(TEMPLATES_DIR, target, dirs_exist_ok=True, ignore=_ignore)
+
+    # 题材命中 → 只拷选中那一份(可手改、file-as-truth)
+    chosen = _resolve_genre(genre)
+    if chosen:
+        dst = target / GENRE_DIR
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TEMPLATES_DIR / GENRE_DIR / f"{chosen}.md", dst / f"{chosen}.md")
 
     # loom.toml 填上书名
     toml = target / "loom.toml"
