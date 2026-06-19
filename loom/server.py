@@ -176,7 +176,9 @@ def learn(b: ChapterBody):
         fp_learn(root, b.chapter, get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    return {"ok": True, "fingerprint": (root / "外置大脑" / "写作指纹.md").read_text(encoding="utf-8")}
+    return {"ok": True,
+            "fingerprint": (root / "外置大脑" / "写作指纹.md").read_text(encoding="utf-8"),
+            "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8")}
 
 
 # ----------------------------- write(流式) -----------------------------
