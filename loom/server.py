@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from .agents import run_pipeline
 from .backends import LoomBackendError, get_backend
+from . import ledger
 from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import learn as fp_learn
@@ -192,12 +193,13 @@ class WriteBody(BaseModel):
 def write(b: WriteBody):
     root = Path(b.root)
     out = root / "正文" / f"第{b.chapter}章.md"
-    snap = root / "正文" / ".原稿" / f"第{b.chapter}章.md"
     if out.exists() and not b.force:
-        edited = snap.exists() and out.read_text(encoding="utf-8").strip() != snap.read_text(encoding="utf-8").strip()
-        msg = (f"第 {b.chapter} 章你手改过,重跑会覆盖。先 learn,或勾选覆盖。"
-               if edited else f"第 {b.chapter} 章已存在。要重写请勾选覆盖。")
-        return JSONResponse({"error": msg}, status_code=409)
+        if ledger.chapter_drifted(root, b.chapter):
+            return JSONResponse(
+                {"error": f"第 {b.chapter} 章正文与上次记录不符(手改过?)。先 learn,或勾选覆盖以你的正文为准重写。",
+                 "code": "chapter_drifted"}, status_code=409)
+        return JSONResponse(
+            {"error": f"第 {b.chapter} 章已写完。要重写请勾选覆盖。", "code": "chapter_exists"}, status_code=409)
 
     q: queue.Queue = queue.Queue()
 
@@ -205,7 +207,8 @@ def write(b: WriteBody):
         try:
             cfg = load_config(root)
             backend = get_backend(cfg)
-            run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25)
+            # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序
+            run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25, resume=not b.force)
         except (LoomBackendError, ValueError, FileNotFoundError) as e:
             q.put({"type": "error", "message": str(e)})
         except Exception as e:  # 兜底,别让流挂死

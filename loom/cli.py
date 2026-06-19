@@ -34,6 +34,8 @@ def _render(event: dict) -> None:
         console.print(f"[bold cyan]▶ {event['role']} Agent[/bold cyan] …")
     elif t == "agent_done":
         console.print(f"[bold green]✓ {event['role']} Agent[/bold green] —— 已产出{event['produces']}")
+    elif t == "agent_skip":
+        console.print(f"[dim]⏭ {event['role']} —— 跳过(已完成、上游未变)[/dim]")
     elif t == "warn":
         console.print(f"  [yellow]· {event['message']}[/yellow]")
     elif t == "info":
@@ -98,20 +100,20 @@ def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
 
 @app.command(help="跑 5 个 Agent 写第 N 章。")
 def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, "--force", "-f")) -> None:
+    from . import ledger
     from .agents import run_pipeline
 
     try:
         root = find_project_root()
         out = root / "正文" / f"第{chapter}章.md"
-        snap = root / "正文" / ".原稿" / f"第{chapter}章.md"
         if out.exists() and not force:
-            edited = snap.exists() and out.read_text(encoding="utf-8").strip() != snap.read_text(encoding="utf-8").strip()
-            if edited:
-                _die(f"第 {chapter} 章你手改过,重跑会覆盖。先 learn {chapter},或加 --force。")
-            _die(f"第 {chapter} 章已存在。要重写就加 --force。")
+            if ledger.chapter_drifted(root, chapter):
+                _die(f"第 {chapter} 章正文与上次记录不符(你手改过?)。先 learn {chapter},或加 --force 以你的正文为准重写。")
+            _die(f"第 {chapter} 章已写完。要重写加 --force。")
         config = load_config(root)
         console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字[/dim]\n")
-        run_pipeline(root, chapter, get_backend(config), config, _render, slow=0.3)
+        # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序,省 DeepSeek 计费
+        run_pipeline(root, chapter, get_backend(config), config, _render, slow=0.3, resume=not force)
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 
