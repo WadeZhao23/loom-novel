@@ -143,6 +143,12 @@ button.danger:hover { background: #a23f28; border-color: #a23f28; }
 .welcome-help { margin-top: 16px; font-size: 13px; color: var(--ink-soft); }
 .welcome-help summary { cursor: pointer; color: var(--ink); }
 .welcome-help ol { margin: 8px 0 0; padding-left: 20px; line-height: 1.8; }
+.rewrite-src, .rewrite-result { margin: 8px 0; padding: 12px 14px; border-radius: 10px;
+  font-family: var(--serif); font-size: 14px; line-height: 1.7; white-space: pre-wrap;
+  max-height: 180px; overflow-y: auto; }
+.rewrite-src { background: #f6e9e3; color: var(--ink-soft); }
+.rewrite-result { background: var(--green-tint); color: var(--ink); border: 1px solid var(--line); }
+#rewrite-instruction { width: 100%; margin: 6px 0; }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

@@ -232,6 +232,43 @@ def learn_revert(b: ChapterBody):
     return {"ok": True, "fingerprint": p.read_text(encoding="utf-8")}
 
 
+# ----------------------------- 局部重写 -----------------------------
+class RewriteBody(BaseModel):
+    root: str
+    chapter: int
+    full_text: str
+    span: str
+    instruction: str = ""
+
+
+@app.post("/api/rewrite")
+def rewrite(b: RewriteBody):
+    """只重写选中段(整章作上下文,按写作指纹的嗓音);不落盘,返回候选。"""
+    from .rewrite import rewrite_span
+    root = Path(b.root)
+    try:
+        out = rewrite_span(root, b.chapter, b.full_text, b.span, b.instruction, get_backend(load_config(root)))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"rewritten": out}
+
+
+class RewriteApplyBody(BaseModel):
+    root: str
+    chapter: int
+    content: str
+    old_span: str
+    new_span: str
+
+
+@app.post("/api/rewrite/apply")
+def rewrite_apply(b: RewriteApplyBody):
+    """应用重写:落盘正文 + 外科式同步 .原稿 快照(守 learn 不被 AI 重写污染)。"""
+    from .rewrite import apply_rewrite
+    apply_rewrite(Path(b.root), b.chapter, b.content, b.old_span, b.new_span)
+    return {"ok": True}
+
+
 # ----------------------------- write(流式) -----------------------------
 class WriteBody(BaseModel):
     root: str

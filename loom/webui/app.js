@@ -4,6 +4,8 @@ const $ = (id) => document.getElementById(id);
 let DATA = null;            // 当前项目 state
 let CUR = null;             // 当前打开的文件 {rel, editable, chapter}
 let _lastLearnChapter = null;  // 最近一次 learn 的章号(供撤销)
+let _rewriteSel = null;        // 当前重写的选区 {start, end, span}
+let _rewriteText = "";         // 当前重写候选
 
 // ---------- 小工具 ----------
 async function jreq(method, url, body) {
@@ -57,6 +59,11 @@ function bind() {
   $("seed-go").onclick = doSeed;
   $("btn-save-file").onclick = saveFile;
   $("btn-learn").onclick = () => CUR && learn(CUR.chapter);
+  $("btn-rewrite").onclick = openRewrite;
+  $("rewrite-cancel").onclick = () => $("rewrite-overlay").classList.add("hidden");
+  $("rewrite-go").onclick = doRewrite;
+  $("rewrite-again").onclick = doRewrite;
+  $("rewrite-apply").onclick = applyRewrite;
   $("learn-keep").onclick = () => { $("learn-overlay").classList.add("hidden"); openFile("外置大脑/写作指纹.md", true, null); };
   $("learn-revert").onclick = revertLearn;
   $("run-close").onclick = closeRun;
@@ -179,6 +186,7 @@ async function openFile(rel, editable, chapter, li) {
   $("editor-path").textContent = rel + (editable ? "" : "(只读)");
   $("btn-save-file").classList.toggle("hidden", !editable);
   $("btn-learn").classList.toggle("hidden", chapter == null);
+  $("btn-rewrite").classList.toggle("hidden", chapter == null);
   $("editor-status").textContent = chapter != null
     ? "改完点【保存】,再点【学这章的手改】把你的风格喂给指纹。" : "";
 }
@@ -235,6 +243,60 @@ async function revertLearn() {
     await refresh();
     openFile("外置大脑/写作指纹.md", true, null);
   } catch (e) { toast(e.message, true); }
+}
+
+// ---------- 局部重写 ----------
+function openRewrite() {
+  if (!CUR || CUR.chapter == null) return;
+  const ed = $("editor");
+  const start = ed.selectionStart, end = ed.selectionEnd;
+  const span = ed.value.substring(start, end);
+  if (!span.trim()) { toast("先在正文里选中要重写的一段", true); return; }
+  _rewriteSel = { start, end, span };
+  _rewriteText = "";
+  $("rewrite-src").textContent = span;
+  $("rewrite-instruction").value = "";
+  $("rewrite-error").textContent = "";
+  $("rewrite-result").textContent = "";
+  $("rewrite-result").classList.add("hidden");
+  $("rewrite-go").classList.remove("hidden");
+  $("rewrite-again").classList.add("hidden");
+  $("rewrite-apply").classList.add("hidden");
+  $("rewrite-overlay").classList.remove("hidden");
+}
+async function doRewrite() {
+  if (!_rewriteSel) return;
+  $("rewrite-error").textContent = "";
+  $("rewrite-go").disabled = $("rewrite-again").disabled = true;
+  try {
+    const d = await jreq("POST", "/api/rewrite", {
+      root: DATA.root, chapter: CUR.chapter,
+      full_text: $("editor").value, span: _rewriteSel.span,
+      instruction: $("rewrite-instruction").value.trim(),
+    });
+    _rewriteText = d.rewritten;
+    $("rewrite-result").textContent = d.rewritten;
+    $("rewrite-result").classList.remove("hidden");
+    $("rewrite-go").classList.add("hidden");
+    $("rewrite-again").classList.remove("hidden");
+    $("rewrite-apply").classList.remove("hidden");
+  } catch (e) { $("rewrite-error").textContent = e.message; }
+  finally { $("rewrite-go").disabled = $("rewrite-again").disabled = false; }
+}
+async function applyRewrite() {
+  if (!_rewriteSel || !_rewriteText) return;
+  const ed = $("editor");
+  const content = ed.value.substring(0, _rewriteSel.start) + _rewriteText + ed.value.substring(_rewriteSel.end);
+  try {
+    await jreq("POST", "/api/rewrite/apply", {
+      root: DATA.root, chapter: CUR.chapter, content,
+      old_span: _rewriteSel.span, new_span: _rewriteText,
+    });
+    ed.value = content;
+    $("rewrite-overlay").classList.add("hidden");
+    toast("已替换选中段");
+    await refresh();
+  } catch (e) { $("rewrite-error").textContent = e.message; }
 }
 
 // ---------- write(流式) ----------
