@@ -134,6 +134,8 @@ button.danger:hover { background: #a23f28; border-color: #a23f28; }
 .learn-changes .chg { padding: 3px 8px; border-radius: 6px; margin: 3px 0; white-space: pre-wrap; }
 .learn-changes .add { background: var(--green-tint); color: var(--green-deep); }
 .learn-changes .rem { background: #f6e9e3; color: var(--danger); text-decoration: line-through; }
+.book-actions { display: flex; gap: 8px; margin-top: 10px; }
+.book-actions .mini { flex: 1; }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

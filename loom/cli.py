@@ -217,6 +217,29 @@ def deconstruct(source: Path = typer.Argument(..., help="参考书文本路径")
         _die(str(e))
 
 
+@app.command(help="把全书正文导出成一个 txt(发平台 / 留档用)。")
+def export() -> None:
+    from .archive import export_text
+
+    try:
+        r = export_text(find_project_root())
+        console.print(f"[green]✓ 已导出 {r['chapters']} 章、{r['chars']} 字:[/green] {r['path']}")
+    except (FileNotFoundError, ValueError) as e:
+        _die(str(e))
+
+
+@app.command(help="把整本书打包成 zip 备份(不含密钥)。记得拷到云盘/U盘才算真备份。")
+def backup() -> None:
+    from .archive import backup_project
+
+    try:
+        r = backup_project(find_project_root())
+        console.print(f"[green]✓ 已备份:[/green] {r['path']}  [dim]({r['size'] // 1024} KB,留最近 {r['kept']} 份)[/dim]")
+        console.print("[yellow]提醒:把这个 zip 拷到云盘/U盘,才算真备份。[/yellow]")
+    except (FileNotFoundError, ValueError) as e:
+        _die(str(e))
+
+
 @app.command(help="打印版本。")
 def version() -> None:
     console.print(f"loom {__version__}")
