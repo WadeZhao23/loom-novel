@@ -104,6 +104,7 @@
         <div class="editor-head">
           <span id="editor-path" class="path">选左边一个文件来看/改</span>
           <div class="editor-actions">
+            <button id="btn-rewrite" class="hidden">✂️ 重写选中</button>
             <button id="btn-learn" class="hidden">📈 学这章的手改(learn)</button>
             <button id="btn-save-file" class="primary hidden">保存</button>
           </div>
@@ -154,6 +155,24 @@
         <button id="learn-revert" class="danger">撤销这次 learn</button>
         <button id="learn-keep" class="primary">保留,去看指纹</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 局部重写:选中一段,按你的嗓音重写 -->
+  <div id="rewrite-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3>重写选中段</h3>
+      <p class="hint">按你的写作指纹嗓音重写选中段;只改这一段,剧情默认不动。AI 重写会同步进快照,不污染 learn。</p>
+      <div id="rewrite-src" class="rewrite-src"></div>
+      <input id="rewrite-instruction" type="text" placeholder="可选指令:太铺张压一压 / 换个更冷的章末钩 / 加一句冲突…(留空就按你的嗓音改顺)" />
+      <div id="rewrite-result" class="rewrite-result hidden"></div>
+      <div class="row-end">
+        <button id="rewrite-cancel" class="ghost">取消</button>
+        <button id="rewrite-again" class="ghost hidden">再来一个</button>
+        <button id="rewrite-go" class="primary">重写</button>
+        <button id="rewrite-apply" class="primary hidden">用这个</button>
+      </div>
+      <div id="rewrite-error" class="error"></div>
     </div>
   </div>
 
