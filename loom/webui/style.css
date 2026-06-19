@@ -129,6 +129,11 @@ button.danger:hover { background: #a23f28; border-color: #a23f28; }
   background: var(--green-tint); border: 1px solid var(--line); border-radius: 10px;
   padding: 14px; }
 .run-stream:empty { display: none; }
+.learn-changes { margin-top: 14px; max-height: 300px; overflow-y: auto; font-size: 13px;
+  font-family: var(--serif); line-height: 1.7; }
+.learn-changes .chg { padding: 3px 8px; border-radius: 6px; margin: 3px 0; white-space: pre-wrap; }
+.learn-changes .add { background: var(--green-tint); color: var(--green-deep); }
+.learn-changes .rem { background: #f6e9e3; color: var(--danger); text-decoration: line-through; }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

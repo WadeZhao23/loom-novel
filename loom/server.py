@@ -20,6 +20,7 @@ from .backends import LoomBackendError, get_backend
 from . import ledger
 from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
+from .fingerprint import changed_rules, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
 from .scaffold import available_genres
@@ -180,13 +181,25 @@ class ChapterBody(BaseModel):
 @app.post("/api/learn")
 def learn(b: ChapterBody):
     root = Path(b.root)
+    fp_file = root / "外置大脑" / "写作指纹.md"
+    old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else ""
     try:
         fp_learn(root, b.chapter, get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    new_fp = fp_file.read_text(encoding="utf-8")
     return {"ok": True,
-            "fingerprint": (root / "外置大脑" / "写作指纹.md").read_text(encoding="utf-8"),
-            "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8")}
+            "fingerprint": new_fp,
+            "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8"),
+            "changes": changed_rules(old_fp, new_fp)}
+
+
+@app.post("/api/learn/revert")
+def learn_revert(b: ChapterBody):
+    p = revert_learn(Path(b.root), b.chapter)
+    if p is None:
+        return JSONResponse({"error": "没有可撤销的 learn 备份(可能已撤过)。"}, status_code=400)
+    return {"ok": True, "fingerprint": p.read_text(encoding="utf-8")}
 
 
 # ----------------------------- write(流式) -----------------------------
