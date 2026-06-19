@@ -23,9 +23,22 @@ function toast(msg, isErr) {
 // ---------- 启动 ----------
 window.addEventListener("DOMContentLoaded", () => {
   bind();
+  loadGenres();
   const saved = localStorage.getItem("loom_root");
   if (saved) openProject(saved, true);
 });
+
+async function loadGenres() {
+  try {
+    const d = await jreq("GET", "/api/genres");
+    const sel = $("new-genre");
+    (d.genres || []).forEach((g) => {
+      const o = document.createElement("option");
+      o.value = g; o.textContent = g;
+      sel.appendChild(o);
+    });
+  } catch (e) { /* 题材是可选增益,拉不到就只留"不选题材" */ }
+}
 
 function bind() {
   $("btn-create").onclick = createProject;
@@ -48,7 +61,7 @@ async function createProject() {
   $("welcome-error").textContent = "";
   try {
     const d = await jreq("POST", "/api/project/create",
-      { name: $("new-name").value.trim(), parent: $("new-parent").value.trim() });
+      { name: $("new-name").value.trim(), parent: $("new-parent").value.trim(), genre: $("new-genre").value || null });
     enterProject(d);
   } catch (e) { $("welcome-error").textContent = e.message; }
 }

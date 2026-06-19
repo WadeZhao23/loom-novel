@@ -52,11 +52,12 @@ def _render(event: dict) -> None:
 
 
 @app.command(help="离线铺一个写小说项目的骨架。")
-def init(name: str = typer.Argument(...)) -> None:
+def init(name: str = typer.Argument(...),
+         genre: str = typer.Option(None, "--题材", "--genre", help="选一个题材,只拷一份题材速查进项目")) -> None:
     from .scaffold import HIGHLIGHT, init as do_init
 
     try:
-        target = do_init(name)
+        target = do_init(name, genre=genre)
     except (FileExistsError, FileNotFoundError) as e:
         _die(str(e))
     tree = Tree(f"[bold]{target.name}/[/bold]")

@@ -107,7 +107,12 @@ def _read_files(project_root: Path, rels: list[str], progress: Progress) -> str:
     blocks = []
     for rel in rels:
         p = project_root / rel
-        if p.exists():
+        if p.is_dir():
+            # 目录型 reads(如 skills/题材):读其中所有 .md(跳过 README,排序保证签名稳定)
+            for f in sorted(p.glob("*.md")):
+                if f.stem != "README":
+                    blocks.append(f"【{rel}/{f.name}】\n{f.read_text(encoding='utf-8').strip()}")
+        elif p.exists():
             blocks.append(f"【{rel}】\n{p.read_text(encoding='utf-8').strip()}")
         else:
             progress({"type": "warn", "message": f"跳过缺失文件 {rel}"})
