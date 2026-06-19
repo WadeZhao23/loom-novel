@@ -135,5 +135,11 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=1800)
     fp_path.write_text(new_fp.strip() + "\n", encoding="utf-8")
     mark_learned(project_root, chapter_n)
+    # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
+    try:
+        from .recap import recap_chapter
+        recap_chapter(project_root, chapter_n, backend, progress)
+    except LoomBackendError as e:
+        progress({"type": "warn", "message": f"写后摘要没补成(不影响指纹):{e}"})
     progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n})
     return fp_path

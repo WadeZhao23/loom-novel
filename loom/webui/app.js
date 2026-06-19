@@ -168,7 +168,7 @@ async function doSeed() {
 async function learn(n) {
   try {
     await jreq("POST", "/api/learn", { root: DATA.root, chapter: n });
-    toast(`已把第${n}章的手改学进指纹`);
+    toast(`已把第${n}章手改学进指纹,并把写后摘要补进卡章纲`);
     await refresh();
     openFile("外置大脑/写作指纹.md", true, null);
   } catch (e) { toast(e.message, true); }
