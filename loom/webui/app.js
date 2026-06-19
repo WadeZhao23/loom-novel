@@ -233,6 +233,9 @@ function handleEvent(ev) {
   } else if (ev.type === "agent_done") {
     const p = $("pill-" + ev.role); if (p) { p.classList.remove("running"); p.classList.add("done"); }
     logRun(`✓ ${ev.role} —— ${ev.produces}`, "ok");
+  } else if (ev.type === "agent_skip") {
+    const p = $("pill-" + ev.role); if (p) p.classList.add("done");
+    logRun(`⏭ ${ev.role} —— 跳过(已完成、上游未变)`);
   } else if (ev.type === "warn") {
     logRun("· " + ev.message);
   } else if (ev.type === "info") {

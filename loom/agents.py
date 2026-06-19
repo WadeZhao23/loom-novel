@@ -106,20 +106,41 @@ def run_pipeline(
     progress: Progress = _noop,
     *,
     slow: float = 0.0,
+    resume: bool = True,
 ) -> tuple[Path, str]:
-    """跑一章。返回 (终稿路径, 终稿文本)。进度通过 progress 回调发出。"""
+    """跑一章。返回 (终稿路径, 终稿文本)。进度通过 progress 回调发出。
+
+    resume=True 时跳过 ledger 里"已完成且上游未变"的工序(断点续跑,省 DeepSeek 计费);
+    上游(reads 文件 / 已累积产物 / 上一章正文)任一变化,从该工序起重算。
+    """
+    from . import ledger
+
     progress({"type": "pipeline_start", "chapter": chapter_n, "roles": PIPELINE})
-    workspace: list[tuple[str, str]] = []
     prev = _prev_chapter(project_root, chapter_n)
 
-    for role in PIPELINE:
-        agent = load_agent(project_root, role)
-        progress({"type": "agent_start", "role": role})
+    def _knowledge_for(role: str) -> tuple[Agent, str]:
+        a = load_agent(project_root, role)
+        rels = list(a.reads) + (a.reads_first_chapter if chapter_n == 1 else [])
+        return a, _read_files(project_root, rels, _noop)
 
-        rels = list(agent.reads)
-        if chapter_n == 1:
-            rels += agent.reads_first_chapter
-        knowledge = _read_files(project_root, rels, progress)
+    def _sig(knowledge: str, ws: list[tuple[str, str]]) -> str:
+        return ledger.sha(knowledge + "\x1f" + "\n".join(t for _, t in ws) + "\x1f" + prev)
+
+    def _upstream_of(role: str, ws: list[tuple[str, str]]) -> str:
+        _, knowledge = _knowledge_for(role)
+        return _sig(knowledge, ws)
+
+    if resume:
+        start_idx, workspace = ledger.resume_point(project_root, chapter_n, _upstream_of)
+        for role in PIPELINE[:start_idx]:
+            progress({"type": "agent_skip", "role": role, "reason": "已完成且上游未变"})
+    else:
+        start_idx, workspace = 0, []
+
+    for role in PIPELINE[start_idx:]:
+        agent, knowledge = _knowledge_for(role)
+        progress({"type": "agent_start", "role": role})
+        up_sha = _sig(knowledge, workspace)  # 记录入此工序时的上游签名(供下次续跑比对)
 
         parts = [f"# 你要写的是第 {chapter_n} 章。"]
         if knowledge:
@@ -133,6 +154,7 @@ def run_pipeline(
 
         max_chars = _SHORT.get(role, config.chapter_chars)
         output = backend.complete(agent.system_prompt, "\n\n".join(parts), max_chars=max_chars)
+        ledger.record_step(project_root, chapter_n, role, output, up_sha)  # 即时落盘=断点可续
         workspace.append((agent.produces, output))
         progress({"type": "agent_done", "role": role, "produces": agent.produces})
         if slow:
@@ -140,6 +162,7 @@ def run_pipeline(
 
     final = workspace[-1][1]
     path = _save_chapter(project_root, chapter_n, final)
+    ledger.record_snapshot(project_root, chapter_n, final)
     progress({
         "type": "chapter_done",
         "chapter": chapter_n,
