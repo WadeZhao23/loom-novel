@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
   <title>Loom · 织布机</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -10,8 +11,16 @@
   <!-- 欢迎页:没有打开项目时显示 -->
   <div id="welcome" class="welcome">
     <div class="welcome-card">
-      <div class="logo">🧵 Loom</div>
-      <p class="tag">一队 Agent,织成一条写小说的流水线。</p>
+      <div class="welcome-head">
+        <svg class="weave-mark" viewBox="0 0 38 38" fill="none" aria-hidden="true">
+          <path class="warp" d="M7 4v30M14 4v30M21 4v30M28 4v30" stroke-width="1.5"/>
+          <path class="weft" d="M3 12h26M3 20h20M3 28h30" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div>
+          <div class="logo">Loom</div>
+          <p class="tag">一队 Agent,织成一条写小说的流水线。</p>
+        </div>
+      </div>
 
       <div class="welcome-intro">
         <p>第一次用?三步:① 填<b>外置大脑</b>(世界观/人物/卡章纲)② 喂段你写的字,让它学你的<b>文风</b> ③ <b>写一章 → 手改 → learn</b>,越写越像你。</p>
@@ -52,7 +61,13 @@
   <!-- 主界面 -->
   <div id="app" class="app hidden">
     <header class="topbar">
-      <div class="brand">🧵 <span id="proj-title">—</span></div>
+      <div class="brand">
+        <svg class="weave-mark" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path class="warp" d="M4 2v16M8 2v16M12 2v16M16 2v16" stroke-width="1.2"/>
+          <path class="weft" d="M2 7h14M2 13h11" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <span id="proj-title">—</span>
+      </div>
       <div class="backend">
         <select id="provider">
           <option value="deepseek">DeepSeek</option>
@@ -64,6 +79,9 @@
         <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>
         <button id="btn-save-backend" class="ghost">保存后端</button>
       </div>
+      <div class="divider"></div>
+      <button id="btn-theme" class="ghost icon-btn" title="明暗主题(切换)">◐</button>
+      <button id="btn-focus" class="ghost icon-btn" title="专注模式 ⌘.">⊡</button>
       <button id="btn-doctor" class="ghost">自检</button>
       <button id="btn-close-proj" class="ghost">切换项目</button>
     </header>
@@ -85,8 +103,11 @@
         <div class="side-section">
           <div class="side-head"><span>🧠 外置大脑</span></div>
           <ul id="brain" class="list"></ul>
+          <div class="voice-card">
+            <div class="vc-head">❖ 写作指纹</div>
+            <div id="fp-source" class="vc-body"></div>
+          </div>
           <button id="btn-seed" class="mini">✨ 喂样本,让它懂你(seed)</button>
-          <div id="fp-source" class="hint"></div>
         </div>
 
         <details class="side-section">
@@ -102,19 +123,32 @@
 
       <section class="editor-pane">
         <div class="editor-head">
-          <span id="editor-path" class="path">选左边一个文件来看/改</span>
+          <div class="path"><span class="dirty-dot"></span><span id="editor-path">选左边一个文件来看/改</span></div>
           <div class="editor-actions">
+            <button id="btn-search" class="ghost hidden" title="章内搜索 ⌘F">🔍</button>
             <button id="btn-rewrite" class="hidden">✂️ 重写选中</button>
             <button id="btn-learn" class="hidden">📈 学这章的手改(learn)</button>
             <button id="btn-save-file" class="primary hidden">保存</button>
           </div>
         </div>
+        <div id="search-bar" class="search-bar">
+          <input id="search-input" type="text" placeholder="在本章里查找…" />
+          <span id="search-count" class="sb-count"></span>
+          <button id="search-prev" class="mini">↑</button>
+          <button id="search-next" class="mini">↓</button>
+          <button id="search-close" class="ghost mini">✕</button>
+        </div>
         <div class="editor-scroll">
           <textarea id="editor" spellcheck="false" placeholder=""></textarea>
         </div>
-        <div id="editor-status" class="editor-status"></div>
+        <div id="editor-status" class="editor-status">
+          <span id="wordcount" class="wordcount"></span>
+          <div id="progress" class="progress hidden"><div id="progress-bar" class="progress-bar"></div></div>
+          <span id="status-note" class="status-note"></span>
+        </div>
       </section>
     </main>
+    <button id="focus-exit" class="ghost focus-exit" title="退出专注 Esc">⊠ 退出专注</button>
   </div>
 
   <!-- 写章节时的实时流水线面板 -->
@@ -134,9 +168,20 @@
   <!-- seed 弹层 -->
   <div id="seed-overlay" class="overlay hidden">
     <div class="run-card">
-      <h3>喂一段你真写过的文字</h3>
-      <p class="hint">它会从你的样本里提炼"写作指纹",之后写手照着它的味儿写。</p>
-      <textarea id="seed-text" class="seed-text" placeholder="贴 2-3 段你平时写的字…越像你越好"></textarea>
+      <h3>让它懂你的嗓音(seed)</h3>
+      <div class="seg">
+        <button id="seed-tab-sample" class="seg-btn on">喂一段你写的字</button>
+        <button id="seed-tab-inherit" class="seg-btn">继承另一本书的指纹</button>
+      </div>
+      <div id="seed-pane-sample">
+        <p class="hint">它会从你的样本里提炼"写作指纹",之后写手照着它的味儿写。</p>
+        <textarea id="seed-text" class="seed-text" placeholder="贴 2-3 段你平时写的字…越像你越好"></textarea>
+      </div>
+      <div id="seed-pane-inherit" class="hidden">
+        <p class="hint">从你另一本书的写作指纹起步(继承后两本各自独立演进,互不影响)。</p>
+        <label class="hint">那本书的 <b>写作指纹.md</b> 完整路径</label>
+        <input id="seed-inherit-path" type="text" placeholder="/Users/你/Desktop/另一本书/外置大脑/写作指纹.md" />
+      </div>
       <div class="row-end">
         <button id="seed-cancel" class="ghost">取消</button>
         <button id="seed-go" class="primary">提炼指纹</button>
@@ -149,8 +194,12 @@
   <div id="learn-overlay" class="overlay hidden">
     <div class="run-card">
       <h3>这次 learn 学到了什么</h3>
-      <p class="hint">下面是写作指纹这次的变化。若有"形对神错"——句式像你、但内容是你不会写的(比如把剧情/议论当文风),撤销它;或保留后去编辑器手删那一条。</p>
+      <p class="hint">下面是写作指纹这次的变化(金=更像你)。若有"形对神错"——句式像你、但内容是你不会写的(比如把剧情/议论当文风),撤销它;或保留后去编辑器手删那一条。</p>
       <div id="learn-changes" class="learn-changes"></div>
+      <div id="learn-recap-wrap" class="hidden">
+        <div class="sub-head">📌 已补进卡章纲的写后摘要</div>
+        <div id="learn-recap" class="recap-block"></div>
+      </div>
       <div class="row-end">
         <button id="learn-revert" class="danger">撤销这次 learn</button>
         <button id="learn-keep" class="primary">保留,去看指纹</button>
@@ -173,6 +222,25 @@
         <button id="rewrite-apply" class="primary hidden">用这个</button>
       </div>
       <div id="rewrite-error" class="error"></div>
+    </div>
+  </div>
+
+  <!-- doctor 自检面板 -->
+  <div id="doctor-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3>环境自检</h3>
+      <div id="doctor-list" class="doctor-list"></div>
+      <div class="row-end">
+        <button id="doctor-close" class="primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 命令面板 ⌘K -->
+  <div id="cmdk" class="cmdk hidden">
+    <div class="cmdk-box">
+      <input id="cmdk-input" type="text" placeholder="输入命令…(写下一章 / 重写 / 主题 / 专注 / 导出…)" />
+      <div id="cmdk-list" class="cmdk-list"></div>
     </div>
   </div>
 
