@@ -20,7 +20,7 @@ from .backends import LoomBackendError, get_backend
 from . import ledger
 from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
-from .fingerprint import changed_rules, revert_learn
+from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
 from .scaffold import available_genres
@@ -182,7 +182,8 @@ class ChapterBody(BaseModel):
 def learn(b: ChapterBody):
     root = Path(b.root)
     fp_file = root / "外置大脑" / "写作指纹.md"
-    old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else ""
+    # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
+    old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
     try:
         fp_learn(root, b.chapter, get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
