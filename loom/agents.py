@@ -182,7 +182,10 @@ def run_pipeline(
         parts.append(f"## 你的任务\n产出【{agent.produces}】。只输出这一项,不要解释你在做什么。")
 
         max_chars = _SHORT.get(role, config.chapter_chars)
-        output = backend.complete(agent.system_prompt, "\n\n".join(parts), max_chars=max_chars)
+        output = backend.complete(
+            agent.system_prompt, "\n\n".join(parts), max_chars=max_chars,
+            on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),
+        )
         if role == "编辑":
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:

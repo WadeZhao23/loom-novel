@@ -124,6 +124,11 @@ button.danger:hover { background: #a23f28; border-color: #a23f28; }
   color: var(--ink-soft); white-space: pre-wrap; font-family: var(--serif); }
 .run-log .ok { color: var(--green-deep); }
 .run-log .err { color: var(--danger); }
+.run-stream { margin-top: 12px; max-height: 260px; overflow-y: auto; white-space: pre-wrap;
+  font-family: var(--serif); font-size: 14px; line-height: 1.7; color: var(--ink);
+  background: var(--green-tint); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px; }
+.run-stream:empty { display: none; }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }

@@ -32,8 +32,12 @@ def _render(event: dict) -> None:
     t = event.get("type")
     if t == "agent_start":
         console.print(f"[bold cyan]▶ {event['role']} Agent[/bold cyan] …")
+    elif t == "agent_chunk":
+        import sys
+        sys.stdout.write(event["delta"])  # 流式:边写边吐(调试用)
+        sys.stdout.flush()
     elif t == "agent_done":
-        console.print(f"[bold green]✓ {event['role']} Agent[/bold green] —— 已产出{event['produces']}")
+        console.print(f"\n[bold green]✓ {event['role']} Agent[/bold green] —— 已产出{event['produces']}")
     elif t == "agent_skip":
         console.print(f"[dim]⏭ {event['role']} —— 跳过(已完成、上游未变)[/dim]")
     elif t == "edit_note":
