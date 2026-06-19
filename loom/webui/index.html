@@ -13,6 +13,11 @@
       <div class="logo">🧵 Loom</div>
       <p class="tag">一队 Agent,织成一条写小说的流水线。</p>
 
+      <div class="welcome-intro">
+        <p>第一次用?三步:① 填<b>外置大脑</b>(世界观/人物/卡章纲)② 喂段你写的字,让它学你的<b>文风</b> ③ <b>写一章 → 手改 → learn</b>,越写越像你。</p>
+        <button id="btn-sample" class="primary">📖 先看看样例(一本跑通的书)</button>
+      </div>
+
       <div class="welcome-block">
         <h3>新建一本书</h3>
         <label>放在哪个文件夹</label>
@@ -30,6 +35,16 @@
         <input id="open-path" type="text" placeholder="/Users/你/Desktop/我的小说" />
         <button id="btn-open">打开</button>
       </div>
+      <details class="welcome-help">
+        <summary>🔑 怎么拿 DeepSeek API key(自带 key)</summary>
+        <p>Loom 用你自己的 key 写作,稿子不离开你的电脑。四步:</p>
+        <ol>
+          <li>浏览器打开 <b>platform.deepseek.com</b>,注册 + 实名</li>
+          <li>充值(按字数计费,几块钱能写很久)</li>
+          <li>在「API Keys」里创建一个 key(sk- 开头)</li>
+          <li>新建/打开书后,把 key 粘进顶栏 API Key 框 → 点「保存后端」</li>
+        </ol>
+      </details>
       <div id="welcome-error" class="error"></div>
     </div>
   </div>

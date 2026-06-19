@@ -34,3 +34,4 @@ packages = ["loom"]
 [tool.hatch.build.targets.wheel.force-include]
 "loom/templates" = "loom/templates"
 "loom/webui" = "loom/webui"
+"loom/sample" = "loom/sample"

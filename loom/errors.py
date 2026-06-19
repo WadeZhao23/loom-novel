@@ -31,6 +31,30 @@ author_errors: dict[str, AuthorError] = {
         impact="DeepSeek 后端无法初始化,写作流水线起不来。",
         next_action="在 Loom 的环境里跑 `pip install openai`(或重装 Loom 依赖)后重试。",
     ),
+    "deepseek_auth_failed": AuthorError(
+        title="DeepSeek 的 API key 没通过验证",
+        reason="DeepSeek 拒绝了这个 key(填错、复制时多了空格、或 key 已被删/停用)。",
+        impact="这一步没产出,你的外置大脑和已写章节没受影响。",
+        next_action="去 platform.deepseek.com 确认 key 还在、复制完整(以 sk- 开头),在顶栏重新填一遍 API Key 再写。",
+    ),
+    "deepseek_insufficient_balance": AuthorError(
+        title="DeepSeek 账户余额不足",
+        reason="key 没问题,但账户里没钱了——DeepSeek 按字数计费,余额用完就调不动。",
+        impact="这一步没产出,已写的章节和外置大脑都安全。",
+        next_action="去 platform.deepseek.com 充值(几块钱能写很久),充好后重试;或顶栏切到 Claude 后端先继续。",
+    ),
+    "deepseek_rate_limited": AuthorError(
+        title="DeepSeek 这会儿被限流了",
+        reason="短时间请求太多(或平台高峰),DeepSeek 暂时挡了一下。",
+        impact="只是这一下没成,没扣坏任何东西。",
+        next_action="等十几秒再点一次;若总是这样,把章节字数调小一点,或错峰再写。",
+    ),
+    "deepseek_call_failed": AuthorError(
+        title="调用 DeepSeek 没成功",
+        reason="网络不通、平台抽风或一个还没归类的接口错误。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="检查网络后重试;若反复失败,顶栏切到 Claude 后端,或看下面的细节反馈。",
+    ),
     "claude_not_found": AuthorError(
         title="找不到 claude 命令",
         reason="loom.toml 里 provider 设成了 claude,但系统 PATH 里没有 `claude`。",

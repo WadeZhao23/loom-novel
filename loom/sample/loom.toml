@@ -1,0 +1,9 @@
+# Loom 项目配置
+
+[backend]
+provider = "deepseek"
+model    = "deepseek-chat"
+
+[novel]
+title = "重生记忆(样例)"
+"章节字数" = 1200

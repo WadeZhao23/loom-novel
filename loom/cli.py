@@ -86,6 +86,15 @@ def _walk(node: Tree, path: Path, base: Path, highlight: str) -> None:
             node.add(child.name)
 
 
+@app.command(help="拷一份内置样例书《重生记忆》到当前目录,看看一本跑通的书。")
+def sample() -> None:
+    from .scaffold import open_sample
+
+    root = open_sample()
+    console.print(f"[green]✓ 样例书已就位:[/green] {root}")
+    console.print("[dim]2 章正文 + 进化过的写作指纹 + 外置大脑都在。想续写,填你自己的 DeepSeek key。[/dim]")
+
+
 @app.command(help="从样本提炼写作指纹。")
 def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
          text: str = typer.Option(None, "--文本", "--text"),

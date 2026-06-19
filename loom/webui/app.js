@@ -43,6 +43,7 @@ async function loadGenres() {
 
 function bind() {
   $("btn-create").onclick = createProject;
+  $("btn-sample").onclick = openSample;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
   $("btn-close-proj").onclick = () => { localStorage.removeItem("loom_root"); showWelcome(); };
   $("btn-doctor").onclick = runDoctor;
@@ -67,6 +68,14 @@ async function createProject() {
   try {
     const d = await jreq("POST", "/api/project/create",
       { name: $("new-name").value.trim(), parent: $("new-parent").value.trim(), genre: $("new-genre").value || null });
+    enterProject(d);
+  } catch (e) { $("welcome-error").textContent = e.message; }
+}
+async function openSample() {
+  $("welcome-error").textContent = "";
+  try {
+    const parent = $("new-parent").value.trim() || "~/Desktop";
+    const d = await jreq("POST", "/api/sample/open", { parent });
     enterProject(d);
   } catch (e) { $("welcome-error").textContent = e.message; }
 }
