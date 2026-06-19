@@ -56,6 +56,8 @@ button.primary:hover { background: var(--green-deep); border-color: var(--green-
 button.ghost { background: transparent; border-color: transparent; color: var(--ink-soft); }
 button.ghost:hover { background: var(--line-soft); color: var(--ink); }
 button.mini { padding: 5px 11px; font-size: 12px; }
+button.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
+button.danger:hover { background: #a23f28; border-color: #a23f28; }
 .welcome-block button { margin-top: 14px; }
 .error { color: var(--danger); margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
 .hint { color: var(--ink-soft); font-size: 12px; margin-top: 6px; }
@@ -124,7 +126,7 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .run-log .err { color: var(--danger); }
 .seed-text { height: 200px; margin-top: 12px; font-family: var(--serif); }
 .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-#run-close { margin-top: 18px; }
+.run-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 /* ---------- toast ---------- */
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);

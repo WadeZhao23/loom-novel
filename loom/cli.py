@@ -153,6 +153,26 @@ def status() -> None:
     console.print(table)
 
 
+@app.command(help="离线拆一本参考书,抽可迁移框架(产物是候选,不进流水线)。")
+def deconstruct(source: Path = typer.Argument(..., help="参考书文本路径"),
+                name: str = typer.Option(None, "--名", "--name")) -> None:
+    from .deconstruct import deconstruct as do_deconstruct
+
+    try:
+        root = find_project_root()
+        if not source.exists():
+            _die(f"参考书文件不存在:{source}")
+        text = source.read_text(encoding="utf-8")
+        label = name or source.stem
+        out = do_deconstruct(root, text, label, get_backend(load_config(root)), _render)
+        console.print(Panel(
+            "产物在 [bold]外置大脑/.拆书/[/bold],只是候选。\n"
+            "要用:亲手把'条件框架'抄进 世界观.md;[red]专名黑名单别抄,写作指纹.md 永远别动[/red]。",
+            title=f"✓ 已拆:{label} → {out.name}", border_style="yellow"))
+    except (LoomBackendError, FileNotFoundError, ValueError) as e:
+        _die(str(e))
+
+
 @app.command(help="打印版本。")
 def version() -> None:
     console.print(f"loom {__version__}")

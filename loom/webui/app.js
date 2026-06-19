@@ -171,6 +171,7 @@ async function writeChapter(n, force) {
   $("agent-pills").innerHTML = "";
   $("run-log").innerHTML = "";
   $("run-close").classList.add("hidden");
+  $("run-force").classList.add("hidden");
   $("run-overlay").classList.remove("hidden");
 
   let resp;
@@ -185,6 +186,10 @@ async function writeChapter(n, force) {
   if (!ct.includes("ndjson")) {
     const d = await resp.json().catch(() => ({}));
     logRun("✗ " + (d.error || `失败 (${resp.status})`), "err");
+    if (resp.status === 409) {
+      $("run-title").textContent = `第 ${n} 章已存在`;
+      showRunForce(n);
+    }
     showRunClose();
     return;
   }
@@ -237,6 +242,11 @@ function logRun(text, cls) {
   $("run-log").scrollTop = $("run-log").scrollHeight;
 }
 function showRunClose() { $("run-close").classList.remove("hidden"); }
+function showRunForce(n) {
+  const b = $("run-force");
+  b.onclick = () => writeChapter(n, true);
+  b.classList.remove("hidden");
+}
 async function closeRun() {
   $("run-overlay").classList.add("hidden");
   await refresh();
