@@ -70,6 +70,9 @@ class ClaudeCodeBackend:
     def __init__(self, config: Config) -> None:
         if shutil.which("claude") is None:
             raise LoomBackendError(render("claude_not_found"), code="claude_not_found")
+        # 让 loom.toml 的 model 生效;没填/填了 deepseek 默认值时退回 sonnet(写文质量好,禁工具后仍是一次性补全)
+        m = (config.model or "").strip()
+        self.model = m if m and "deepseek" not in m else "sonnet"
 
     # 护栏:逼 `claude -p` 当"纯文本补全",别当 Claude Code agent(去找文件/反问/解释)
     _GUARD = (
@@ -82,11 +85,12 @@ class ClaudeCodeBackend:
         prompt = f"{self._GUARD}\n\n{system}\n\n---\n\n{user}"
         # 关键:用快模型 + 禁工具,把 `claude -p` 压成一次性文本补全。
         # 否则它会以完整 agent 形态运行(调工具、反复探索),大 prompt 直接跑到超时。
-        cmd = ["claude", "-p", prompt, "--model", "haiku", "--allowed-tools", ""]
+        cmd = ["claude", "-p", prompt, "--model", self.model, "--allowed-tools", ""]
+        timeout = int(os.environ.get("LOOM_CLAUDE_TIMEOUT", "600"))  # sonnet 写长章较慢,放宽;可环境覆盖
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=240)
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired as e:
-            raise LoomBackendError(render("claude_timeout", detail="timeout=240s"), code="claude_timeout") from e
+            raise LoomBackendError(render("claude_timeout", detail=f"timeout={timeout}s"), code="claude_timeout") from e
         except Exception as e:
             raise LoomBackendError(f"调用 claude 失败:{e}") from e
         if out.returncode != 0:
