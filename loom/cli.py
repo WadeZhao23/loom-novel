@@ -36,6 +36,8 @@ def _render(event: dict) -> None:
         console.print(f"[bold green]✓ {event['role']} Agent[/bold green] —— 已产出{event['produces']}")
     elif t == "agent_skip":
         console.print(f"[dim]⏭ {event['role']} —— 跳过(已完成、上游未变)[/dim]")
+    elif t == "edit_note":
+        console.print(f"  [dim]📝 本章改动留痕已存:{event['path']}[/dim]")
     elif t == "warn":
         console.print(f"  [yellow]· {event['message']}[/yellow]")
     elif t == "info":

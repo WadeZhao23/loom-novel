@@ -33,6 +33,30 @@ _PRODUCES = {
 }
 _SHORT = {"设定师": 350, "大纲师": 450}  # 其余按 config.chapter_chars
 
+# 编辑产出"改稿 + 《本章改动留痕》",用哨兵分隔。留痕给作者看,绝不进正文/快照/写作指纹。
+EDIT_NOTE_SENTINEL = "<!--LOOM:EDIT-NOTE-->"
+
+
+def _split_edit_note(text: str) -> tuple[str, str]:
+    """按哨兵首次出现切分 →(干净正文 body, 留痕 note)。无哨兵则 (text, "")。"""
+    idx = text.find(EDIT_NOTE_SENTINEL)
+    if idx == -1:
+        return text, ""
+    return text[:idx].rstrip(), text[idx + len(EDIT_NOTE_SENTINEL):].strip()
+
+
+def _strip_edit_note(text: str) -> str:
+    """落盘前兜底:只保留哨兵前的干净正文(保护 learn 的 diff 源不被留痕污染)。"""
+    return _split_edit_note(text)[0] if EDIT_NOTE_SENTINEL in text else text
+
+
+def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Progress) -> None:
+    """留痕落盘外的 .审稿留痕/(人可读可改,绝不被任何 learn/写作指纹流程读取)。"""
+    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(note + "\n", encoding="utf-8")
+    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+
 
 @dataclass
 class Agent:
@@ -154,13 +178,17 @@ def run_pipeline(
 
         max_chars = _SHORT.get(role, config.chapter_chars)
         output = backend.complete(agent.system_prompt, "\n\n".join(parts), max_chars=max_chars)
+        if role == "编辑":
+            output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
+            if note:
+                _save_edit_note(project_root, chapter_n, note, progress)
         ledger.record_step(project_root, chapter_n, role, output, up_sha)  # 即时落盘=断点可续
         workspace.append((agent.produces, output))
         progress({"type": "agent_done", "role": role, "produces": agent.produces})
         if slow:
             time.sleep(slow)
 
-    final = workspace[-1][1]
+    final = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
     path = _save_chapter(project_root, chapter_n, final)
     ledger.record_snapshot(project_root, chapter_n, final)
     progress({
