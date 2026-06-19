@@ -1,0 +1,9 @@
+# Loom 项目配置
+
+[backend]
+provider = "deepseek"     # deepseek | claude | codex
+model    = "deepseek-chat"
+
+[novel]
+title = "__TITLE__"
+"章节字数" = 800           # 终稿目标字数;中间工序(锚点/细纲)自然更短

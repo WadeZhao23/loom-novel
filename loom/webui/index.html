@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loom · 织布机</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- 欢迎页:没有打开项目时显示 -->
+  <div id="welcome" class="welcome">
+    <div class="welcome-card">
+      <div class="logo">🧵 Loom</div>
+      <p class="tag">一队 Agent,织成一条写小说的流水线。</p>
+
+      <div class="welcome-block">
+        <h3>新建一本书</h3>
+        <label>放在哪个文件夹</label>
+        <input id="new-parent" type="text" value="~/Desktop" />
+        <label>书名</label>
+        <input id="new-name" type="text" placeholder="我的小说" />
+        <button id="btn-create" class="primary">新建项目</button>
+      </div>
+
+      <div class="welcome-block">
+        <h3>打开已有的书</h3>
+        <label>项目文件夹完整路径</label>
+        <input id="open-path" type="text" placeholder="/Users/你/Desktop/我的小说" />
+        <button id="btn-open">打开</button>
+      </div>
+      <div id="welcome-error" class="error"></div>
+    </div>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">🧵 <span id="proj-title">—</span></div>
+      <div class="backend">
+        <select id="provider">
+          <option value="deepseek">DeepSeek</option>
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+        </select>
+        <input id="model" type="text" class="model" title="模型" />
+        <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填;写进项目 .env" />
+        <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>
+        <button id="btn-save-backend" class="ghost">保存后端</button>
+      </div>
+      <button id="btn-close-proj" class="ghost">切换项目</button>
+    </header>
+
+    <main class="main">
+      <aside class="sidebar">
+        <div class="side-section">
+          <div class="side-head">
+            <span>📕 正文</span>
+            <button id="btn-write-next" class="mini primary">写下一章 ▸</button>
+          </div>
+          <ul id="chapters" class="list"></ul>
+        </div>
+
+        <div class="side-section">
+          <div class="side-head"><span>🧠 外置大脑</span></div>
+          <ul id="brain" class="list"></ul>
+          <button id="btn-seed" class="mini">✨ 喂样本,让它懂你(seed)</button>
+          <div id="fp-source" class="hint"></div>
+        </div>
+
+        <details class="side-section">
+          <summary>🛠 skills(方法论)</summary>
+          <ul id="skills" class="list"></ul>
+        </details>
+
+        <details class="side-section">
+          <summary>🤖 agents(5 道工序的提示词)</summary>
+          <ul id="agents" class="list"></ul>
+        </details>
+      </aside>
+
+      <section class="editor-pane">
+        <div class="editor-head">
+          <span id="editor-path" class="path">选左边一个文件来看/改</span>
+          <div class="editor-actions">
+            <button id="btn-learn" class="hidden">📈 学这章的手改(learn)</button>
+            <button id="btn-save-file" class="primary hidden">保存</button>
+          </div>
+        </div>
+        <div class="editor-scroll">
+          <textarea id="editor" spellcheck="false" placeholder=""></textarea>
+        </div>
+        <div id="editor-status" class="editor-status"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 写章节时的实时流水线面板 -->
+  <div id="run-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3 id="run-title">正在写…</h3>
+      <div id="agent-pills" class="pills"></div>
+      <div id="run-log" class="run-log"></div>
+      <button id="run-close" class="ghost hidden">完成,去看正文</button>
+    </div>
+  </div>
+
+  <!-- seed 弹层 -->
+  <div id="seed-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3>喂一段你真写过的文字</h3>
+      <p class="hint">它会从你的样本里提炼"写作指纹",之后写手照着它的味儿写。</p>
+      <textarea id="seed-text" class="seed-text" placeholder="贴 2-3 段你平时写的字…越像你越好"></textarea>
+      <div class="row-end">
+        <button id="seed-cancel" class="ghost">取消</button>
+        <button id="seed-go" class="primary">提炼指纹</button>
+      </div>
+      <div id="seed-error" class="error"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
