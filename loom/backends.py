@@ -8,10 +8,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .config import Config
 from .errors import render
+
+# 流式回调:每收到一小段生成文本就调一次(让前端"看着它一句句写出来")。
+OnChunk = Callable[[str], None]
 
 
 class LoomBackendError(RuntimeError):
@@ -26,7 +29,9 @@ class LoomBackendError(RuntimeError):
 
 
 class Backend(Protocol):
-    def complete(self, system: str, user: str, *, max_chars: int | None = None) -> str:
+    def complete(self, system: str, user: str, *, max_chars: int | None = None,
+                 on_chunk: OnChunk | None = None) -> str:
+        """生成。给了 on_chunk 的后端会边生成边回调(流式);不支持流式的后端忽略它、结尾一次性返回。"""
         ...
 
 
@@ -46,18 +51,26 @@ class DeepSeekBackend:
 
         self._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
-    def complete(self, system: str, user: str, *, max_chars: int | None = None) -> str:
+    def complete(self, system: str, user: str, *, max_chars: int | None = None,
+                 on_chunk: OnChunk | None = None) -> str:
         # 中文按 ~1.6 token/字 粗估,留点余量
         max_tokens = int(max_chars * 2.2) if max_chars else 2048
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
+            if on_chunk is not None:  # 流式:边写边回调
+                stream = self._client.chat.completions.create(
+                    model=self.model, messages=messages, max_tokens=max_tokens,
+                    temperature=0.9, stream=True,
+                )
+                parts = []
+                for ev in stream:
+                    delta = (ev.choices[0].delta.content or "") if ev.choices else ""
+                    if delta:
+                        parts.append(delta)
+                        on_chunk(delta)
+                return "".join(parts).strip()
             resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                max_tokens=max_tokens,
-                temperature=0.9,
+                model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
             )
         except Exception as e:  # 网络/限流/鉴权 —— 统一收口成友好错误
             raise LoomBackendError(f"调用 DeepSeek 失败:{e}") from e
@@ -81,7 +94,9 @@ class ClaudeCodeBackend:
         "输出「我检查了目录」「请提供」之类的话。你需要的全部材料都在下面,直接用。"
     )
 
-    def complete(self, system: str, user: str, *, max_chars: int | None = None) -> str:
+    def complete(self, system: str, user: str, *, max_chars: int | None = None,
+                 on_chunk: OnChunk | None = None) -> str:
+        # claude 子进程不做 token 级流式(返回即全量);on_chunk 接受但忽略,前端靠 agent_done 展示。
         prompt = f"{self._GUARD}\n\n{system}\n\n---\n\n{user}"
         # 关键:用快模型 + 禁工具,把 `claude -p` 压成一次性文本补全。
         # 否则它会以完整 agent 形态运行(调工具、反复探索),大 prompt 直接跑到超时。
@@ -104,7 +119,8 @@ class CodexBackend:
     def __init__(self, config: Config) -> None:
         pass
 
-    def complete(self, system: str, user: str, *, max_chars: int | None = None) -> str:
+    def complete(self, system: str, user: str, *, max_chars: int | None = None,
+                 on_chunk: OnChunk | None = None) -> str:
         raise LoomBackendError("codex 后端 v0.1 还没接,先用 deepseek 或 claude。")
 
 
@@ -117,19 +133,37 @@ class DemoBackend:
     def __init__(self, config: Config) -> None:
         self._chars = config.chapter_chars
 
-    def complete(self, system: str, user: str, *, max_chars: int | None = None) -> str:
-        import time
-        time.sleep(0.7)  # 让录屏里五个 agent 一个一个亮起来
+    def _pick(self, system: str, user: str) -> str:
         head = system.strip().splitlines()[0]
         if "文风分析器" in system:
             return _DEMO["seed"]
         if "维护一个作者" in system:
             return _DEMO["learn"]
+        if "剧情脊柱记录员" in system:
+            return "摘要:(demo 占位摘要)。\n伏笔:\n- 无"
         for role, key in (("设定师", "anchor"), ("大纲师", "outline"),
                           ("写手", "draft"), ("编辑", "edit"), ("润色师", "final")):
             if role in head:
                 return _DEMO[key]
         return "（demo 占位）"
+
+    def complete(self, system: str, user: str, *, max_chars: int | None = None,
+                 on_chunk: OnChunk | None = None) -> str:
+        import time
+        text = self._pick(system, user)
+        if on_chunk is not None:  # 模拟流式:按小块吐,离线也能看见"一句句写出来"
+            buf = ""
+            for ch in text:
+                buf += ch
+                if len(buf) >= 6 or ch in "。\n!?！?":
+                    on_chunk(buf)
+                    buf = ""
+                    time.sleep(0.02)
+            if buf:
+                on_chunk(buf)
+            return text.strip()
+        time.sleep(0.7)  # 让录屏里五个 agent 一个一个亮起来
+        return text
 
 
 _DEMO = {

@@ -194,6 +194,7 @@ async function writeChapter(n, force) {
   $("run-title").textContent = `正在写第 ${n} 章…`;
   $("agent-pills").innerHTML = "";
   $("run-log").innerHTML = "";
+  $("run-stream").textContent = "";
   $("run-close").classList.add("hidden");
   $("run-force").classList.add("hidden");
   $("run-overlay").classList.remove("hidden");
@@ -243,6 +244,11 @@ function handleEvent(ev) {
   } else if (ev.type === "agent_start") {
     const p = $("pill-" + ev.role); if (p) p.classList.add("running");
     logRun(`▶ ${ev.role} …`);
+    $("run-stream").textContent = "";  // 新一棒,清空实时稿区
+  } else if (ev.type === "agent_chunk") {
+    const s = $("run-stream");
+    s.textContent += ev.delta;
+    s.scrollTop = s.scrollHeight;  // 跟着写,自动滚到底
   } else if (ev.type === "agent_done") {
     const p = $("pill-" + ev.role); if (p) { p.classList.remove("running"); p.classList.add("done"); }
     logRun(`✓ ${ev.role} —— ${ev.produces}`, "ok");
