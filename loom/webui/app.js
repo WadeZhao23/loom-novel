@@ -236,6 +236,8 @@ function handleEvent(ev) {
   } else if (ev.type === "agent_skip") {
     const p = $("pill-" + ev.role); if (p) p.classList.add("done");
     logRun(`⏭ ${ev.role} —— 跳过(已完成、上游未变)`);
+  } else if (ev.type === "edit_note") {
+    logRun(`📝 本章改动留痕已存(.审稿留痕/)`);
   } else if (ev.type === "warn") {
     logRun("· " + ev.message);
   } else if (ev.type === "info") {
