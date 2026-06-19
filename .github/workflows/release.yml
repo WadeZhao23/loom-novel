@@ -1,0 +1,74 @@
+name: Build & Release
+
+# 推一个 v* tag(如 v0.2.1)就自动打 Mac + Windows 包并发到同一个 Release。
+# 手动触发(workflow_dispatch)只构建+上传 artifact,不发 Release(方便测构建)。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dist]"
+      - name: PyInstaller 打包(.app)
+        run: pyinstaller --noconfirm --clean packaging/loom.spec
+      - name: 压成 zip(-y 保留 .app 符号链接)
+        run: cd dist && zip -r -y Loom-mac.zip Loom.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-mac
+          path: dist/Loom-mac.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dist]"
+      - name: PyInstaller 打包(.exe 文件夹)
+        run: pyinstaller --noconfirm --clean packaging/loom.spec
+      - name: 压成 zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/Loom -DestinationPath Loom-win.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-win
+          path: Loom-win.zip
+
+  release:
+    needs: [build-mac, build-windows]
+    # 即使 Windows 那棒失败也照常发(Mac 包是稳的);只在推 tag 时发 Release。
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          merge-multiple: true
+      - name: 创建 / 更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" art/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Loom $GITHUB_REF_NAME" \
+            --notes-file packaging/release-notes.md \
+          || gh release upload "$GITHUB_REF_NAME" art/*.zip --repo "$GITHUB_REPOSITORY" --clobber
