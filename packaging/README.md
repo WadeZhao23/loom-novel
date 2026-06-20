@@ -15,6 +15,17 @@ bash packaging/build.sh
 
 底层就是 `pyinstaller packaging/loom.spec`。改配置改那个 spec。
 
+## 应用图标 / 应用名
+
+- **图标**:`spec` 的 BUNDLE `icon=` 指向 `packaging/loom.icns`(墨绿底 + 暖金织标)。
+  由 `packaging/make_icon.py` 从品牌 weave-mark 生成(纯 Pillow),改色/换样式改脚本再跑:
+  `.venv/bin/python packaging/make_icon.py`(重生成 `loom.icns` + `loom/webui/app-icon.png`)。
+- **应用名**:Info.plist 的 `CFBundleName=Loom` → 打包后菜单栏/访达显示「Loom」。
+- **dev 模式注意**:从源码 `loom-app` 跑时进程是裸 python,Dock 图标已由 `desktop.py`
+  运行时换成 Loom(用随包的 `app-icon.png`),但**菜单栏名仍是「Python」**——那由 app bundle
+  身份决定,无解;要看「Loom」就跑打包好的 `Loom.app`。
+- 换了图标后访达可能仍显示旧的(图标缓存):`touch dist/Loom.app` 或重启访达即可刷新。
+
 ## 分发(开源、零基建)
 
 应用是**纯本地**的:用户自带 DeepSeek key,稿子和写作指纹都不出本机,所以你**没有任何服务器/存储成本**。分发就是把产物压个包挂出去:

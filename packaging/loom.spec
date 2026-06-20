@@ -74,7 +74,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="Loom.app",
-        icon=None,  # 有 .icns 后填路径
+        icon=os.path.join(PROJECT_ROOT, "packaging", "loom.icns"),  # 织标墨绿图标(make_icon.py 生成)
         bundle_identifier="com.chambers.loom",
         info_plist={
             "CFBundleName": "Loom",

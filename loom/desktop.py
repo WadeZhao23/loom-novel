@@ -33,6 +33,28 @@ def _wait_up(port: int, timeout: float = 8.0) -> None:
             time.sleep(0.1)
 
 
+def _set_dock_icon() -> None:
+    """dev 模式(loom-app,进程是 python)下,把 Dock 图标换成 Loom 的。
+
+    打包成 .app 后 Dock 图标走 Info.plist 的 .icns,不需要这步;但从源码跑没有
+    app 身份,默认是 Python 火箭,这里运行时补上。菜单栏名仍会是 Python——那由
+    bundle 决定,只有打包 .app 能根治。
+    """
+    try:
+        from pathlib import Path
+
+        png = Path(__file__).resolve().parent / "webui" / "app-icon.png"
+        if not png.exists():
+            return
+        from AppKit import NSApplication, NSImage
+
+        img = NSImage.alloc().initByReferencingFile_(str(png))
+        if img and img.isValid():
+            NSApplication.sharedApplication().setApplicationIconImage_(img)
+    except Exception:
+        pass  # 锦上添花,失败不影响启动
+
+
 def run() -> None:
     """原生窗口。"""
     port = _free_port()
@@ -47,6 +69,7 @@ def run() -> None:
         f"http://127.0.0.1:{port}",
         width=1180, height=780, min_size=(920, 600),
     )
+    _set_dock_icon()
     webview.start()
 
 
