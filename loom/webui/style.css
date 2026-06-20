@@ -168,6 +168,14 @@ button:disabled { opacity: .55; cursor: default; }
 .error { color: var(--danger); margin-top: var(--space-3); font-size: var(--fs-sm); white-space: pre-wrap; }
 .hint { color: var(--text-soft); font-size: var(--fs-xs); margin-top: var(--space-2); }
 
+/* ---------- 3b. 图标(iconfont Symbol)---------- */
+/* svg 用 fill: currentColor → 自动跟随文字色与明暗主题;1em → 跟随字号 */
+.ico { display: inline-flex; vertical-align: -.14em; }
+.icon { width: 1em; height: 1em; fill: currentColor; flex: none; overflow: hidden; }
+/* 纯图标按钮:图标直接挂在 button 上(无 .ico 包裹),给个固定尺寸 */
+.icon-btn .icon, .search-bar button .icon { width: 16px; height: 16px; }
+.ch-act .icon { width: 14px; height: 14px; }
+
 /* ---------- 4. 欢迎页 ---------- */
 .welcome { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: var(--space-6); }
 .welcome-card {
@@ -231,8 +239,9 @@ button:disabled { opacity: .55; cursor: default; }
 }
 .side-section > summary { cursor: pointer; list-style: none; }
 .side-section > summary::-webkit-details-marker { display: none; }
-.side-section > summary::before { content: "▸ "; color: var(--text-mute); }
-.side-section[open] > summary::before { content: "▾ "; }
+/* 折叠箭头:一个 chevron 图标,展开时转 90° 朝下 */
+.disclosure { color: var(--text-mute); margin-right: 2px; transition: transform var(--dur-2) var(--ease-out); }
+.side-section[open] > summary .disclosure { transform: rotate(90deg); }
 .side-head { display: flex; align-items: center; justify-content: space-between; }
 
 .list { list-style: none; margin: 0; padding: 0; }
@@ -244,7 +253,7 @@ button:disabled { opacity: .55; cursor: default; }
 .list li:hover { background: var(--line-soft); }
 .list li.active { background: var(--accent-tint); color: var(--accent-ink); font-weight: 600; }
 .list li.fp { color: var(--gold-ink); font-weight: 600; }
-.list li.fp::before { content: "❖"; font-size: 10px; color: var(--gold); }
+.list li.fp .icon { color: var(--gold); }
 .list li.hint { cursor: default; color: var(--text-mute); font-size: var(--fs-sm); }
 .list li.hint:hover { background: transparent; }
 
@@ -471,3 +480,58 @@ body.focus-mode .focus-exit { display: block; }
   .backend .model { width: 96px; }
   .backend .chars { display: none; }
 }
+
+/* ---------- 15. 新手引导:T0 就地气泡 + T1 样例首跑聚光 ---------- */
+/* 金色脉冲:把注意力引向 learn 按钮 */
+@keyframes coachPulse {
+  0%   { box-shadow: 0 0 0 0 var(--gold-line); }
+  70%  { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.pulse-gold { animation: coachPulse 1.5s var(--ease-out) infinite; border-color: var(--gold) !important; }
+
+/* T0:不挡屏的就地气泡,锚在目标附近 */
+.coach-pop {
+  position: fixed; z-index: 60; width: 320px; max-width: calc(100vw - 16px);
+  background: var(--surface-raised); border: 1px solid var(--gold-line);
+  border-radius: var(--radius-md); padding: var(--space-4);
+  box-shadow: var(--shadow-4); animation: rise var(--dur-3) var(--ease-out);
+}
+.coach-pop .cp-body { font-size: var(--fs-sm); line-height: 1.7; color: var(--text); }
+.coach-pop b { color: var(--gold-ink); font-weight: 700; }
+.coach-pop .cp-foot { margin-top: var(--space-3); display: flex; justify-content: flex-end; }
+
+/* T1:暗背景(吞点击)+ 聚光环 + 提示卡 */
+.tour-back { position: fixed; inset: 0; z-index: 55; display: none; }
+.tour-back.on { display: block; }
+.tour-spot {
+  position: fixed; z-index: 56; display: none; pointer-events: none; border-radius: var(--radius-md);
+  box-shadow: 0 0 0 9999px var(--overlay-scrim), 0 0 0 2px var(--accent);
+  transition: top var(--dur-3) var(--ease-out), left var(--dur-3) var(--ease-out),
+              width var(--dur-3) var(--ease-out), height var(--dur-3) var(--ease-out);
+}
+.tour-spot.on { display: block; }
+.tour-tip {
+  position: fixed; z-index: 57; display: none; width: 344px; max-width: calc(100vw - 16px);
+  background: var(--surface-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-md); padding: var(--space-4); box-shadow: var(--shadow-4);
+  animation: rise var(--dur-3) var(--ease-out);
+}
+.tour-tip.on { display: block; }
+.tour-tip .tt-title { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -.01em; margin-bottom: var(--space-2); }
+.tour-tip .tt-body { font-size: var(--fs-sm); line-height: 1.7; color: var(--text-soft); }
+.tour-tip .tt-foot { margin-top: var(--space-4); display: flex; align-items: center; justify-content: space-between; }
+.tour-tip .tt-dots { display: flex; gap: 6px; }
+.tour-tip .tt-dot { width: 6px; height: 6px; border-radius: var(--radius-pill); background: var(--line-strong); transition: background-color var(--dur-2); }
+.tour-tip .tt-dot.on { background: var(--accent); }
+.tour-tip .tt-btns { display: flex; gap: var(--space-2); }
+
+/* 气泡/提示卡共用的小箭头(指向锚点) */
+.coach-pop::before, .tour-tip::before {
+  content: ""; position: absolute; left: var(--arrow-x, 50%); width: 12px; height: 12px;
+  background: var(--surface-raised); transform: translateX(-50%) rotate(45deg);
+}
+.coach-pop::before { border: 1px solid var(--gold-line); }
+.tour-tip::before  { border: 1px solid var(--line); }
+.coach-pop.below::before, .tour-tip.below::before { top: -7px; border-right: 0; border-bottom: 0; }
+.coach-pop.above::before, .tour-tip.above::before { bottom: -7px; border-left: 0; border-top: 0; }

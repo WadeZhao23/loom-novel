@@ -24,7 +24,7 @@
 
       <div class="welcome-intro">
         <p>第一次用?三步:① 填<b>外置大脑</b>(世界观/人物/卡章纲)② 喂段你写的字,让它学你的<b>文风</b> ③ <b>写一章 → 手改 → learn</b>,越写越像你。</p>
-        <button id="btn-sample" class="primary">📖 先看看样例(一本跑通的书)</button>
+        <button id="btn-sample" class="primary"><span class="ico" data-ico="sample"></span> 先看看样例(一本跑通的书)</button>
       </div>
 
       <div class="welcome-block">
@@ -45,7 +45,7 @@
         <button id="btn-open">打开</button>
       </div>
       <details class="welcome-help">
-        <summary>🔑 怎么拿 DeepSeek API key(自带 key)</summary>
+        <summary><span class="ico" data-ico="key"></span> 怎么拿 DeepSeek API key(自带 key)</summary>
         <p>Loom 用你自己的 key 写作,稿子不离开你的电脑。四步:</p>
         <ol>
           <li>浏览器打开 <b>platform.deepseek.com</b>,注册 + 实名</li>
@@ -81,8 +81,8 @@
         <button id="btn-save-backend" class="ghost">保存后端</button>
       </div>
       <div class="divider"></div>
-      <button id="btn-theme" class="ghost icon-btn" title="明暗主题(切换)">◐</button>
-      <button id="btn-focus" class="ghost icon-btn" title="专注模式 ⌘.">⊡</button>
+      <button id="btn-theme" class="ghost icon-btn" title="明暗主题(切换)"></button>
+      <button id="btn-focus" class="ghost icon-btn" title="专注模式 ⌘." data-ico="focus"></button>
       <button id="btn-doctor" class="ghost">自检</button>
       <button id="btn-close-proj" class="ghost">切换项目</button>
     </header>
@@ -91,33 +91,33 @@
       <aside class="sidebar">
         <div class="side-section">
           <div class="side-head">
-            <span>📕 正文</span>
-            <button id="btn-write-next" class="mini primary">写下一章 ▸</button>
+            <span><span class="ico" data-ico="chapters"></span> 正文</span>
+            <button id="btn-write-next" class="mini primary">写下一章 <span class="ico" data-ico="writeNext"></span></button>
           </div>
           <ul id="chapters" class="list"></ul>
           <div class="book-actions">
-            <button id="btn-export" class="mini">📤 导出全书</button>
-            <button id="btn-backup" class="mini">💾 备份整本</button>
+            <button id="btn-export" class="mini"><span class="ico" data-ico="export"></span> 导出全书</button>
+            <button id="btn-backup" class="mini"><span class="ico" data-ico="backup"></span> 备份整本</button>
           </div>
         </div>
 
-        <div class="side-section">
-          <div class="side-head"><span>🧠 外置大脑</span></div>
+        <div class="side-section" id="brain-section">
+          <div class="side-head"><span><span class="ico" data-ico="brain"></span> 外置大脑</span></div>
           <ul id="brain" class="list"></ul>
-          <div class="voice-card">
-            <div class="vc-head">❖ 写作指纹</div>
+          <div class="voice-card" id="fp-card">
+            <div class="vc-head"><span class="ico" data-ico="fingerprint"></span> 写作指纹</div>
             <div id="fp-source" class="vc-body"></div>
           </div>
-          <button id="btn-seed" class="mini">✨ 喂样本,让它懂你(seed)</button>
+          <button id="btn-seed" class="mini"><span class="ico" data-ico="seed"></span> 喂样本,让它懂你(seed)</button>
         </div>
 
         <details class="side-section">
-          <summary>🛠 skills(方法论)</summary>
+          <summary><span class="ico disclosure" data-ico="chevron"></span><span class="ico" data-ico="skills"></span> skills(方法论)</summary>
           <ul id="skills" class="list"></ul>
         </details>
 
         <details class="side-section">
-          <summary>🤖 agents(5 道工序的提示词)</summary>
+          <summary><span class="ico disclosure" data-ico="chevron"></span><span class="ico" data-ico="agents"></span> agents(5 道工序的提示词)</summary>
           <ul id="agents" class="list"></ul>
         </details>
       </aside>
@@ -126,18 +126,18 @@
         <div class="editor-head">
           <div class="path"><span class="dirty-dot"></span><span id="editor-path">选左边一个文件来看/改</span></div>
           <div class="editor-actions">
-            <button id="btn-search" class="ghost hidden" title="章内搜索 ⌘F">🔍</button>
-            <button id="btn-rewrite" class="hidden">✂️ 重写选中</button>
-            <button id="btn-learn" class="hidden">📈 学这章的手改(learn)</button>
+            <button id="btn-search" class="ghost hidden" title="章内搜索 ⌘F" data-ico="search"></button>
+            <button id="btn-rewrite" class="hidden"><span class="ico" data-ico="rewrite"></span> 重写选中</button>
+            <button id="btn-learn" class="hidden"><span class="ico" data-ico="learn"></span> 学这章的手改(learn)</button>
             <button id="btn-save-file" class="primary hidden">保存</button>
           </div>
         </div>
         <div id="search-bar" class="search-bar">
           <input id="search-input" type="text" placeholder="在本章里查找…" />
           <span id="search-count" class="sb-count"></span>
-          <button id="search-prev" class="mini">↑</button>
-          <button id="search-next" class="mini">↓</button>
-          <button id="search-close" class="ghost mini">✕</button>
+          <button id="search-prev" class="mini" title="上一个" data-ico="arrowUp"></button>
+          <button id="search-next" class="mini" title="下一个" data-ico="arrowDown"></button>
+          <button id="search-close" class="ghost mini" title="关闭搜索" data-ico="close"></button>
         </div>
         <div class="editor-scroll">
           <textarea id="editor" spellcheck="false" placeholder=""></textarea>
@@ -149,7 +149,7 @@
         </div>
       </section>
     </main>
-    <button id="focus-exit" class="ghost focus-exit" title="退出专注 Esc">⊠ 退出专注</button>
+    <button id="focus-exit" class="ghost focus-exit" title="退出专注 Esc"><span class="ico" data-ico="focusExit"></span> 退出专注</button>
   </div>
 
   <!-- 写章节时的实时流水线面板 -->
@@ -198,7 +198,7 @@
       <p class="hint">下面是写作指纹这次的变化(金=更像你)。若有"形对神错"——句式像你、但内容是你不会写的(比如把剧情/议论当文风),撤销它;或保留后去编辑器手删那一条。</p>
       <div id="learn-changes" class="learn-changes"></div>
       <div id="learn-recap-wrap" class="hidden">
-        <div class="sub-head">📌 已补进卡章纲的写后摘要</div>
+        <div class="sub-head"><span class="ico" data-ico="pin"></span> 已补进卡章纲的写后摘要</div>
         <div id="learn-recap" class="recap-block"></div>
       </div>
       <div class="row-end">
@@ -247,6 +247,12 @@
 
   <div id="toast" class="toast hidden"></div>
 
+  <!-- 图标:iconfont(阿里矢量图标库)Symbol 方案。两步接上,见 docs/design/iconfont.md
+       1) iconfont.cn 建项目 → 按「采购清单」加图标 → 每个图标命名为清单里的 id(或改 app.js 的 IC 映射)
+       2) 在「Symbol」标签「下载至本地」拿到一个 .js → 存为 loom/webui/iconfont.js(离线可用)
+          想图省事也可换成在线链接 //at.alicdn.com/t/c/font_xxx.js(需联网)。
+       接上前:文字标签照常显示,图标位先空着。 -->
+  <script src="/iconfont.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
