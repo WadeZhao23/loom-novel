@@ -55,7 +55,8 @@ def run_checks(root: Path) -> list[Check]:
                          "PATH 里没有 claude", "装 Claude Code 并确保 claude 在 PATH"))
     elif prov == "codex":
         checks.append(_c("codex 命令可用", shutil.which("codex") is not None,
-                         "codex 后端 v0.1 未接", "先把 provider 改成 deepseek 或 claude"))
+                         "PATH 里没有 codex",
+                         "装 Codex CLI(npm i -g @openai/codex)并 codex login(复用 ChatGPT 订阅,不用填 key)"))
     else:
         checks.append(_c("provider 受支持", False,
                          f"未知 provider={prov!r}", "loom.toml 里改成 deepseek/claude/codex"))
