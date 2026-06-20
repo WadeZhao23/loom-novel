@@ -41,8 +41,13 @@ class GateResult:
     remaining: list[Issue] = field(default_factory=list)  # 跑满仍残留(交回留痕)
 
 
+# 复审员表示"没问题"的措辞:裸行回「通过」最常见,但偶尔会带 - 项目符号或句号。
+# 命中即跳过,别把它当成一条硬伤而触发无谓回炉(质检/去AI味 共用此解析)。
+_PASS_PHRASES = frozenset({"无硬伤", "通过", "无问题", "没问题", "没有硬伤", "无命中", "没有问题"})
+
+
 def _parse_verdict(raw: str) -> list[Issue]:
-    """解析复审员输出 → 硬伤清单。无硬伤(含'通过')返回空列表。
+    """解析复审员输出 → 硬伤清单。无硬伤(回「通过」等)返回空列表。
 
     宽容解析:每条形如 `- 类别 | 问题 | 证据:"…"`;只认以 - 开头的行。
     """
@@ -52,7 +57,7 @@ def _parse_verdict(raw: str) -> list[Issue]:
         if not s.startswith(("-", "·", "•")):
             continue
         body = s.lstrip("-·• ").strip()
-        if not body or body == "无硬伤":
+        if not body or body.rstrip("。.!！,，、;； \t") in _PASS_PHRASES:
             continue
         parts = [p.strip() for p in body.split("|")]
         kind = parts[0] if parts else "硬伤"

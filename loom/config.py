@@ -15,7 +15,7 @@ class Config:
     model: str = "deepseek-chat"
     title: str = "我的第一本书"
     chapter_chars: int = 800           # 终稿目标字数;中间工序自然更短
-    gate_rounds: int = 1               # 质检/去AI味 复审→回炉的最多轮数;0=关闭(挑硬伤不打分,见 ADR-0006)
+    gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -78,7 +78,7 @@ def save_config(project_root: Path, cfg: Config) -> None:
         f'title = "{cfg.title}"\n'
         f'"章节字数" = {int(cfg.chapter_chars)}\n\n'
         "[gate]\n"
-        "# 质检/去AI味 复审→回炉最多轮数;0=关闭。只挑硬伤、不打分、不硬阻断(见 ADR-0006)\n"
+        "# 质检/去AI味 复审轮数:1=只挑硬伤写进 .审稿留痕/(默认,不自动改稿);≥2 才回炉重写;0=关闭。不打分、不硬阻断(见 ADR-0006)\n"
         f'"轮数" = {int(cfg.gate_rounds)}\n'
     )
     (project_root / "loom.toml").write_text(content, encoding="utf-8")
