@@ -43,6 +43,23 @@ def _render(event: dict) -> None:
         console.print(f"{nl}[bold green]✓ {event['role']} Agent[/bold green] —— 已产出{event['produces']}")
     elif t == "agent_skip":
         console.print(f"[dim]⏭ {event['role']} —— 跳过(已完成、上游未变)[/dim]")
+    elif t == "gate_start":
+        if getattr(_render, "_streamed", False):
+            console.print()
+            _render._streamed = False  # 让复审标题另起一行,不黏在上游流式稿尾
+        console.print(f"  [magenta]🔍 {event['label']}复审 · 第{event['round']}轮[/magenta] …")
+    elif t == "gate_pass":
+        console.print(f"  [green]✓ {event['label']}通过[/green] [dim](无硬伤)[/dim]")
+    elif t == "gate_issues":
+        console.print(f"  [yellow]发现 {len(event['issues'])} 处硬伤:[/yellow]")
+        for it in event["issues"]:
+            ev = f" [dim]｜证据:「{it['证据']}」[/dim]" if it.get("证据") else ""
+            console.print(f"    [yellow]·[/yellow] {it['类别']}:{it['问题']}{ev}")
+    elif t == "gate_revise":
+        console.print("  [magenta]↻ 回炉重写中…[/magenta]")
+    elif t == "gate_exhausted":
+        console.print(f"  [yellow]⚠ {event['label']}跑满 {event['rounds']} 轮仍有 "
+                      f"{len(event['issues'])} 处残留 → 已记入留痕,不阻断,继续[/yellow]")
     elif t == "edit_note":
         console.print(f"  [dim]📝 本章改动留痕已存:{event['path']}[/dim]")
     elif t == "warn":

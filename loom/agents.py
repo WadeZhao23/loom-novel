@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from . import gates
 from .backends import Backend
 from .config import Config
 
@@ -19,6 +20,16 @@ Progress = Callable[[dict], None]
 
 def _noop(event: dict) -> None:
     pass
+
+
+# 质检/去AI味 关卡:挂在某一棒产出之后。挑硬伤→回炉,不打分、不硬阻断(见 ADR-0006)。
+# role -> (人看的名字, 复审提示词, 回炉提示词, 复审要读的设定/方法论, 是否带上一章看钩子)
+_GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
+    "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
+            ["skills/评估自检.md", "外置大脑/人物卡.md", "外置大脑/世界观.md", "外置大脑/卡章纲.md"], True),
+    "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
+             ["skills/去AI味.md", "外置大脑/写作指纹.md"], False),
+}
 
 
 # 流水线顺序(角色名,不是题材名词)
@@ -55,6 +66,20 @@ def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Pro
     path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(note + "\n", encoding="utf-8")
+    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+
+
+def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
+                         remaining: list, progress: Progress) -> None:
+    """gate 跑满轮数仍未解决的硬伤 → 追加进审稿留痕(不阻断,只留痕给作者看)。"""
+    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"\n## {label}未解决项(跑满复审轮数仍残留,未阻断,供你定夺)"]
+    for i in remaining:
+        ev = f" | 证据:「{i.evidence}」" if getattr(i, "evidence", "") else ""
+        lines.append(f"- {i.kind}:{i.desc}{ev}")
+    with path.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
 
 
@@ -216,6 +241,22 @@ def run_pipeline(
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:
                 _save_edit_note(project_root, chapter_n, note, progress)
+
+        # 质检/去AI味 关卡:独立复审→回炉(挑硬伤、不打分、不硬阻断)。残留写进留痕,继续往下。
+        if role in _GATES and config.gate_rounds > 0:
+            label, critic, revise, gate_reads, need_prev = _GATES[role]
+            gk = _read_files(project_root, gate_reads, _noop)
+            if need_prev and prev:
+                gk += "\n\n【上一章章末(看本章有没有接住它的钩子)】\n" + prev[-800:]
+            gres = gates.run_gate(
+                backend, label=label, owner_role=role, critic_system=critic, revise_system=revise,
+                draft=output, knowledge=gk, produces=agent.produces,
+                rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
+            )
+            output = gres.text
+            if gres.remaining:
+                _save_gate_remaining(project_root, chapter_n, label, gres.remaining, progress)
+
         ledger.record_step(project_root, chapter_n, role, output, up_sha)  # 即时落盘=断点可续
         workspace.append((agent.produces, output))
         progress({"type": "agent_done", "role": role, "produces": agent.produces})

@@ -542,6 +542,20 @@ function handleEvent(ev) {
   } else if (ev.type === "agent_skip") {
     const p = $("pill-" + ev.role); if (p) p.classList.add("done");
     logRun(`⏭ ${ev.role} —— 跳过(已完成、上游未变)`);
+  } else if (ev.type === "gate_start") {
+    const p = $("pill-" + ev.role); if (p) p.classList.add("running");
+    logRun(`🔍 ${ev.label}复审 · 第${ev.round}轮 …`);
+  } else if (ev.type === "gate_pass") {
+    logRun(`✓ ${ev.label}通过(无硬伤)`, "ok");
+  } else if (ev.type === "gate_issues") {
+    logRun(`发现 ${ev.issues.length} 处硬伤:`);
+    ev.issues.forEach(it => logRun(
+      `  · ${it["类别"]}:${it["问题"]}` + (it["证据"] ? `(证据:「${it["证据"]}」)` : "")));
+  } else if (ev.type === "gate_revise") {
+    logRun(`↻ 回炉重写中 …`);
+    $("run-stream").textContent = "";  // 回炉稿重新流式
+  } else if (ev.type === "gate_exhausted") {
+    logRun(`⚠ ${ev.label}跑满 ${ev.rounds} 轮仍有 ${ev.issues.length} 处残留 → 记入留痕,不阻断,继续`);
   } else if (ev.type === "edit_note") {
     logRun(`📝 本章改动留痕已存(.审稿留痕/)`);
   } else if (ev.type === "warn") {
