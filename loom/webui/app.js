@@ -78,7 +78,13 @@ function bind() {
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
   $("btn-save-backend").onclick = saveBackend;
-  $("provider").onchange = () => { if ($("provider").value === "deepseek") $("model").value = "deepseek-chat"; };
+  $("provider").onchange = () => {
+    // 切后端给个合理默认 model:codex 留空走它自己的默认模型(订阅登录即可),claude 用 sonnet
+    const def = { deepseek: "deepseek-chat", claude: "sonnet", codex: "" };
+    const p = $("provider").value;
+    $("model").value = def[p] ?? "";
+    $("model").placeholder = p === "codex" ? "留空=codex 默认模型" : (p === "claude" ? "sonnet" : "deepseek-chat");
+  };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
   $("btn-export").onclick = exportBook;
   $("btn-backup").onclick = backupBook;

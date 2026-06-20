@@ -46,7 +46,7 @@ loom                      # ③ 内部引擎调试 CLI(开发用,非产品)
 
 打开后:**新建一本书** → 顶栏选后端、填 DeepSeek API Key(`platform.deepseek.com` 申请)→ 左侧"喂样本"让它懂你的文风 → **写第 1 章**(看 5 个 agent 依次点亮)→ 在编辑器里手改 → **学这章的手改**(指纹更新,越来越像你)。
 
-- 用 Claude Code / Codex 当后端时,顶栏切 provider 即可,需本机已装好 `claude` / `codex` 命令。
+- 用 Claude Code / Codex 当后端时,顶栏切 provider 即可,**无需在 Loom 填 key**:Loom 直接 shell 到本机 `claude -p` / `codex exec`,复用它们各自客户端的登录(含订阅)。前提是已装好 `claude` / `codex` 命令并登录过(`codex login`)。
 
 ## 架构(为什么这么搭)
 

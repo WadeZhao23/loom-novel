@@ -53,6 +53,7 @@
           <li>在「API Keys」里创建一个 key(sk- 开头)</li>
           <li>新建/打开书后,把 key 粘进顶栏 API Key 框 → 点「保存后端」</li>
         </ol>
+        <p class="muted">不想自带 key?顶栏后端切到 <b>Claude Code</b> 或 <b>Codex</b>——它们复用你本机客户端的登录(含订阅),Loom 不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
       </details>
       <div id="welcome-error" class="error"></div>
     </div>
@@ -75,7 +76,7 @@
           <option value="codex">Codex</option>
         </select>
         <input id="model" type="text" class="model" title="模型" />
-        <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填;写进项目 .env" />
+        <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
         <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>
         <button id="btn-save-backend" class="ghost">保存后端</button>
       </div>

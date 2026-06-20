@@ -1,6 +1,7 @@
 """可插拔后端:一个 complete(system, user) -> str 的协议 + 三个实现。
 
-v0.1 先把 DeepSeek 跑通(OpenAI 兼容)。Claude 走 `claude -p`。Codex 先 stub。
+DeepSeek 走 OpenAI 兼容接口(自带 key)。Claude 走 `claude -p`、Codex 走 `codex exec`——
+两者都 shell 到本机装好的客户端,复用它自己的登录态(订阅/CLI key),Loom 不碰 key。
 """
 
 from __future__ import annotations
@@ -8,6 +9,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Callable, Protocol
 
 from .config import Config
@@ -138,14 +141,57 @@ class ClaudeCodeBackend:
 
 
 class CodexBackend:
-    """v0.1 占位。"""
+    """接 Codex CLI:把 system+user 拼成 prompt 走 `codex exec` 非交互(headless)。
+
+    复用 codex 客户端自己的登录态(ChatGPT 订阅 / OPENAI_API_KEY),Loom 不碰 key——
+    和 Claude 后端同一套思路:shell 到装好的客户端,鉴权交给客户端。
+    """
 
     def __init__(self, config: Config) -> None:
-        pass
+        if shutil.which("codex") is None:
+            raise LoomBackendError(render("codex_not_found"), code="codex_not_found")
+        # 只在用户显式配了 codex 适用的模型时才传 --model;否则让 codex 用它自己的默认模型
+        # (订阅登录下默认模型即可,硬塞一个模型名反而可能"未知模型")。
+        m = (config.model or "").strip()
+        self.model = m if m and "deepseek" not in m else ""
+
+    # 护栏:逼 `codex exec` 当"纯文本补全",别当 Codex agent(改文件/跑命令/反问)
+    _GUARD = (
+        "[严格指令] 你是一个纯文本生成函数,不是助手、不是 agent。只输出要求的成品中文文本本身。"
+        "禁止:调用或提及任何工具、读写或查找任何文件、执行命令、反问、说明你在做什么、"
+        "输出「我检查了目录」「请提供」之类的话。你需要的全部材料都在下面,直接用。"
+    )
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None) -> str:
-        raise LoomBackendError("codex 后端 v0.1 还没接,先用 deepseek 或 claude。")
+        # codex 子进程不做 token 级流式(返回即全量);on_chunk 接受但忽略,前端靠 agent_done 展示。
+        prompt = f"{self._GUARD}\n\n{system}\n\n---\n\n{user}"
+        timeout = int(os.environ.get("LOOM_CODEX_TIMEOUT", "600"))  # 与 claude 一致放宽,可环境覆盖
+        # 关键:read-only 沙箱 + 在临时空目录里跑,codex 既改不了你的稿子、也读不到项目文件;
+        # --skip-git-repo-check 避免它因"不在 git 仓库"而中断;最终回复写临时文件以拿到纯文本。
+        with tempfile.TemporaryDirectory() as td:
+            last = Path(td) / "last.txt"
+            cmd = ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only",
+                   "--output-last-message", str(last)]
+            if self.model:
+                cmd += ["--model", self.model]
+            cmd.append(prompt)
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=td)
+            except subprocess.TimeoutExpired as e:
+                raise LoomBackendError(render("codex_timeout", detail=f"timeout={timeout}s"),
+                                       code="codex_timeout") from e
+            except Exception as e:
+                raise LoomBackendError(f"调用 codex 失败:{e}") from e
+            if out.returncode != 0:
+                raise LoomBackendError(render("codex_call_failed", detail=out.stderr.strip()[:500]),
+                                       code="codex_call_failed")
+            if last.exists():
+                text = last.read_text(encoding="utf-8").strip()
+                if text:
+                    return text
+        # 兜底:--output-last-message 没写出来时退回 stdout
+        return out.stdout.strip()
 
 
 class DemoBackend:
