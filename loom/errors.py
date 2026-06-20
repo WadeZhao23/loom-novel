@@ -67,6 +67,24 @@ author_errors: dict[str, AuthorError] = {
         impact="这一章/这一步没产出,但你的外置大脑和已写章节没受影响。",
         next_action="稍后重试;若反复超时,把章节字数调小一点,或在 loom.toml 把 provider 换成 deepseek。",
     ),
+    "codex_not_found": AuthorError(
+        title="找不到 codex 命令",
+        reason="loom.toml 里 provider 设成了 codex,但系统 PATH 里没有 `codex`(没装,或装了但没登录)。",
+        impact="选了 Codex 后端却调不起来,写作无法进行。",
+        next_action="装好 Codex CLI(`npm i -g @openai/codex`)、跑一次 `codex login` 用 ChatGPT 订阅登录,确认 `codex --version` 能跑;或把 provider 改回 deepseek/claude。Codex 复用它自己的登录,不用在 Loom 填 key。",
+    ),
+    "codex_timeout": AuthorError(
+        title="codex 这次跑超时了",
+        reason="`codex exec` 在限定时间内没返回(提示词太长或本机太慢都可能)。",
+        impact="这一章/这一步没产出,但你的外置大脑和已写章节没受影响。",
+        next_action="稍后重试;若反复超时,把章节字数调小一点,或在 loom.toml 把 provider 换成 deepseek。可用 LOOM_CODEX_TIMEOUT 放宽超时。",
+    ),
+    "codex_call_failed": AuthorError(
+        title="调用 codex 没成功",
+        reason="codex 返回了非零(可能没登录、模型名不对、网络不通,或一个还没归类的 CLI 错误)。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="先在终端跑一次 `codex exec \"你好\"` 确认 codex 本身能用、已 `codex login`;若 model 填了 codex 不认的名字,清空模型框让它用默认。细节见下方反馈。",
+    ),
     "project_root_not_found": AuthorError(
         title="这里不是一个 Loom 项目",
         reason="从当前目录一路向上都没找到 loom.toml,无法确定要操作哪本书。",
