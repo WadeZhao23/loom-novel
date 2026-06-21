@@ -28,6 +28,8 @@ const IC = {
   redo: "icon-refresh",       warn: "icon-warning",
   play: "icon-play",          skip: "icon-skip",
   chevron: "icon-chevron-right",  // 折叠区展开/收起(展开时 CSS 转 90°)
+  back: "icon-arrow-left",        // 回首页(退出当前书 / 换一本)
+  history: "icon-history",        // 本章版本历史
 };
 function icon(name, cls) {
   const id = IC[name] || name;
@@ -113,13 +115,21 @@ function bind() {
   $("focus-exit").onclick = exitFocus;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
+  $("flow-close").onclick = () => $("flow-overlay").classList.add("hidden");
+  $("flow-prompt").onclick = () => {
+    const a = (DATA.agents || []).find((x) => x.name === _flowAgent);   // 留个口子:仍能去看/改提示词
+    $("flow-overlay").classList.add("hidden");
+    if (a) openFile(a.rel, false, null);
+  };
   $("btn-save-backend").onclick = saveBackend;
+  $("btn-probe").onclick = probeBackend;
   $("provider").onchange = () => {
     // 切后端给个合理默认 model:codex 留空走它自己的默认模型(订阅登录即可),claude 用 sonnet
     const def = { deepseek: "deepseek-chat", claude: "sonnet", codex: "" };
     const p = $("provider").value;
     $("model").value = def[p] ?? "";
     $("model").placeholder = p === "codex" ? "留空=codex 默认模型" : (p === "claude" ? "sonnet" : "deepseek-chat");
+    applyProviderUI(p);
   };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
   $("btn-export").onclick = exportBook;
@@ -131,6 +141,9 @@ function bind() {
   $("seed-go").onclick = doSeed;
   $("btn-save-file").onclick = saveFile;
   $("btn-learn").onclick = () => CUR && learn(CUR.chapter);
+  $("btn-history").onclick = openHistory;
+  $("history-close").onclick = () => $("history-overlay").classList.add("hidden");
+  $("btn-sensitive").onclick = scanSensitive;
   $("btn-rewrite").onclick = openRewrite;
   $("rewrite-cancel").onclick = () => $("rewrite-overlay").classList.add("hidden");
   $("rewrite-go").onclick = doRewrite;
@@ -160,6 +173,10 @@ function bind() {
 
   // 全局快捷键
   document.addEventListener("keydown", globalKeys);
+
+  // 防丢稿:关窗/切走前保住未保存手改
+  window.addEventListener("beforeunload", (e) => { if (_dirty) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("blur", () => { if (_dirty) autosave(); });
 }
 
 // ---------- 项目 ----------
@@ -254,6 +271,7 @@ function render() {
   $("chapter-chars").value = DATA.backend.chapter_chars;
   $("api-key").value = "";
   $("api-key").placeholder = DATA.backend.key_set ? "API Key 已设置" : "填 DeepSeek API Key";
+  applyProviderUI(DATA.backend.provider);
 
   const fpMap = {
     default: "中性默认 · 还没懂你",
@@ -285,8 +303,187 @@ function render() {
   $("btn-write-next").innerHTML = `写第${DATA.next_chapter}章 ` + icon("writeNext");
 
   fillList("brain", DATA.brain, true);
-  fillList("skills", DATA.skills, false);
-  fillList("agents", DATA.agents, false);
+  fillSkills(DATA.skills);
+  fillAgents(DATA.agents);
+}
+
+// 5 个 agent 不是「提示词文件」,是流水线上五个有人设的角色。点卡片 → 看整条流水线(不贴 Markdown)。
+const AGENT_ORDER = ["设定师", "大纲师", "写手", "编辑", "润色师"];
+const AGENTS_META = {
+  "设定师": { slug: "loremaster", tag: "第一棒 · 立规矩", reads: "世界观 · 人物卡 · 方法论", produces: "本章设定锚点",        desc: "守世界观的人。开写前为这章圈好边界、钉死硬约束,绝不让设定穿帮。" },
+  "大纲师": { slug: "outliner",   tag: "第二棒 · 搭骨架", reads: "卡章纲 · 故事引擎",       produces: "分镜细纲(场景骨头)", desc: "搭骨架的人。把这章拆成 3-6 场分镜,标好爆点和章末钩,让写手照着就能落字。" },
+  "写手":   { slug: "writer",     tag: "第三棒 · 落字",   reads: "写作指纹 · 网文大神",     produces: "本章初稿",          desc: "真正落字的人。照着你的写作指纹写初稿——越写越像你,是这本书的灵魂。" },
+  "编辑":   { slug: "editor",     tag: "第四棒 · 挑硬伤", reads: "评估自检",               produces: "本章改稿",          desc: "挑刺的人。盘爽点、钩子、OOC、设定漂移,问题当场改掉,只管内容硬伤。" },
+  "润色师": { slug: "polisher",   tag: "第五棒 · 去AI味", reads: "去AI味 · 写作指纹",       produces: "本章终稿",          desc: "最后一道。擦掉 AI 腔与套话,却保留你的口头禅和怪句,让它读起来像真人。" },
+};
+// 头像:有图用 /agents/<slug>.jpg,没生成则退化成首字徽标
+function agentAvatar(name, imgCls, fbCls) {
+  const meta = AGENTS_META[name] || {};
+  const initial = name.slice(0, 1);
+  if (meta.slug) {
+    const img = document.createElement("img");
+    img.className = imgCls; img.src = `/agents/${meta.slug}.jpg`; img.alt = name; img.loading = "lazy";
+    img.onerror = () => { const fb = document.createElement("span"); fb.className = fbCls; fb.textContent = initial; img.replaceWith(fb); };
+    return img;
+  }
+  const fb = document.createElement("span"); fb.className = fbCls; fb.textContent = initial; return fb;
+}
+function fillAgents(items) {
+  const ul = $("agents"); ul.innerHTML = "";
+  items.forEach((it) => {
+    const meta = AGENTS_META[it.name] || {};
+    const li = document.createElement("li");
+    li.className = "agent-card";
+    li.appendChild(agentAvatar(it.name, "agent-ava", "agent-fallback"));
+    const info = document.createElement("div"); info.className = "agent-info";
+    const nm = document.createElement("div"); nm.className = "agent-name"; nm.textContent = it.name;
+    if (meta.tag) { const t = document.createElement("span"); t.className = "agent-tag"; t.textContent = meta.tag; nm.appendChild(t); }
+    const ds = document.createElement("div"); ds.className = "agent-desc"; ds.textContent = meta.desc || "";
+    info.appendChild(nm); info.appendChild(ds);
+    li.appendChild(info);
+    li.onclick = () => openFlow(it.name);   // 点卡片 → 看全流程,而不是贴 Markdown
+    ul.appendChild(li);
+  });
+}
+
+// ---------- agent 全流程面板 ----------
+let _flowAgent = null;
+function openFlow(focusName) {
+  const box = $("flow-stages"); box.innerHTML = "";
+  AGENT_ORDER.forEach((name, i) => {
+    if (i > 0) { const a = document.createElement("div"); a.className = "flow-arrow"; a.innerHTML = icon("chevron"); box.appendChild(a); }
+    const meta = AGENTS_META[name] || {};
+    const st = document.createElement("div");
+    st.className = "flow-stage" + (name === focusName ? " on" : "");
+    st.appendChild(agentAvatar(name, "flow-ava", "flow-fallback"));
+    const body = document.createElement("div"); body.className = "flow-body";
+    const nm = document.createElement("div"); nm.className = "flow-name";
+    const b = document.createElement("b"); b.textContent = name; nm.appendChild(b);
+    if (meta.tag) { const t = document.createElement("span"); t.className = "flow-tag"; t.textContent = meta.tag; nm.appendChild(t); }
+    const ds = document.createElement("div"); ds.className = "flow-desc"; ds.textContent = meta.desc || "";
+    const io = document.createElement("div"); io.className = "flow-io";
+    io.innerHTML = `<span class="flow-reads">读 ${escHtml(meta.reads || "")}</span><span class="flow-prod">产出 ${escHtml(meta.produces || "")}</span>`;
+    body.appendChild(nm); body.appendChild(ds); body.appendChild(io);
+    st.appendChild(body);
+    st.onclick = () => { box.querySelectorAll(".flow-stage").forEach((x) => x.classList.remove("on")); st.classList.add("on"); _flowAgent = name; _syncFlowPrompt(); };
+    box.appendChild(st);
+  });
+  _flowAgent = focusName;
+  _syncFlowPrompt();
+  $("flow-overlay").classList.remove("hidden");
+  const on = box.querySelector(".flow-stage.on"); if (on) on.scrollIntoView({ block: "nearest" });
+}
+function _syncFlowPrompt() {
+  const btn = $("flow-prompt"); if (btn && _flowAgent) btn.textContent = `查看「${_flowAgent}」的提示词`;
+}
+
+// ---------- 通用引导浮层(skills 意图介绍 / 外置大脑空状态)----------
+function showGuide({ title, bodyHtml, primary, ghost }) {
+  $("guide-title").textContent = title;
+  $("guide-body").innerHTML = bodyHtml;
+  const pb = $("guide-primary"), gb = $("guide-ghost");
+  const wire = (btn, spec) => {
+    if (spec) { btn.classList.remove("hidden"); btn.textContent = spec.label;
+      btn.onclick = () => { $("guide-overlay").classList.add("hidden"); spec.fn && spec.fn(); }; }
+    else btn.classList.add("hidden");
+  };
+  wire(pb, primary); wire(gb, ghost);
+  $("guide-overlay").classList.remove("hidden");
+}
+
+// skills 是给 Agent 看的「方法论手册」:点开先讲清是什么 / 哪一棒用,而不是糊一脸 Markdown
+const SKILLS_META = {
+  "世界观引擎": { who: "设定师", what: "怎么搭一个自洽、能长期写下去的世界观与力量体系。" },
+  "故事引擎":   { who: "大纲师", what: "把『这章要完成什么』拆成有爆点、有钩子的分镜结构。" },
+  "网文大神":   { who: "写手",   what: "网文落字手艺:画面代替形容词、对白带潜台词、短段落、章末留钩。" },
+  "黄金开篇":   { who: "写手",   what: "只在第 1 章用:开篇怎么几句话就抓住读者。" },
+  "评估自检":   { who: "编辑",   what: "章级自检清单:爽点够不够、钩子立没立、有没有 OOC / 设定漂移 / 拖节奏。" },
+  "去AI味":     { who: "润色师", what: "怎么擦掉机器腔:套话头尾、空洞排比、黑名单词、被焊死的连接词。" },
+  "金手指":     { who: "设定师", what: "金手指设计法:七字段、代价库、反制库,别让主角无敌到没冲突。" },
+};
+function fillSkills(items) {
+  const ul = $("skills"); ul.innerHTML = "";
+  items.forEach((it) => {
+    const li = document.createElement("li");
+    li.textContent = it.name;
+    li.onclick = () => openSkillGuide(it.name, it.rel);
+    ul.appendChild(li);
+  });
+}
+function openSkillGuide(name, rel) {
+  const m = SKILLS_META[name] || {};
+  showGuide({
+    title: `${name} · 方法论`,
+    bodyHtml:
+      `<p class="guide-lead">${escHtml(m.what || "这一棒 Agent 写作时参照的方法论。")}</p>` +
+      (m.who ? `<div class="guide-who">${icon("robot", "guide-ico")} ${escHtml(m.who)}写作时会读它</div>` : "") +
+      `<p class="hint">方法论是给 Agent 看的「手艺说明书」,平时不用管。想了解可查看全文。</p>`,
+    primary: { label: "知道了" },
+    ghost: { label: "查看方法论全文", fn: () => openFile(rel, false, null) },
+  });
+}
+
+// 外置大脑:空 / 还没懂你 时给 onboarding,而不是甩一个空编辑器或中性默认文本
+const BRAIN_GUIDE = {
+  "世界观": "这本书的世界设定、力量体系、规则。设定师每章会读它,抽出本章能用的设定与绝不能违反的硬约束。",
+  "人物卡": "主要人物的设定、关系、底线。防止写着写着人物 OOC、性格漂移。",
+  "卡章纲": "整本书的分章规划,每章一句话任务。大纲师照它搭本章骨架;每章 learn 后这里还会自动补一条「AI 回顾」。",
+  "写作指纹": "你的文风档案——句式、口头禅、节奏、禁用词。写手照它写,于是越写越像你。",
+  "违禁词": "国内平台审核的敏感雷区清单 + 改写指引。写手/润色师参照它绕开红线;编辑器里「违禁词」按钮按它做本地粗筛。",
+};
+function maybeBrainGuide(rel, content) {
+  if (!rel.startsWith("外置大脑/")) return;
+  const empty = !content || !content.trim();
+  const isFp = rel.endsWith("写作指纹.md");
+  const neutralFp = isFp && /中性默认|还没.{0,4}懂你|还没学到你/.test(content);
+  if (!empty && !neutralFp) return;
+  const name = rel.split("/").pop().replace(/\.md$/, "");
+  const desc = BRAIN_GUIDE[name] || "外置大脑的一部分,Agent 写作时会读它。";
+  if (neutralFp) {
+    showGuide({
+      title: "写作指纹 · 还没懂你",
+      bodyHtml: `<p class="guide-lead">${escHtml(desc)}</p>` +
+        `<p class="hint">现在是中性默认。喂一段你写的字,或写几章手改后点「学这章的手改 learn」,它会慢慢长成你的样子——越写越像你。</p>`,
+      primary: { label: "喂样本,让它懂我", fn: openSeed },
+      ghost: { label: "先不管" },
+    });
+  } else {
+    showGuide({
+      title: `${name} · 还是空的`,
+      bodyHtml: `<p class="guide-lead">${escHtml(desc)}</p>` +
+        `<p class="hint">这是你来填的「外置大脑」。直接在编辑器里写就行,写得越具体,Agent 越不跑偏。</p>`,
+      primary: { label: "开始填写", fn: () => $("editor").focus() },
+      ghost: { label: "知道了" },
+    });
+  }
+}
+
+// ---------- 违禁词自检(本地粗筛,只提示不阻断) ----------
+async function scanSensitive() {
+  if (!CUR || CUR.chapter == null) return;
+  try {
+    const d = await jreq("POST", "/api/sensitive/scan", { root: DATA.root, text: $("editor").value });
+    const hits = d.hits || [];
+    if (!hits.length) {
+      showGuide({
+        title: "违禁词自检 · 没命中",
+        bodyHtml: `<p class="guide-lead">本地粗筛没命中触发词。</p>` +
+          `<p class="hint">这只兜低级漏网——平台审核偏严且不公开清单,终审仍建议人工把关。触发词可在「外置大脑 / 违禁词」里按题材增删。</p>`,
+        primary: { label: "知道了" },
+      });
+      return;
+    }
+    const rows = hits.map((h) =>
+      `<div class="sens-row"><span class="sens-word">${escHtml(h.word)}</span>` +
+      `<span class="sens-cat">${escHtml(h.category)}</span><span class="sens-cnt">×${h.count}</span></div>`).join("");
+    showGuide({
+      title: `违禁词自检 · 命中 ${hits.length} 类`,
+      bodyHtml: `<div class="sens-list">${rows}</div>` +
+        `<p class="hint">只提示、不阻断。改写心法见「外置大脑 / 违禁词」:能架空就架空、能侧写就别直写、不给可复现的违法细节。</p>`,
+      primary: { label: "知道了" },
+      ghost: { label: "看改写指引", fn: () => openFile("外置大脑/违禁词.md", true, null) },
+    });
+  } catch (e) { toast(e.message, true); }
 }
 function fillList(id, items, editable) {
   const ul = $(id); ul.innerHTML = "";
@@ -302,6 +499,7 @@ function fillList(id, items, editable) {
 
 // ---------- 文件编辑 ----------
 async function openFile(rel, editable, chapter, li) {
+  if (_dirty && CUR && CUR.editable) { try { await autosave(); } catch (e) { /* 落盘失败也别拦切换 */ } }  // 切文件前先保住手改
   clearTimeout(_saveTimer); clearDirty(); closeSearch();
   document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
   if (li) li.classList.add("active");
@@ -312,11 +510,14 @@ async function openFile(rel, editable, chapter, li) {
   $("editor-path").textContent = rel + (editable ? "" : "(只读)");
   $("btn-save-file").classList.toggle("hidden", !editable);
   $("btn-search").classList.remove("hidden");
+  $("btn-history").classList.toggle("hidden", chapter == null);
+  $("btn-sensitive").classList.toggle("hidden", chapter == null);
   $("btn-learn").classList.toggle("hidden", chapter == null);
   $("btn-rewrite").classList.toggle("hidden", chapter == null);
   $("status-note").textContent = chapter != null
     ? "改完会自动保存;再点【学这章的手改】把你的风格喂给指纹。" : "";
   updateWordCount();
+  maybeBrainGuide(rel, d.content);   // 外置大脑空/未懂你 → 给 onboarding,不甩空编辑器
 }
 async function saveFile() {
   if (!CUR || !CUR.editable) return;
@@ -363,6 +564,54 @@ async function autosave() {
     await jreq("PUT", "/api/file", { root: DATA.root, rel, content });
     if (CUR && CUR.rel === rel) { clearDirty(); $("status-note").innerHTML = "已自动保存 " + icon("check"); }
   } catch (e) { $("status-note").textContent = "自动保存失败:" + e.message; }
+}
+
+// ---------- 本章版本历史(覆盖前自动留快照,可回滚) ----------
+async function openHistory() {
+  if (!CUR || CUR.chapter == null) return;
+  const box = $("history-list");
+  box.innerHTML = `<div class="hint">读取中…</div>`;
+  $("history-overlay").classList.remove("hidden");
+  try {
+    if (_dirty) await autosave();   // 先把当前手改落盘,免得回滚后丢
+    const d = await jreq("GET", `/api/history?root=${encodeURIComponent(DATA.root)}&rel=${encodeURIComponent(CUR.rel)}`);
+    renderHistory(d.versions || []);
+  } catch (e) { box.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+function _fmtStamp(id) {
+  const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(id);   // 尾部微秒忽略不显示
+  return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : id;
+}
+function renderHistory(versions) {
+  const box = $("history-list"); box.innerHTML = "";
+  if (!versions.length) {
+    box.innerHTML = `<div class="hint">还没有历史版本。保存或 AI 重写覆盖一次后,旧版会自动留在这里。</div>`;
+    return;
+  }
+  versions.forEach((v) => {
+    const el = document.createElement("div"); el.className = "hist-item";
+    const head = document.createElement("div"); head.className = "hist-head";
+    const meta = document.createElement("div"); meta.className = "hist-meta";
+    meta.innerHTML = `<span class="hist-time">${_fmtStamp(v.id)}</span><span class="hist-chars">${v.chars} 字</span>`;
+    const act = document.createElement("button"); act.className = "mini"; act.textContent = "回滚到这版";
+    act.onclick = () => restoreHistory(v.id);
+    head.appendChild(meta); head.appendChild(act);
+    const prev = document.createElement("div"); prev.className = "hist-preview"; prev.textContent = v.preview || "";
+    el.appendChild(head); el.appendChild(prev);
+    box.appendChild(el);
+  });
+}
+async function restoreHistory(id) {
+  if (!CUR || CUR.chapter == null) return;
+  if (!window.confirm("回滚会用这个历史版本覆盖当前正文(当前版本会先自动存一份,可再回滚回来)。确定?")) return;
+  try {
+    const d = await jreq("POST", "/api/history/restore", { root: DATA.root, rel: CUR.rel, id });
+    $("editor").value = d.content;
+    clearDirty(); updateWordCount();
+    $("history-overlay").classList.add("hidden");
+    toast("已回滚到该版本");
+    if (CUR.chapter != null) refresh();
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- seed ----------
@@ -518,6 +767,12 @@ function confirmRewriteChapter(n) {
 // ---------- write(流式) ----------
 let _wroteChapter = null;
 async function writeChapter(n, force) {
+  // 首跑防空转:deepseek 没填 key 就别进面板转半天再报错,直接提示 + 高亮 key 框
+  if (DATA && DATA.backend && DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
+    toast("先在顶栏填 DeepSeek API Key(或把后端切到 Claude / Codex 免 key)再开写", true);
+    const k = $("api-key"); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); }
+    return;
+  }
   _wroteChapter = null;
   $("run-title").textContent = `正在写第 ${n} 章…`;
   $("agent-pills").innerHTML = "";
@@ -600,6 +855,9 @@ function handleEvent(ev) {
     logRun(`${ev.label}跑满 ${ev.rounds} 轮仍有 ${ev.issues.length} 处残留 → 记入留痕,不阻断,继续`, null, "warn");
   } else if (ev.type === "edit_note") {
     logRun(`本章改动留痕已存(.审稿留痕/)`, null, "edit");
+  } else if (ev.type === "sensitive") {
+    const ws = (ev.hits || []).slice(0, 6).map((h) => h.word).join("、");
+    logRun(`违禁词粗筛:命中 ${ev.count} 处(${ws}${(ev.hits || []).length > 6 ? "…" : ""})——只提示,不阻断,可在「违禁词」里改写`, null, "warn");
   } else if (ev.type === "warn") {
     logRun("· " + ev.message);
   } else if (ev.type === "info") {
@@ -646,6 +904,29 @@ async function saveBackend() {
   toast(key ? "后端 + API Key 已保存" : "后端已保存");
   render();
   if (CUR) updateWordCount();
+}
+
+// deepseek 用 key → 显示 key 框;claude/codex 复用客户端登录 → 隐藏 key 框、给「检测连接」按钮
+function applyProviderUI(provider) {
+  const isKey = provider === "deepseek";
+  $("api-key").classList.toggle("hidden", !isKey);
+  $("btn-probe").classList.toggle("hidden", isKey);
+  if (isKey) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
+}
+async function probeBackend() {
+  const p = $("provider").value;
+  const s = $("backend-status");
+  s.className = "backend-status"; s.textContent = "检测中…";
+  try {
+    const d = await jreq("GET", `/api/backend/probe?provider=${encodeURIComponent(p)}`);
+    s.className = "backend-status " + (d.ok ? "ok" : "bad");
+    s.innerHTML = icon(d.ok ? "check" : "cross", "stat-ico") + " " + escHtml(d.message || "");
+    s.title = d.hint || "";
+    if (!d.ok && d.hint) toast(d.hint, true);   // 没装/没登录 → 把"该跑哪条命令"也弹出来
+  } catch (e) {
+    s.className = "backend-status bad";
+    s.innerHTML = icon("cross", "stat-ico") + " " + escHtml(e.message);
+  }
 }
 
 // ---------- 章内搜索 ----------
@@ -720,14 +1001,14 @@ function buildCmds() {
     c.push({ label: "备份整本", run: backupBook });
     c.push({ label: "环境自检 doctor", run: runDoctor });
     c.push({ label: "专注模式", key: "⌘.", run: toggleFocus });
-    c.push({ label: "切换项目", run: () => { localStorage.removeItem("loom_root"); showWelcome(); } });
+    c.push({ label: "回首页(换一本书)", keywords: "切换项目 换书 项目 退出 主页", run: () => { localStorage.removeItem("loom_root"); showWelcome(); } });
   }
   c.push({ label: "切换明暗主题", run: toggleTheme });
   _cmds = c;
 }
 function renderCmds(q) {
   const list = $("cmdk-list"); list.innerHTML = ""; _cmdSel = 0;
-  _filtered = _cmds.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()));
+  _filtered = _cmds.filter((c) => (c.label + " " + (c.keywords || "")).toLowerCase().includes(q.toLowerCase()));
   if (!_filtered.length) { list.innerHTML = `<div class="cmdk-empty">没有匹配的命令</div>`; return; }
   _filtered.forEach((c, i) => {
     const el = document.createElement("div");
@@ -760,7 +1041,7 @@ function anyOverlayOpen() {
 function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
-  const overlays = ["rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "run-overlay"];
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) return true; // 写作中,别误关
@@ -833,9 +1114,9 @@ function maybeCoachLearnLoop() {
 // T1:打开样例书后,3 步聚光引导(只第一次)。
 let _tourSteps = [], _tourI = 0, _tourEls = null, _spotTarget = null;
 function startSampleTour() {
-  if (_seenOnce("loom_tour_sample")) return;
+  if (_seenOnce("loom_tour_sample_v2")) return;
   if ($("app").classList.contains("hidden")) return;  // 没进项目就不引导
-  _markOnce("loom_tour_sample");
+  _markOnce("loom_tour_sample_v2");
   _tourSteps = [
     { sel: "#brain-section", title: "外置大脑:它的记忆",
       body: "世界观 / 人物卡 / 卡章纲 / 写作指纹——5 个 Agent 读着这些写。每本书独有、会随你成长。样例已替你填好了。" },
@@ -843,6 +1124,8 @@ function startSampleTour() {
       body: "点这里:设定→大纲→写手→编辑→润色 五道工序依次接力,一章正文就织出来。样例已有第 1、2 章,你可以直接写第 3 章试试。" },
     { sel: "#fp-card", title: "越写越像你(灵魂)",
       body: "别急着满意 AI 的稿。在编辑器里按你的习惯手改,再点「学这章的手改」——它只学你的改动、蒸馏进这张写作指纹,于是越写越像你本人。" },
+    { sel: "#btn-close-proj", title: "看够样例?回首页换自己的书",
+      body: "右上角这个「回首页」就是出口:退出当前这本(样例),回到首页去新建或打开你自己的书。稿子都存在本地,样例随时还能再打开。" },
   ];
   _tourI = 0;
   _ensureTourEls();

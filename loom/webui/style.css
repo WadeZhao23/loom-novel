@@ -219,6 +219,13 @@ button:disabled { opacity: .55; cursor: default; }
   align-items: center; gap: var(--space-2); white-space: nowrap; }
 .backend .chars input { width: 60px; }
 .topbar .divider { width: 1px; height: 20px; background: var(--line); margin: 0 var(--space-1); }
+/* 后端连接检测状态(claude/codex) */
+.backend-status { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs);
+  color: var(--text-soft); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.backend-status:empty { display: none; }
+.backend-status.ok { color: var(--accent-ink); }
+.backend-status.bad { color: var(--danger); }
+.backend-status .stat-ico { width: 13px; height: 13px; flex: none; }
 
 /* 顶栏图标按钮(主题/自检/专注) */
 .icon-btn { padding: 7px 9px; line-height: 1; color: var(--text-soft); }
@@ -256,6 +263,53 @@ button:disabled { opacity: .55; cursor: default; }
 .list li.fp .icon { color: var(--gold); }
 .list li.hint { cursor: default; color: var(--text-mute); font-size: var(--fs-sm); }
 .list li.hint:hover { background: transparent; }
+
+/* agents:五个有人设的角色卡(头像 + 一句话人设,不展示提示词) */
+#agents { display: flex; flex-direction: column; gap: var(--space-1); }
+.agent-card { align-items: center; gap: var(--space-3); }
+.agent-ava, .agent-fallback {
+  width: 40px; height: 40px; border-radius: 50%; flex: none;
+  border: 1px solid var(--line); background: var(--accent-tint);
+}
+.agent-ava { object-fit: cover; }
+.agent-fallback { display: flex; align-items: center; justify-content: center;
+  color: var(--accent-ink); font-weight: 700; font-size: var(--fs-sm); }
+.agent-info { min-width: 0; }
+.agent-name { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-weight: 600; font-size: var(--fs-sm); color: var(--text); }
+.agent-tag { font-size: var(--fs-caption); font-weight: 500; color: var(--text-mute); }
+.agent-desc { margin-top: 2px; font-size: var(--fs-xs); line-height: 1.5; color: var(--text-soft); }
+.agent-card.active { color: inherit; }
+.agent-card.active .agent-name { color: var(--accent-ink); }
+
+/* agent 全流程面板:5 道工序竖排,头像 + 人设 + 读/产出,点中的高亮 */
+.flow-card { width: 640px; }
+.flow-inputs { font-size: var(--fs-xs); color: var(--text-soft); background: var(--bg-sunken);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: var(--space-3); }
+.flow-stages { display: flex; flex-direction: column; gap: 0; }
+.flow-stage { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); cursor: pointer;
+  transition: border-color var(--dur-2), background-color var(--dur-2); }
+.flow-stage:hover { border-color: var(--text-soft); }
+.flow-stage.on { border-color: var(--accent); background: var(--accent-tint); box-shadow: var(--shadow-1); }
+.flow-ava, .flow-fallback { width: 56px; height: 56px; border-radius: 50%; flex: none;
+  border: 1px solid var(--line); background: var(--accent-tint); }
+.flow-ava { object-fit: cover; }
+.flow-fallback { display: flex; align-items: center; justify-content: center;
+  color: var(--accent-ink); font-weight: 700; font-size: var(--fs-h2); }
+.flow-body { min-width: 0; }
+.flow-name { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.flow-name b { font-size: var(--fs-h2); }
+.flow-tag { font-size: var(--fs-caption); color: var(--text-mute); }
+.flow-desc { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.6; margin-top: 2px; }
+.flow-io { display: flex; gap: var(--space-3); margin-top: 6px; flex-wrap: wrap; font-size: var(--fs-caption); }
+.flow-reads { color: var(--text-mute); }
+.flow-prod { color: var(--accent-ink); font-weight: 600; }
+.flow-arrow { display: flex; justify-content: center; align-items: center; height: 16px; }
+.flow-arrow .icon { transform: rotate(90deg); width: 18px; height: 18px; color: var(--gold); }
+.flow-loop { margin: var(--space-3) 0 0; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--gold-tint); color: var(--gold-ink); font-size: var(--fs-sm);
+  border: 1px solid var(--gold-line); text-align: center; }
 
 .badge { font-size: var(--fs-caption); padding: 1px 7px; border-radius: var(--radius-pill);
   background: var(--line-soft); color: var(--text-soft); margin-left: auto; }
@@ -420,6 +474,38 @@ body.focus-mode .focus-exit { display: block; }
   border-radius: 6px; font-size: var(--fs-sm); cursor: pointer; }
 .seg-btn.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-1); font-weight: 600; }
 
+/* 通用引导浮层(skills 介绍 / 外置大脑空状态) */
+.guide-card { width: 460px; }
+.guide-lead { font-size: var(--fs-body); color: var(--text); line-height: 1.75; margin: 0 0 var(--space-2); }
+.guide-who { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs);
+  color: var(--accent-ink); background: var(--accent-tint); border: 1px solid var(--line);
+  border-radius: var(--radius-pill); padding: 3px 10px; margin-bottom: var(--space-1); }
+.guide-ico { width: 14px; height: 14px; }
+.sens-list { margin: var(--space-2) 0; max-height: 40vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; }
+.sens-row { display: flex; align-items: center; gap: var(--space-3); padding: 5px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--surface); font-size: var(--fs-sm); }
+.sens-word { font-weight: 600; color: var(--danger); }
+.sens-cat { color: var(--text-soft); font-size: var(--fs-xs); }
+.sens-cnt { margin-left: auto; color: var(--text-mute); font-family: var(--font-mono); font-size: var(--fs-xs); }
+
+/* 本章版本历史 */
+.history-list { margin-top: var(--space-3); max-height: 50vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--space-2); }
+.hist-item { border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: var(--space-3); background: var(--surface); }
+.hist-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.hist-meta { display: flex; align-items: baseline; gap: var(--space-3); }
+.hist-time { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text); }
+.hist-chars { font-size: var(--fs-xs); color: var(--text-mute); }
+.hist-preview { margin-top: 6px; font-family: var(--font-read); font-size: var(--fs-sm);
+  color: var(--text-soft); line-height: 1.6; max-height: 3.2em; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* 顶栏 key 框「该填了」高亮(首跑没填 key 就写章时闪一下) */
+@keyframes key-flash { 0%,100% { box-shadow: var(--shadow-focus); } 50% { box-shadow: 0 0 0 3px var(--gold-line); } }
+.backend .model.flash { border-color: var(--gold); animation: key-flash .5s var(--ease-inout) 3; }
+
 /* doctor 面板 */
 .doctor-list { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 .doctor-item { display: flex; gap: var(--space-3); padding: var(--space-3);
@@ -460,7 +546,9 @@ body.focus-mode .focus-exit { display: block; }
 /* ---------- 12. 织布机线描标记(品牌) ---------- */
 .weave-mark { stroke: var(--text-soft); }
 .weave-mark .warp { stroke: var(--line-strong); }
-.weave-mark .weft { stroke: var(--gold-line); }
+/* 纬线:浅色用墨字(白色会糊在白卡上),深色用纯白 */
+.weave-mark .weft { stroke: var(--text); }
+[data-theme="dark"] .weave-mark .weft { stroke: #fff; }
 
 /* ---------- 13. 动画 ---------- */
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

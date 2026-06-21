@@ -33,6 +33,7 @@
 | `icon-chevron-right` | 侧栏折叠区箭头(展开时 CSS 自动转 90°) | chevron / 箭头 / 展开 |
 | `icon-doc` | 侧栏「正文」 | doc / 文档 / 文稿 |
 | `icon-arrow-right` | 「写下一章」 | arrow right / 右箭头 |
+| `icon-arrow-left` | 顶栏「回首页」(退出当前书) | arrow left / 返回 / 左箭头 |
 | `icon-export` | 「导出全书」 | export / 导出 |
 | `icon-save` | 「备份整本」 | save / 磁盘 / 保存 |
 | `icon-brain` | 侧栏「外置大脑」 | brain / 大脑 |

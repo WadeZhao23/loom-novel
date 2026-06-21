@@ -77,6 +77,8 @@
         </select>
         <input id="model" type="text" class="model" title="模型" />
         <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
+        <span id="backend-status" class="backend-status"></span>
         <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>
         <button id="btn-save-backend" class="ghost">保存后端</button>
       </div>
@@ -84,7 +86,7 @@
       <button id="btn-theme" class="ghost icon-btn" title="明暗主题(切换)"></button>
       <button id="btn-focus" class="ghost icon-btn" title="专注模式 ⌘." data-ico="focus"></button>
       <button id="btn-doctor" class="ghost">自检</button>
-      <button id="btn-close-proj" class="ghost">切换项目</button>
+      <button id="btn-close-proj" class="ghost" title="退出当前这本书,回首页新建或打开别的书"><span class="ico" data-ico="back"></span> 回首页</button>
     </header>
 
     <main class="main">
@@ -127,6 +129,8 @@
           <div class="path"><span class="dirty-dot"></span><span id="editor-path">选左边一个文件来看/改</span></div>
           <div class="editor-actions">
             <button id="btn-search" class="ghost hidden" title="章内搜索 ⌘F" data-ico="search"></button>
+            <button id="btn-history" class="ghost hidden" title="本章版本历史"><span class="ico" data-ico="history"></span> 历史</button>
+            <button id="btn-sensitive" class="ghost hidden" title="违禁词自检(本地粗筛,只提示不阻断)"><span class="ico" data-ico="warn"></span> 违禁词</button>
             <button id="btn-rewrite" class="hidden"><span class="ico" data-ico="rewrite"></span> 重写选中</button>
             <button id="btn-learn" class="hidden"><span class="ico" data-ico="learn"></span> 学这章的手改(learn)</button>
             <button id="btn-save-file" class="primary hidden">保存</button>
@@ -233,6 +237,45 @@
       <div id="doctor-list" class="doctor-list"></div>
       <div class="row-end">
         <button id="doctor-close" class="primary">知道了</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用引导:skills「这是什么」、外置大脑空/未懂你时的 onboarding(不贴原文) -->
+  <div id="guide-overlay" class="overlay hidden">
+    <div class="run-card guide-card">
+      <h3 id="guide-title"></h3>
+      <div id="guide-body" class="guide-body"></div>
+      <div class="row-end">
+        <button id="guide-ghost" class="ghost"></button>
+        <button id="guide-primary" class="primary"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 本章版本历史:覆盖前自动留快照,可预览 + 一键回滚 -->
+  <div id="history-overlay" class="overlay hidden">
+    <div class="run-card">
+      <h3>本章版本历史</h3>
+      <p class="hint">每次保存/AI 重写覆盖前,都会先把上一版存一份(最多 30 份)。回滚前会把当前版本也存一份,随时能再回来。</p>
+      <div id="history-list" class="history-list"></div>
+      <div class="row-end">
+        <button id="history-close" class="primary">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- agent 全流程:点任一 agent → 看「一章怎么织出来」5 道工序(而非贴提示词) -->
+  <div id="flow-overlay" class="overlay hidden">
+    <div class="run-card flow-card">
+      <h3>一章,是这样织出来的</h3>
+      <p class="hint">5 个 Agent 接力跑一遍流水线,产出一章正文;然后你手改、点 learn,它就越写越像你。点任一棒看它干什么。</p>
+      <div class="flow-inputs">输入 · 外置大脑：世界观 / 人物卡 / 卡章纲 / 写作指纹 ＋ skills 方法论</div>
+      <div id="flow-stages" class="flow-stages"></div>
+      <div class="flow-loop">写完终稿 → 你手改 → 「学这章的手改 learn」 → 写作指纹更新 → 下一章更像你</div>
+      <div class="row-end">
+        <button id="flow-prompt" class="ghost">查看这一棒的提示词</button>
+        <button id="flow-close" class="primary">知道了</button>
       </div>
     </div>
   </div>
