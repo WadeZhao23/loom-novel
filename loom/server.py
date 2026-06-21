@@ -24,7 +24,7 @@ from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
-from .fsutil import atomic_write_text, list_history, restore_history, snapshot_chapter
+from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
 from .state import load_state
@@ -32,6 +32,23 @@ from .state import load_state
 WEBUI_DIR = Path(__file__).parent / "webui"
 
 app = FastAPI(title="Loom")
+
+# 本地服务的两道安全闸(本地无鉴权模型成立的前提):
+# 1) 只认 Host=127.0.0.1/localhost → 挡 DNS rebinding(恶意网站把域名重绑到本机再调本地端点)
+from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+
+# 2) 跨站写请求一律拒(挡 CSRF):非 GET 且 Origin/Referer 非本机 → 403。
+#    本机 webui(pywebview/浏览器从 127.0.0.1 发)Origin 即 127.0.0.1,放行;无 Origin 的本地工具(curl)放行。
+@app.middleware("http")
+async def _block_cross_site_writes(request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        from urllib.parse import urlparse
+        origin = request.headers.get("origin") or request.headers.get("referer")
+        if origin and (urlparse(origin).hostname or "") not in ("127.0.0.1", "localhost"):
+            return JSONResponse({"error": "跨站写请求被拒"}, status_code=403)
+    return await call_next(request)
 
 # ---- 编辑器允许读写的文件(外置大脑可改、skills/agents 只读展示) ----
 # 外置大脑四件套 / 5 个 agent 的清单单一真相在 doctor.py(BRAIN_FILES/AGENT_FILES)。
@@ -153,7 +170,10 @@ class FileBody(BaseModel):
 
 @app.get("/api/file")
 def read_file(root: str, rel: str):
-    p = Path(root) / rel
+    try:
+        p = safe_join(root, rel)           # 挡目录穿越 / 绝对路径越界
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     if not p.exists():
         return JSONResponse({"error": f"文件不存在:{rel}"}, status_code=404)
     return {"rel": rel, "content": p.read_text(encoding="utf-8")}
@@ -161,8 +181,11 @@ def read_file(root: str, rel: str):
 
 @app.put("/api/file")
 def write_file(b: FileBody):
-    p = Path(b.root) / b.rel
-    snapshot_chapter(b.root, b.rel)        # 覆盖正文章节前留一版历史(非章节自动跳过)
+    try:
+        p = safe_join(b.root, b.rel)       # 挡目录穿越 / 绝对路径越界,绝不写到项目外
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    snapshot_chapter(b.root, b.rel)        # 覆盖正文章节前留一版历史(正则限定 正文/第N章.md,安全)
     atomic_write_text(p, b.content)        # 原子写盘:崩溃/断电不会把正文截成空或半截
     return {"ok": True}
 

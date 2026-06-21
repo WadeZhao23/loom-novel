@@ -37,6 +37,18 @@ def atomic_write_text(path: Path | str, content: str, encoding: str = "utf-8") -
             pass
 
 
+def safe_join(root: Path | str, rel: str) -> Path:
+    """把 rel 锁在 root 内,挡目录穿越(../)与绝对路径越界(/etc/passwd)。越界抛 ValueError。
+
+    Path(root)/rel 在 rel 为绝对路径时会直接顶掉 root,故必须 resolve 后校验在 base 之内。
+    """
+    base = Path(root).resolve()
+    target = (base / rel).resolve()
+    if target != base and not target.is_relative_to(base):
+        raise ValueError(f"路径越界,拒绝访问:{rel}")
+    return target
+
+
 def _chapter_key(rel: str) -> str | None:
     m = _CHAP_RE.match(str(rel).replace("\\", "/"))
     return m.group(1) if m else None
@@ -102,6 +114,8 @@ def restore_history(root: Path | str, rel: str, snap_id: str) -> str:
     key = _chapter_key(rel)
     if not key:
         raise ValueError("不是正文章节,无法回滚")
+    if not re.fullmatch(r"[0-9-]+", snap_id or ""):   # 只允许时间戳样式,挡 snap_id 穿越
+        raise ValueError("非法的历史版本号")
     src = _hist_dir(root, key) / f"{snap_id}.md"
     if not src.is_file():
         raise FileNotFoundError("该历史版本不存在")
