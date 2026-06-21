@@ -136,4 +136,4 @@ flowchart TD
 
 [MIT](LICENSE) © 2026 Chambers
 
-agent 角色头像由 [ModelScope](https://modelscope.cn) 的 Qwen-Image 生成,随本仓库一并以 MIT 分发。借鉴思路来自 [参考开源项目]((参考开源项目))(仅理念,无源码/提示词复制)。
+agent 角色头像由 [ModelScope](https://modelscope.cn) 的 Qwen-Image 生成,随本仓库一并以 MIT 分发。
