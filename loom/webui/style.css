@@ -316,11 +316,15 @@ button:disabled { opacity: .55; cursor: default; }
 .badge.on { background: var(--accent-tint); color: var(--accent-ink); }
 
 /* 章节行:hover 浮出「重写本章」动作 */
-.ch-label { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
-.ch-actions { display: flex; gap: 2px; margin-left: auto; opacity: 0;
+.ch-label { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; }
+.ch-label > span:first-child { flex: none; }   /* 第N章 不被挤到换行 */
+.ch-actions { display: flex; gap: 1px; margin-left: auto; flex: none; opacity: 0;
   transition: opacity var(--dur-2); }
 .list li:hover .ch-actions { opacity: 1; }
-.ch-act { border: none; background: transparent; color: var(--text-mute); padding: 2px 5px;
+/* hover 出操作区时,徽标让位(空间紧),避免章号被挤换行 */
+.list li:hover .ch-label .badge { display: none; }
+.ch-act { border: none; background: transparent; color: var(--text-mute); padding: 2px 4px;
   border-radius: var(--radius-xs); font-size: var(--fs-sm); cursor: pointer; line-height: 1; }
 .ch-act:hover { background: var(--surface); color: var(--accent); }
 

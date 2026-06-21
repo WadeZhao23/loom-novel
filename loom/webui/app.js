@@ -30,6 +30,8 @@ const IC = {
   chevron: "icon-chevron-right",  // 折叠区展开/收起(展开时 CSS 转 90°)
   back: "icon-arrow-left",        // 回首页(退出当前书 / 换一本)
   history: "icon-history",        // 本章版本历史
+  plus: "icon-plus",              // 插入空章
+  trash: "icon-trash",            // 删除章节
 };
 function icon(name, cls) {
   const id = IC[name] || name;
@@ -293,10 +295,17 @@ function render() {
     label.onclick = () => openFile(`正文/第${c.n}章.md`, true, c.n, li);
     const actions = document.createElement("span");
     actions.className = "ch-actions";
-    const rw = document.createElement("button");
-    rw.className = "ch-act"; rw.title = `重写本章(AI 覆盖第${c.n}章)`; rw.innerHTML = icon("redo");
-    rw.onclick = (e) => { e.stopPropagation(); confirmRewriteChapter(c.n); };
-    actions.appendChild(rw);
+    const act = (ic, title, fn) => {
+      const b = document.createElement("button");
+      b.className = "ch-act"; b.title = title; b.innerHTML = icon(ic);
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      return b;
+    };
+    actions.appendChild(act("arrowUp", "上移一章", () => moveChapter(c.n, "up")));
+    actions.appendChild(act("arrowDown", "下移一章", () => moveChapter(c.n, "down")));
+    actions.appendChild(act("plus", `在第${c.n}章后插入空章`, () => insertAfter(c.n)));
+    actions.appendChild(act("redo", `重写本章(AI 覆盖第${c.n}章)`, () => confirmRewriteChapter(c.n)));
+    actions.appendChild(act("trash", `删除第${c.n}章`, () => deleteChapter(c.n)));
     li.appendChild(label); li.appendChild(actions);
     ch.appendChild(li);
   });
@@ -763,6 +772,26 @@ function confirmRewriteChapter(n) {
   const ok = window.confirm(`重写会用 AI 重新生成并【覆盖】第 ${n} 章的现有正文。\n建议先「备份整本」。确定继续?`);
   if (ok) writeChapter(n, true);
 }
+
+// ---------- 章节管理(删 / 插 / 上下移)----------
+async function chapterOp(url, body) {
+  try {
+    const d = await jreq("POST", url, body);
+    // 章号变了:收掉当前打开的章节视图,避免指向错号
+    CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
+    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite"].forEach((id) => $(id).classList.add("hidden"));
+    document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
+    updateWordCount();
+    if (d.state) { DATA = d.state; render(); } else { await refresh(); }
+    if (d.note) toast(d.note);
+  } catch (e) { toast(e.message, true); }
+}
+function deleteChapter(n) {
+  if (!window.confirm(`删除第 ${n} 章?\n它会移进回收站(正文/.回收站/,可手动恢复),后面的章节自动往前补号。`)) return;
+  chapterOp("/api/chapter/delete", { root: DATA.root, n });
+}
+function insertAfter(n) { chapterOp("/api/chapter/insert", { root: DATA.root, n }); }
+function moveChapter(n, direction) { chapterOp("/api/chapter/move", { root: DATA.root, n, direction }); }
 
 // ---------- write(流式) ----------
 let _wroteChapter = null;

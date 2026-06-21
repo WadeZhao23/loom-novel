@@ -78,7 +78,11 @@
     "icon-arrow-left":
       "M19 12H5M11 6l-6 6 6 6",
     "icon-history":
-      "M3.5 9a9 9 0 1 1-.3 5M3.5 4.5V9H8M12 8v4.5l3.5 2"
+      "M3.5 9a9 9 0 1 1-.3 5M3.5 4.5V9H8M12 8v4.5l3.5 2",
+    "icon-plus":
+      "M12 5v14M5 12h14",
+    "icon-trash":
+      "M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"
   };
 
   var common =

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from .agents import run_pipeline
 from .backends import LoomBackendError, get_backend, probe as probe_backend
+from . import chapters as chap
 from . import ledger
 from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
@@ -198,6 +199,36 @@ class ConfigBody(BaseModel):
 @app.get("/api/backend/probe")
 def backend_probe(provider: str):
     return probe_backend(provider)
+
+
+class ChapterOpBody(BaseModel):
+    root: str
+    n: int
+    direction: str | None = None
+
+
+@app.post("/api/chapter/delete")
+def chapter_delete(b: ChapterOpBody):
+    try:
+        return {**chap.delete_chapter(b.root, b.n), **{"state": _state(Path(b.root))}}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/chapter/insert")
+def chapter_insert(b: ChapterOpBody):
+    try:
+        return {**chap.insert_after(b.root, b.n), **{"state": _state(Path(b.root))}}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/chapter/move")
+def chapter_move(b: ChapterOpBody):
+    try:
+        return {**chap.move_chapter(b.root, b.n, b.direction or "up"), **{"state": _state(Path(b.root))}}
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 class ScanBody(BaseModel):
