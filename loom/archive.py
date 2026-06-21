@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import load_config
+from .fsutil import atomic_write_text
 
 _EXPORT_DIR = "导出"
 _BACKUP_DIR = ".备份"
@@ -50,7 +51,7 @@ def export_text(project_root: Path) -> dict:
     out_dir = project_root / _EXPORT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{_safe(title)}-{_stamp()}.txt"
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
     return {"path": str(path), "chapters": len(chapters), "chars": len(content)}
 
 

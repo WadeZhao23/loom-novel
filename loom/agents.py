@@ -14,6 +14,7 @@ from typing import Callable
 from . import gates
 from .backends import Backend
 from .config import Config
+from .fsutil import atomic_write_text, snapshot_chapter
 
 Progress = Callable[[dict], None]
 
@@ -64,8 +65,7 @@ def _strip_edit_note(text: str) -> str:
 def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Progress) -> None:
     """留痕落盘外的 .审稿留痕/(人可读可改,绝不被任何 learn/写作指纹流程读取)。"""
     path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(note + "\n", encoding="utf-8")
+    atomic_write_text(path, note + "\n")
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
 
 
@@ -266,6 +266,7 @@ def run_pipeline(
     final = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
     path = _save_chapter(project_root, chapter_n, final)
     ledger.record_snapshot(project_root, chapter_n, final)
+    _scan_sensitive(project_root, chapter_n, final, progress)  # 违禁词粗筛(只提示,不阻断)
     progress({
         "type": "chapter_done",
         "chapter": chapter_n,
@@ -277,10 +278,22 @@ def run_pipeline(
     return path, final
 
 
+def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Progress) -> None:
+    """本章终稿过一遍违禁词粗筛;命中只发提示事件,绝不阻断(平台审核终归靠人)。"""
+    try:
+        from .sensitive import scan
+        hits = scan(text, project_root)
+    except Exception:
+        return
+    if hits:
+        progress({"type": "sensitive", "chapter": chapter_n,
+                  "count": sum(h["count"] for h in hits), "hits": hits[:20]})
+
+
 def _save_chapter(project_root: Path, chapter_n: int, final: str) -> Path:
     out = project_root / "正文" / f"第{chapter_n}章.md"
     snap = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
-    snap.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(final + "\n", encoding="utf-8")
-    snap.write_text(final + "\n", encoding="utf-8")  # AI 原稿快照,只给 learn 做 diff
+    snapshot_chapter(project_root, f"正文/第{chapter_n}章.md")  # 覆盖前留旧稿历史(force 重写时保住手改)
+    atomic_write_text(out, final + "\n")
+    atomic_write_text(snap, final + "\n")  # AI 原稿快照,只给 learn 做 diff
     return out

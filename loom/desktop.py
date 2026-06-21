@@ -33,12 +33,34 @@ def _wait_up(port: int, timeout: float = 8.0) -> None:
             time.sleep(0.1)
 
 
+def _set_macos_app_name(name: str) -> None:
+    """dev 模式(loom-app,进程是 python)下,把菜单栏/应用名从 'Python' 改成 name。
+
+    从源码跑没有 .app 身份,macOS 会拿进程名当应用名,顶部菜单栏首项显示 'Python'。
+    这里在 NSApplication 菜单构建前,改写 mainBundle 的 CFBundleName 即可纠正。
+    打包成 .app 后由 Info.plist 决定,这步是 no-op(也不会出错)。
+    (注:Activity Monitor / ps 里进程名仍是 python,那只有真打包 .app 才变。)
+    """
+    import sys
+
+    if sys.platform != "darwin":
+        return
+    try:
+        from Foundation import NSBundle
+
+        bundle = NSBundle.mainBundle()
+        info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+        if info is not None:
+            info["CFBundleName"] = name
+    except Exception:
+        pass  # 拿不到就算了,不影响启动
+
+
 def _set_dock_icon() -> None:
     """dev 模式(loom-app,进程是 python)下,把 Dock 图标换成 Loom 的。
 
     打包成 .app 后 Dock 图标走 Info.plist 的 .icns,不需要这步;但从源码跑没有
-    app 身份,默认是 Python 火箭,这里运行时补上。菜单栏名仍会是 Python——那由
-    bundle 决定,只有打包 .app 能根治。
+    app 身份,默认是 Python 火箭,这里运行时补上。
     """
     try:
         from pathlib import Path
@@ -57,6 +79,7 @@ def _set_dock_icon() -> None:
 
 def run() -> None:
     """原生窗口。"""
+    _set_macos_app_name("Loom")  # 菜单栏首项显示 Loom 而非 Python(须在建菜单前)
     port = _free_port()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()

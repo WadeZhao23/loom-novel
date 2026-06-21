@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+
+from .fsutil import atomic_write_text
 from typing import Callable
 
 
@@ -36,9 +38,7 @@ def load_ledger(root: Path, n: int) -> dict:
 
 
 def save_ledger(root: Path, n: int, led: dict) -> None:
-    p = _ledger_path(root, n)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(led, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(_ledger_path(root, n), json.dumps(led, ensure_ascii=False, indent=2))
 
 
 def record_step(root: Path, n: int, role: str, output: str, upstream_sha: str) -> None:

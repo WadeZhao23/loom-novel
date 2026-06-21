@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 from .fingerprint import neutral_default
+from .fsutil import atomic_write_text
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 SAMPLE_DIR = Path(__file__).parent / "sample"  # 内置样例书《重生记忆》(2 章 + 进化过的指纹)
@@ -76,10 +77,10 @@ def init(name: str, parent: Path | None = None, genre: str | None = None) -> Pat
 
     # loom.toml 填上书名
     toml = target / "loom.toml"
-    toml.write_text(toml.read_text(encoding="utf-8").replace("__TITLE__", name), encoding="utf-8")
+    atomic_write_text(toml, toml.read_text(encoding="utf-8").replace("__TITLE__", name))
 
     # 写作指纹.md 离线落一份中性默认(不联网、不播种)
-    (target / "外置大脑" / "写作指纹.md").write_text(neutral_default(), encoding="utf-8")
+    atomic_write_text(target / "外置大脑" / "写作指纹.md", neutral_default())
 
     # 正文/.原稿 先建好(AI 原稿快照将落在这里)
     (target / "正文" / ".原稿").mkdir(parents=True, exist_ok=True)

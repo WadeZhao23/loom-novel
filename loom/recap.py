@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import Backend
+from .fsutil import atomic_write_text
 
 Progress = Callable[[dict], None]
 
@@ -67,7 +68,7 @@ def recap_chapter(project_root: Path, chapter_n: int,
     if new_card is None:           # 没找到该章规划行 / 已存在
         progress({"type": "recap_skip", "chapter": chapter_n})
         return None
-    card_path.write_text(new_card, encoding="utf-8")
+    atomic_write_text(card_path, new_card)
     progress({"type": "recap_done", "chapter": chapter_n, "path": str(card_path)})
     return card_path
 

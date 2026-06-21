@@ -282,6 +282,45 @@ _DEMO = {
 }
 
 
+def probe(provider: str) -> dict:
+    """轻量探活:命令在不在 PATH、能不能跑 --version、(codex)登没登录。
+    只跑本地命令,不发任何 LLM 请求、不消耗 token。给「检测连接」按钮用。"""
+    provider = (provider or "deepseek").lower()
+    if provider == "deepseek":
+        return {"provider": provider, "ok": True, "kind": "key",
+                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存后端」即可。"}
+    cmd = {"claude": "claude", "codex": "codex"}.get(provider)
+    if not cmd:
+        return {"provider": provider, "ok": False, "message": f"未知后端 {provider}"}
+    if shutil.which(cmd) is None:
+        hint = ("安装 Claude Code,确保 `claude` 在 PATH,并登录过一次"
+                if provider == "claude"
+                else "安装 Codex CLI:`npm i -g @openai/codex`,然后运行 `codex login`")
+        return {"provider": provider, "ok": False, "installed": False,
+                "message": f"没找到 `{cmd}` 命令", "hint": hint}
+    try:
+        out = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=8)
+        blob = (out.stdout or out.stderr).strip()
+        ver = blob.splitlines()[0] if blob else cmd
+    except Exception as e:
+        return {"provider": provider, "ok": False, "installed": True,
+                "message": f"`{cmd}` 跑不起来:{e}", "hint": "确认命令可用或重装"}
+    if provider == "codex":  # codex 能查登录态,顺手确认一下
+        try:
+            st = subprocess.run([cmd, "login", "status"], capture_output=True, text=True, timeout=8)
+            low = (st.stdout + st.stderr).lower()
+            if "not logged in" in low or ("not" in low and "log" in low and "in" in low):
+                return {"provider": provider, "ok": False, "installed": True, "version": ver,
+                        "message": "Codex 已安装,但还没登录", "hint": "运行一次 `codex login`(复用 ChatGPT 订阅,不用填 key)"}
+        except Exception:
+            pass
+        return {"provider": provider, "ok": True, "installed": True, "version": ver,
+                "message": f"已就绪 · {ver}(复用 codex 客户端登录,不用填 key)"}
+    return {"provider": provider, "ok": True, "installed": True, "version": ver,
+            "message": f"已就绪 · {ver}(复用 claude 客户端登录,不用填 key)",
+            "hint": "若从没登录过,终端先跑一次 `claude` 登录"}
+
+
 def get_backend(config: Config) -> Backend:
     if os.environ.get("LOOM_DEMO"):
         return DemoBackend(config)

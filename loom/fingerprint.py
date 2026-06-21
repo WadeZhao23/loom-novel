@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import Backend, LoomBackendError
+from .fsutil import atomic_write_text
 from .state import mark_learned, set_fingerprint_source, unmark_learned
 
 Progress = Callable[[dict], None]
@@ -90,7 +91,7 @@ def seed_from_samples(project_root: Path, samples: str, backend: Backend, progre
     )
     fp = backend.complete(_SEED_SYSTEM, user, max_chars=1800)
     path = project_root / FINGERPRINT_REL
-    path.write_text(fp.strip() + "\n", encoding="utf-8")
+    atomic_write_text(path, fp.strip() + "\n")
     set_fingerprint_source(project_root, "sample")
     progress({"type": "seed_done", "path": str(path), "source": "sample"})
     return path
@@ -100,7 +101,7 @@ def seed_from_inherit(project_root: Path, other_fingerprint: Path, progress: Pro
     if not other_fingerprint.exists():
         raise LoomBackendError(f"找不到要继承的指纹文件:{other_fingerprint}")
     path = project_root / FINGERPRINT_REL
-    path.write_text(other_fingerprint.read_text(encoding="utf-8"), encoding="utf-8")
+    atomic_write_text(path, other_fingerprint.read_text(encoding="utf-8"))
     set_fingerprint_source(project_root, "inherit")
     progress({"type": "seed_done", "path": str(path), "source": "inherit"})
     return path
@@ -180,9 +181,8 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=1800)
     # 备份 learn 前的指纹,供作者一键撤销(人兜"形对神错"——自动打分兜不住)
     hist = project_root / "外置大脑" / ".指纹历史"
-    hist.mkdir(parents=True, exist_ok=True)
-    (hist / f"第{chapter_n}章-learn前.md").write_text(old_fp, encoding="utf-8")
-    fp_path.write_text(new_fp.strip() + "\n", encoding="utf-8")
+    atomic_write_text(hist / f"第{chapter_n}章-learn前.md", old_fp)
+    atomic_write_text(fp_path, new_fp.strip() + "\n")
     mark_learned(project_root, chapter_n)
     # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
     try:
@@ -203,7 +203,7 @@ def revert_learn(project_root: Path, chapter_n: int) -> Path | None:
     if not backup.exists():
         return None
     fp_path = project_root / FINGERPRINT_REL
-    fp_path.write_text(backup.read_text(encoding="utf-8"), encoding="utf-8")
+    atomic_write_text(fp_path, backup.read_text(encoding="utf-8"))
     backup.unlink()
     unmark_learned(project_root, chapter_n)  # 状态同步:撤了就别再假显「已学」
     return fp_path

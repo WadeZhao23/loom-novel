@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .fsutil import atomic_write_text
+
 _STATE_FILE = ".loom_state.json"
 
 
@@ -23,9 +25,7 @@ def load_state(project_root: Path) -> dict:
 
 
 def save_state(project_root: Path, state: dict) -> None:
-    _path(project_root).write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(_path(project_root), json.dumps(state, ensure_ascii=False, indent=2))
 
 
 def set_fingerprint_source(project_root: Path, source: str) -> None:

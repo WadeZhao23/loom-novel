@@ -16,13 +16,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents import run_pipeline
-from .backends import LoomBackendError, get_backend
+from .backends import LoomBackendError, get_backend, probe as probe_backend
 from . import ledger
 from .config import Config, key_is_set, load_config, save_config, set_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
+from .fsutil import atomic_write_text, list_history, restore_history, snapshot_chapter
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
 from .state import load_state
@@ -56,7 +57,9 @@ def _state(root: Path) -> dict:
         "backend": {"provider": cfg.provider, "model": cfg.model, "chapter_chars": cfg.chapter_chars,
                     "key_set": key_is_set(root)},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES],
+        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
+                 + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
+                    if (root / "外置大脑" / "违禁词.md").is_file() else []),
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
         "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
         "chapters": chs,
@@ -158,9 +161,29 @@ def read_file(root: str, rel: str):
 @app.put("/api/file")
 def write_file(b: FileBody):
     p = Path(b.root) / b.rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(b.content, encoding="utf-8")
+    snapshot_chapter(b.root, b.rel)        # 覆盖正文章节前留一版历史(非章节自动跳过)
+    atomic_write_text(p, b.content)        # 原子写盘:崩溃/断电不会把正文截成空或半截
     return {"ok": True}
+
+
+@app.get("/api/history")
+def history(root: str, rel: str):
+    return {"versions": list_history(root, rel)}
+
+
+class RestoreBody(BaseModel):
+    root: str
+    rel: str
+    id: str
+
+
+@app.post("/api/history/restore")
+def history_restore(b: RestoreBody):
+    try:
+        content = restore_history(b.root, b.rel, b.id)  # 回滚前会先把当前版本也存一份
+    except (ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "content": content}
 
 
 # ----------------------------- 后端配置 -----------------------------
@@ -172,11 +195,28 @@ class ConfigBody(BaseModel):
     api_key: str | None = None
 
 
+@app.get("/api/backend/probe")
+def backend_probe(provider: str):
+    return probe_backend(provider)
+
+
+class ScanBody(BaseModel):
+    root: str
+    text: str
+
+
+@app.post("/api/sensitive/scan")
+def sensitive_scan(b: ScanBody):
+    from .sensitive import scan
+    return {"hits": scan(b.text, b.root)}
+
+
 @app.put("/api/config")
 def update_config(b: ConfigBody):
     root = Path(b.root)
     cfg = load_config(root)
-    save_config(root, Config(provider=b.provider, model=b.model, title=cfg.title, chapter_chars=b.chapter_chars))
+    save_config(root, Config(provider=b.provider, model=b.model, title=cfg.title,
+                             chapter_chars=b.chapter_chars, gate_rounds=cfg.gate_rounds))  # 别把回炉轮数静默重置回默认
     if b.api_key:
         set_env_key(root, b.api_key.strip())
     return _state(root)

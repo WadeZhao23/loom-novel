@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import Backend
+from .fsutil import atomic_write_text, snapshot_chapter
 
 Progress = Callable[[dict], None]
 
@@ -46,10 +47,11 @@ def apply_rewrite(project_root: Path, chapter_n: int, new_content: str,
     out = project_root / "正文" / f"第{chapter_n}章.md"
     snap = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
     body = new_content.rstrip() + "\n"
-    out.write_text(body, encoding="utf-8")
+    snapshot_chapter(project_root, f"正文/第{chapter_n}章.md")  # 应用重写前留一版,误替换可回滚
+    atomic_write_text(out, body)
     if snap.exists():
         s = snap.read_text(encoding="utf-8")
         # 旧段还在快照里 → 精准替换(其余手改部分仍是原 AI 版,learn 照常看见你的手改);
         # 不在(你刚手改过这段)→ 退化为整章作新 AI 基线(只丢信号,不污染)。
         s2 = s.replace(old_span, new_span, 1) if old_span and old_span in s else body
-        snap.write_text(s2, encoding="utf-8")
+        atomic_write_text(snap, s2)

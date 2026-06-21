@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .fsutil import atomic_write_text
+
 
 @dataclass
 class Config:
@@ -55,7 +57,7 @@ def set_env_key(project_root: Path, key: str) -> None:
         lines = [l for l in env.read_text(encoding="utf-8").splitlines()
                  if not l.strip().startswith("DEEPSEEK_API_KEY")]
     lines.append(f"DEEPSEEK_API_KEY={key}")
-    env.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(env, "\n".join(lines) + "\n")
 
 
 def key_is_set(project_root: Path) -> bool:
@@ -81,4 +83,4 @@ def save_config(project_root: Path, cfg: Config) -> None:
         "# 质检/去AI味 复审轮数:1=只挑硬伤写进 .审稿留痕/(默认,不自动改稿);≥2 才回炉重写;0=关闭。不打分、不硬阻断(见 ADR-0006)\n"
         f'"轮数" = {int(cfg.gate_rounds)}\n'
     )
-    (project_root / "loom.toml").write_text(content, encoding="utf-8")
+    atomic_write_text(project_root / "loom.toml", content)
