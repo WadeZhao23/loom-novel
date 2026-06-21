@@ -1,6 +1,6 @@
 """拆书:离线把一本参考书拆成【可迁移条件框架】,产物只是候选。
 
-红线(见 docs/backlog/T9-deconstruct.md):
+红线:
 - 只抽 what(套路/金手指机制/爽点循环),绝不碰 voice;产物绝不写 写作指纹.md。
 - 物理隔离:只写 外置大脑/.拆书/ 隔离草稿区,绝不直接写 canon(世界观.md/人物卡.md/正文)。
 - 不进默认流水线:没有任何 agent 的 reads: 含 skills/拆书.md,run_pipeline 不读 .拆书/。
