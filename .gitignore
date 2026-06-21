@@ -5,6 +5,11 @@ __pycache__/
 .DS_Store
 .env
 
+# 本地工具 / IDE / agent 配置(别进公开仓)
+.claude/
+.vscode/
+.idea/
+
 # PyInstaller 产物
 build/
 dist/
