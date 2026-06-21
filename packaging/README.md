@@ -21,9 +21,9 @@ bash packaging/build.sh
   由 `packaging/make_icon.py` 从品牌 weave-mark 生成(纯 Pillow),改色/换样式改脚本再跑:
   `.venv/bin/python packaging/make_icon.py`(重生成 `loom.icns` + `loom/webui/app-icon.png`)。
 - **应用名**:Info.plist 的 `CFBundleName=Loom` → 打包后菜单栏/访达显示「Loom」。
-- **dev 模式注意**:从源码 `loom-app` 跑时进程是裸 python,Dock 图标已由 `desktop.py`
-  运行时换成 Loom(用随包的 `app-icon.png`),但**菜单栏名仍是「Python」**——那由 app bundle
-  身份决定,无解;要看「Loom」就跑打包好的 `Loom.app`。
+- **dev 模式**:从源码 `loom-app` 跑时进程是裸 python,但 `desktop.py` 运行时已把 Dock 图标
+  (随包 `app-icon.png`)和**菜单栏名(改写 `CFBundleName`)都换成 Loom**;只有活动监视器 / `ps`
+  里进程名还是 `python`(解释器决定),要彻底改名就跑打包好的 `Loom.app`。
 - 换了图标后访达可能仍显示旧的(图标缓存):`touch dist/Loom.app` 或重启访达即可刷新。
 
 ## 分发(开源、零基建)
