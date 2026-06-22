@@ -58,4 +58,5 @@ cd dist && zip -r -y Loom-mac.zip Loom.app
 
 - 闪退看日志:`/tmp/loom-crash.log`(Win 在 `%TEMP%\loom-crash.log`)。
 - 想看启动报错:把 `loom.spec` 里 `console=False` 临时改 `True` 重新构建,会带个终端打印异常。
+- **Windows 双击闪退 `Unable to configure formatter 'default'`**(1.0.0 踩过):无终端构建(`console=False`)里 `sys.stdout`/`stderr` 是 `None`,启动期任何 `.isatty()`/`print`/写 std 流都会崩(uvicorn 配日志首当其冲),Mac 的 `.app` 有有效 stdout 故不触发。`loom_app.py` 入口已把 None 流兜底指向 devnull;新加的依赖若在启动期写 std 流,留意同类坑。CI(`release.yml`)打完 Windows 包会**真启动一次 exe 冒烟**,崩了就挡在 Release 前。
 - 界面/模板加载不出来:多半是数据文件没进包,检查 spec 的 `datas` 是否含 `loom/webui`、`loom/templates`。
