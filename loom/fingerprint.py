@@ -42,9 +42,15 @@ _LEARN_SYSTEM = """你在维护一个作者的【写作指纹】。我给你:①
 第二步,只从判定为【改写】的条目里提取作者的【个人文风偏好】(句式长短、用词习惯、节奏、口头禅、禁用表达);\
 【改情节】的条目、以及【纯增删】,一律忽略,绝不当文风学。也忽略单纯的"去AI味"通用改动(那是另一个功能)。
 
-把新观察并进现有指纹:合并、去重、冲突时以更近的证据为准,整体压在 40 条规则以内。\
-anchor 例句用"作者改完后保留下来的原句"补充/替换,逐字保留——但只选【体现文风、且不含具体剧情专名/信息】的句子,别把情节细节当例句。\
-输出【完整的新指纹】,沿用与现有指纹相同的小标题结构,不要解释你改了什么。"""
+把新观察【增量并入】现有指纹——这是【累积】,不是推倒重写。现有指纹是作者一路 learn 攒下来的嗓音,默认全部保留:
+- 既有规则【默认一条不删】。只在三种情况下动它:① 把这次新学到的文风偏好【追加】成新规则;\
+② 当本次证据与某条旧规则【直接矛盾】时,改写那一条(以更近的证据为准);③ 把意思明显重复的两条合并成一条。\
+除此之外,不要因为"想精简/想换个说法/这条本次没复现"就删任何既有规则。
+- anchor 例句【只增不减,逐字保留】:把这次作者改完保留下来、且体现文风又不含剧情专名/信息的原句【追加】进去;\
+既有 anchor 一字不改、不替换、不删除。
+- 规则总数即使超过 40 条,也优先合并近义项来收敛,绝不靠丢掉作者的个人偏好来压缩。
+
+输出【完整的新指纹】(含全部保留下来的旧规则与旧 anchor),沿用与现有指纹相同的小标题结构,不要解释你改了什么。"""
 
 _FORMAT_HINT = """# 写作指纹
 
@@ -220,14 +226,26 @@ def _is_rule(line: str) -> bool:
     return not any(k in s for k in ("中性默认指纹", "文风规则化描述", "喂样本", "先写一章"))
 
 
+_QUOTE_NORM = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
+
+
+def _norm_rule(line: str) -> str:
+    """比对用归一:中英文引号统一、去首尾空白。
+    免得"只把『他没说话。』的弯引号换成直引号"这种纯标点改动被误报成「删一条又加一条」,
+    在弹窗里吓到作者(以为攒下的嗓音被删了)。展示仍用原文,只比对时归一。"""
+    return line.strip().translate(_QUOTE_NORM)
+
+
 def changed_rules(old_fp: str, new_fp: str) -> dict:
     """新旧指纹的行级变化(只看真规则/anchor 行),给作者一眼看清这次 learn 学到/改了什么。"""
     old_lines, new_lines = old_fp.splitlines(), new_fp.splitlines()
-    sm = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
+    old_norm = [_norm_rule(l) for l in old_lines]  # 归一后比对,原文用于展示
+    new_norm = [_norm_rule(l) for l in new_lines]
+    sm = difflib.SequenceMatcher(None, old_norm, new_norm, autojunk=False)
     added, removed = [], []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag in ("replace", "delete"):
-            removed += [l.strip() for l in old_lines[i1:i2] if _is_rule(l)]
+            removed += [old_lines[i].strip() for i in range(i1, i2) if _is_rule(old_lines[i])]
         if tag in ("replace", "insert"):
-            added += [l.strip() for l in new_lines[j1:j2] if _is_rule(l)]
+            added += [new_lines[j].strip() for j in range(j1, j2) if _is_rule(new_lines[j])]
     return {"added": added, "removed": removed}
