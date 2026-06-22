@@ -12,7 +12,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%20|%20Windows-666)
 ![Local-first](https://img.shields.io/badge/本地优先-稿子存你电脑-1C7C56)
 
-[⬇ 下载 1.0](https://github.com/WadeZhao23/loom-novel/releases/latest) · [它是什么](#它是什么) · [跑起来](#跑起来) · [隐私](#隐私--数据去向)
+[⬇ 下载最新版](https://github.com/WadeZhao23/loom-novel/releases/latest) · [它是什么](#它是什么) · [跑起来](#跑起来) · [隐私](#隐私--数据去向)
 
 </div>
 
