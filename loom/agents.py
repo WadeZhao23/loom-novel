@@ -178,6 +178,32 @@ def _prev_chapter(project_root: Path, chapter_n: int) -> str:
     return p.read_text(encoding="utf-8").strip() if p.exists() else ""
 
 
+def _outline_path(project_root: Path, chapter_n: int) -> Path:
+    """本章细纲(大纲师的分镜)落盘处:可看可改。一旦存在,大纲师就读它(WYSIWYG)——
+    你改了它,重写本章就按你的来;想要新方案,清空它或点「重新生成细纲」。"""
+    return project_root / "正文" / ".细纲" / f"第{chapter_n}章.md"
+
+
+def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
+    a = load_agent(project_root, role)
+    rels = list(a.reads) + (a.reads_first_chapter if chapter_n == 1 else [])
+    return a, _read_files(project_root, rels, _noop)
+
+
+def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
+                       prev: str, workspace: list[tuple[str, str]]) -> str:
+    parts = [f"# 你要写的是第 {chapter_n} 章。"]
+    if knowledge:
+        parts.append("## 你要遵循的设定/方法论\n" + knowledge)
+    if prev and role in ("大纲师", "写手"):
+        parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
+    if workspace:
+        ctx = "\n\n".join(f"### {label}\n{text}" for label, text in workspace)
+        parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
+    parts.append(f"## 你的任务\n产出【{agent.produces}】。只输出这一项,不要解释你在做什么。")
+    return "\n\n".join(parts)
+
+
 def run_pipeline(
     project_root: Path,
     chapter_n: int,
@@ -198,16 +224,11 @@ def run_pipeline(
     progress({"type": "pipeline_start", "chapter": chapter_n, "roles": PIPELINE})
     prev = _prev_chapter(project_root, chapter_n)
 
-    def _knowledge_for(role: str) -> tuple[Agent, str]:
-        a = load_agent(project_root, role)
-        rels = list(a.reads) + (a.reads_first_chapter if chapter_n == 1 else [])
-        return a, _read_files(project_root, rels, _noop)
-
     def _sig(knowledge: str, ws: list[tuple[str, str]]) -> str:
         return ledger.sha(knowledge + "\x1f" + "\n".join(t for _, t in ws) + "\x1f" + prev)
 
     def _upstream_of(role: str, ws: list[tuple[str, str]]) -> str:
-        _, knowledge = _knowledge_for(role)
+        _, knowledge = _knowledge_for(project_root, chapter_n, role)
         return _sig(knowledge, ws)
 
     if resume:
@@ -218,25 +239,25 @@ def run_pipeline(
         start_idx, workspace = 0, []
 
     for role in PIPELINE[start_idx:]:
-        agent, knowledge = _knowledge_for(role)
+        agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress({"type": "agent_start", "role": role})
         up_sha = _sig(knowledge, workspace)  # 记录入此工序时的上游签名(供下次续跑比对)
 
-        parts = [f"# 你要写的是第 {chapter_n} 章。"]
-        if knowledge:
-            parts.append("## 你要遵循的设定/方法论\n" + knowledge)
-        if prev and role in ("大纲师", "写手"):
-            parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
-        if workspace:
-            ctx = "\n\n".join(f"### {label}\n{text}" for label, text in workspace)
-            parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
-        parts.append(f"## 你的任务\n产出【{agent.produces}】。只输出这一项,不要解释你在做什么。")
-
         max_chars = _SHORT.get(role, config.chapter_chars)
-        # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
-        chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
-                    else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
-        output = backend.complete(agent.system_prompt, "\n\n".join(parts), max_chars=max_chars, on_chunk=chunk_cb)
+        outline_path = _outline_path(project_root, chapter_n) if role == "大纲师" else None
+        if outline_path and outline_path.is_file() and outline_path.read_text(encoding="utf-8").strip():
+            # 已有细纲(多半你手改过)→ 直接用它,不再调大纲师;改它/清空它即重新生成(WYSIWYG)。
+            output = outline_path.read_text(encoding="utf-8").strip()
+            progress({"type": "agent_chunk", "role": role, "delta": output})
+            progress({"type": "info", "message": f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"})
+        else:
+            user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace)
+            # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
+            chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
+                        else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
+            output = backend.complete(agent.system_prompt, user_prompt, max_chars=max_chars, on_chunk=chunk_cb)
+            if outline_path:  # 大纲师首次生成 → 落一份可看可改的细纲,之后就读这份
+                atomic_write_text(outline_path, output.strip() + "\n")
         if role == "编辑":
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:
@@ -297,3 +318,29 @@ def _save_chapter(project_root: Path, chapter_n: int, final: str) -> Path:
     atomic_write_text(out, final + "\n")
     atomic_write_text(snap, final + "\n")  # AI 原稿快照,只给 learn 做 diff
     return out
+
+
+def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
+                  config: Config, progress: Progress = _noop) -> str:
+    """重新生成第 N 章细纲:跑 设定师→大纲师,覆盖写 正文/.细纲/第N章.md,返回细纲文本。
+
+    只刷细纲、不碰正文——用于"我想要个新的分镜方案"。之后重写本章会按这份新细纲来。
+    设定师此刻会读到最新的世界观/人物卡/卡章纲,所以改了上游再「重新生成细纲」就能吃到。
+    """
+    prev = _prev_chapter(project_root, chapter_n)
+    workspace: list[tuple[str, str]] = []
+    outline = ""
+    for role in ("设定师", "大纲师"):
+        agent, knowledge = _knowledge_for(project_root, chapter_n, role)
+        progress({"type": "agent_start", "role": role})
+        user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace)
+        out = backend.complete(
+            agent.system_prompt, user_prompt, max_chars=_SHORT.get(role, config.chapter_chars),
+            on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),
+        )
+        workspace.append((agent.produces, out))
+        progress({"type": "agent_done", "role": role, "produces": agent.produces})
+        outline = out
+    atomic_write_text(_outline_path(project_root, chapter_n), outline.strip() + "\n")
+    progress({"type": "outline_done", "chapter": chapter_n})
+    return outline.strip()

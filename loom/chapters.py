@@ -21,6 +21,7 @@ _ARTIFACTS = [
     ("正文", "第{n}章.md", False),
     ("正文/.原稿", "第{n}章.md", False),
     ("正文/.原稿", "第{n}章.ledger.json", False),
+    ("正文/.细纲", "第{n}章.md", False),
     ("正文/.历史", "第{n}章", True),
     (".审稿留痕", "第{n}章.md", False),
     ("外置大脑/.指纹历史", "第{n}章-learn前.md", False),

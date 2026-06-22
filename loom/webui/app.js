@@ -24,6 +24,7 @@ const IC = {
   search: "icon-search",      rewrite: "icon-scissors",         learn: "icon-trend-up",
   arrowUp: "icon-arrow-up",   arrowDown: "icon-arrow-down",      close: "icon-close",
   pin: "icon-pin",            edit: "icon-edit",
+  outline: "icon-doc",        // 本章细纲(分镜)
   check: "icon-check",        cross: "icon-cross",
   redo: "icon-refresh",       warn: "icon-warning",
   play: "icon-play",          skip: "icon-skip",
@@ -146,6 +147,8 @@ function bind() {
   $("btn-history").onclick = openHistory;
   $("history-close").onclick = () => $("history-overlay").classList.add("hidden");
   $("btn-sensitive").onclick = scanSensitive;
+  $("btn-outline").onclick = () => CUR && CUR.chapter != null && openOutline(CUR.chapter);
+  $("btn-outline-regen").onclick = regenOutline;
   $("btn-rewrite").onclick = openRewrite;
   $("rewrite-cancel").onclick = () => $("rewrite-overlay").classList.add("hidden");
   $("rewrite-go").onclick = doRewrite;
@@ -304,7 +307,7 @@ function render() {
     actions.appendChild(act("arrowUp", "上移一章", () => moveChapter(c.n, "up")));
     actions.appendChild(act("arrowDown", "下移一章", () => moveChapter(c.n, "down")));
     actions.appendChild(act("plus", `在第${c.n}章后插入空章`, () => insertAfter(c.n)));
-    actions.appendChild(act("redo", `重写本章(AI 覆盖第${c.n}章)`, () => confirmRewriteChapter(c.n)));
+    actions.appendChild(act("redo", `重写本章正文(按当前细纲覆盖第${c.n}章;想换结构先改/重新生成细纲)`, () => confirmRewriteChapter(c.n)));
     actions.appendChild(act("trash", `删除第${c.n}章`, () => deleteChapter(c.n)));
     li.appendChild(label); li.appendChild(actions);
     ch.appendChild(li);
@@ -523,6 +526,8 @@ async function openFile(rel, editable, chapter, li) {
   $("btn-sensitive").classList.toggle("hidden", chapter == null);
   $("btn-learn").classList.toggle("hidden", chapter == null);
   $("btn-rewrite").classList.toggle("hidden", chapter == null);
+  $("btn-outline").classList.toggle("hidden", chapter == null);  // 正文章节才给「本章细纲」入口
+  $("btn-outline-regen").classList.add("hidden");                 // 默认藏,只在看细纲时由 openOutline 亮出
   $("status-note").textContent = chapter != null
     ? "改完会自动保存;再点【学这章的手改】把你的风格喂给指纹。" : "";
   updateWordCount();
@@ -733,6 +738,39 @@ async function revertLearn() {
   } catch (e) { toast(e.message, true); }
 }
 
+// ---------- 本章细纲(看 / 改 / 重新生成) ----------
+async function openOutline(n) {
+  const rel = `正文/.细纲/第${n}章.md`;
+  // 旧章 / 还没生成过 → 细纲文件不存在;问一下要不要现在生成
+  try {
+    await jreq("GET", `/api/file?root=${encodeURIComponent(DATA.root)}&rel=${encodeURIComponent(rel)}`);
+  } catch (e) {
+    if (!confirm(`第${n}章还没有细纲(可能是旧章)。现在用「设定师→大纲师」生成一份?`)) return;
+    if (await callRegen(n) == null) return;
+  }
+  await openFile(rel, true, null, null);   // 当普通可编辑文件打开(非正文章节,不出 learn/重写选中等)
+  CUR.outline = n;
+  $("editor-path").textContent = rel;
+  $("status-note").textContent = `这是第${n}章的细纲(分镜)。改完它,重写本章(覆盖)就按你的细纲来;想要新方案点「重新生成细纲」。`;
+  $("btn-outline-regen").classList.remove("hidden");
+}
+async function regenOutline() {
+  if (!CUR || CUR.outline == null) return;
+  if (!confirm(`重新生成第${CUR.outline}章细纲?当前细纲(含你的手改)会被覆盖。`)) return;
+  const text = await callRegen(CUR.outline);
+  if (text == null) return;
+  $("editor").value = text; clearDirty(); toast("细纲已重新生成");
+}
+async function callRegen(n) {
+  const btn = $("btn-outline-regen"); const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "生成中…(设定师→大纲师)";
+  try {
+    const d = await jreq("POST", "/api/outline/regen", { root: DATA.root, chapter: n });
+    return d.outline;
+  } catch (e) { toast(e.message, true); return null; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
 // ---------- 局部重写 ----------
 function openRewrite() {
   if (!CUR || CUR.chapter == null) return;
@@ -801,7 +839,7 @@ async function chapterOp(url, body) {
     const d = await jreq("POST", url, body);
     // 章号变了:收掉当前打开的章节视图,避免指向错号
     CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
-    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite"].forEach((id) => $(id).classList.add("hidden"));
+    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-outline", "btn-outline-regen"].forEach((id) => $(id).classList.add("hidden"));
     document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
     updateWordCount();
     if (d.state) { DATA = d.state; render(); } else { await refresh(); }
