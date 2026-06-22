@@ -111,3 +111,54 @@ def _append_recap(card: str, n: int, block: str) -> str | None:
             lines.insert(j, block)
             return "\n".join(lines) + ("\n" if card.endswith("\n") else "")
     return None  # 卡章纲里没有这章的规划行
+
+
+def _recap_span(lines: list[str], n: int) -> tuple[int, int] | None:
+    """定位第 N 章 [AI回顾] 自动子块的行区间 [start, end);没有就 None。
+
+    子块 = `  - [AI回顾]…` 那一行 + 紧随其后【缩进更深】的伏笔子行;遇到空行、
+    同级兄弟项或下一条顶格章行即止——只圈 loom 自己写的那块,不碰作者手写的规划行。
+    """
+    for i, ln in enumerate(lines):
+        if not _ch_line(n).match(ln):
+            continue
+        j = i + 1
+        while j < len(lines):
+            cur = lines[j]
+            if cur.strip() and not cur.startswith((" ", "\t")):
+                return None                      # 到下一条顶格行仍没 [AI回顾]
+            if _RECAP_MARK in cur:
+                base = len(cur) - len(cur.lstrip())
+                k = j + 1
+                while k < len(lines):
+                    nxt = lines[k]
+                    if nxt.strip() and (len(nxt) - len(nxt.lstrip())) > base:
+                        k += 1                   # 该块的伏笔子行(缩进更深),一起删
+                    else:
+                        break
+                return j, k
+            j += 1
+        return None
+    return None
+
+
+def strip_recap(project_root: Path, chapter_n: int) -> str | None:
+    """删掉第 N 章在卡章纲下的 [AI回顾] 自动子块(只删 loom 自己写的那块,
+    不碰作者手写的顶格规划行)。返回被删文本(供回收站留底),没有则 None。
+
+    给删章用:章一删除,它那条 [AI回顾] 就成了悬空的陈旧记忆——留着会让"同章号
+    重新生成后再 learn"因 write-once 跳过补写,卡章纲里显示的还是【已删旧章】的回顾。
+    """
+    card_path = project_root / CARD_REL
+    if not card_path.exists():
+        return None
+    raw = card_path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    span = _recap_span(lines, chapter_n)
+    if span is None:
+        return None
+    s, e = span
+    removed = "\n".join(lines[s:e])
+    new_lines = lines[:s] + lines[e:]
+    atomic_write_text(card_path, "\n".join(new_lines) + ("\n" if raw.endswith("\n") else ""))
+    return removed

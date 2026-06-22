@@ -196,6 +196,12 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         recap_chapter(project_root, chapter_n, backend, progress)
     except LoomBackendError as e:
         progress({"type": "warn", "message": f"写后摘要没补成(不影响指纹):{e}"})
+    # 外置大脑随章生长:把这章新设定/新人物追加进世界观/人物卡(同为附赠,绝不阻断 learn)
+    try:
+        from .enrich import enrich_chapter
+        enrich_chapter(project_root, chapter_n, backend, progress)
+    except Exception as e:  # 附赠功能,任何失败都不能拖累已落盘的指纹
+        progress({"type": "warn", "message": f"外置大脑补充没补成(不影响指纹):{e}"})
     progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n})
     return fp_path
 

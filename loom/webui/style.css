@@ -457,6 +457,9 @@ body.focus-mode .focus-exit { display: block; }
 .learn-changes .rem { background: var(--danger-tint); color: var(--danger); text-decoration: line-through; }
 .learn-changes .sub-head { margin: var(--space-3) 0 6px; font-family: var(--font-ui);
   font-size: var(--fs-xs); font-weight: 700; color: var(--text-soft); }
+.learn-changes .learn-warn { background: var(--danger-tint); color: var(--danger);
+  border: 1px solid var(--danger); border-radius: var(--radius-sm); padding: 8px 11px;
+  margin-bottom: var(--space-3); font-family: var(--font-ui); font-size: var(--fs-sm); line-height: 1.6; }
 .recap-block { background: var(--bg-sunken); border: 1px solid var(--line); border-radius: var(--radius-sm);
   padding: var(--space-3); font-family: var(--font-read); font-size: var(--fs-sm); line-height: 1.7;
   white-space: pre-wrap; color: var(--text-soft); }

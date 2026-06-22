@@ -312,10 +312,30 @@ def learn(b: ChapterBody):
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     new_fp = fp_file.read_text(encoding="utf-8")
+    from .enrich import extract_supplement
+    world_p = root / "外置大脑" / "世界观.md"
+    chars_p = root / "外置大脑" / "人物卡.md"
+    world_supp = extract_supplement(world_p.read_text(encoding="utf-8"), b.chapter) if world_p.exists() else ""
+    chars_supp = extract_supplement(chars_p.read_text(encoding="utf-8"), b.chapter) if chars_p.exists() else ""
     return {"ok": True,
             "fingerprint": new_fp,
             "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8"),
-            "changes": changed_rules(old_fp, new_fp)}
+            "changes": changed_rules(old_fp, new_fp),
+            "世界观补充": world_supp,
+            "人物卡补充": chars_supp}
+
+
+@app.post("/api/outline/regen")
+def outline_regen(b: ChapterBody):
+    """重新生成第 N 章细纲(设定师→大纲师),覆盖 正文/.细纲/第N章.md 并返回。不碰正文。"""
+    from .agents import regen_outline
+    root = Path(b.root)
+    cfg = load_config(root)
+    try:
+        text = regen_outline(root, b.chapter, get_backend(cfg), cfg)
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "outline": text}
 
 
 @app.post("/api/learn/revert")

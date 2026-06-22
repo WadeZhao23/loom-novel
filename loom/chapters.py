@@ -78,6 +78,17 @@ def delete_chapter(root: Path | str, n: int) -> dict:
         src = root / d / tmpl.format(n=n)
         if src.exists():
             _move(src, trash / d / src.name)
+    # 1.5) loom 自动写进外置大脑的、属于这章的块也清掉(只删 loom 写的,留作者手写内容):
+    #      卡章纲的 [AI回顾] + 世界观/人物卡的 [AI补充]。否则同号重新生成后 learn 会被
+    #      write-once 挡住、外置大脑里留着的还是【已删旧章】的回顾/设定。都留底到回收站(防丢稿)。
+    from .recap import strip_recap
+    from .enrich import strip_supplement
+    removed_recap = strip_recap(root, n)
+    if removed_recap:
+        atomic_write_text(trash / "外置大脑" / f"卡章纲-第{n}章-AI回顾.md", removed_recap)
+    removed_supp = strip_supplement(root, n)
+    if removed_supp:
+        atomic_write_text(trash / "外置大脑" / f"第{n}章-AI补充.md", removed_supp)
     state.unmark_learned(root, n)                   # 2) learned 先摘掉这章
     _renumber(root, {k: k - 1 for k in nums if k > n})  # 3) 高于 n 的整体下移 1
     return {"ok": True, "deleted": n, "trash": str(trash), "note": SYNC_NOTE}

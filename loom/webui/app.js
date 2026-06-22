@@ -667,7 +667,8 @@ async function learn(n) {
     _lastLearnChapter = n;
     toast(`第${n}章手改已学,写后摘要已补进卡章纲`);
     await refresh();
-    showLearnChanges(d.changes || { added: [], removed: [] }, extractRecap(d["卡章纲"] || "", n));
+    showLearnChanges(d.changes || { added: [], removed: [] }, extractRecap(d["卡章纲"] || "", n),
+      { world: d["世界观补充"] || "", chars: d["人物卡补充"] || "" });
   } catch (e) { toast(e.message, true); }
 }
 function extractRecap(kataGang, n) {
@@ -686,18 +687,39 @@ function extractRecap(kataGang, n) {
   const k = joined.indexOf("[AI回顾]");
   return k >= 0 ? joined.slice(k).replace(/^\s+/, "").replace(/\n\s+/g, "\n").trim() : "";
 }
-function showLearnChanges(changes, recap) {
+function showLearnChanges(changes, recap, supp) {
   const box = $("learn-changes"); box.innerHTML = "";
   const add = changes.added || [], rem = changes.removed || [];
   if (!add.length && !rem.length) {
     box.innerHTML = '<div class="hint">这次没有明显的规则变化。</div>';
   } else {
-    rem.forEach((l) => { const e = document.createElement("div"); e.className = "chg rem"; e.textContent = "− " + l; box.appendChild(e); });
-    add.forEach((l) => { const e = document.createElement("div"); e.className = "chg add"; e.textContent = "+ " + l; box.appendChild(e); });
+    if (rem.length) {
+      const w = document.createElement("div");
+      w.className = "learn-warn";
+      w.innerHTML = `⚠️ 这次从你的写作指纹里 <b>删掉了 ${rem.length} 条</b>(下面红底划线的)。` +
+        `若那是你之前 learn 攒下来的嗓音、不该被抹掉,点下面 <b>「撤销这次 learn」</b> 一键还原。`;
+      box.appendChild(w);
+      const h = document.createElement("div"); h.className = "sub-head"; h.textContent = "删掉的(原有规则被抹掉)"; box.appendChild(h);
+      rem.forEach((l) => { const e = document.createElement("div"); e.className = "chg rem"; e.textContent = "− " + l; box.appendChild(e); });
+    }
+    if (add.length) {
+      const h = document.createElement("div"); h.className = "sub-head"; h.textContent = "新增的(更像你)"; box.appendChild(h);
+      add.forEach((l) => { const e = document.createElement("div"); e.className = "chg add"; e.textContent = "+ " + l; box.appendChild(e); });
+    }
   }
+  // 有删除时,撤掉「保留」的金色强调——让红色「撤销」成为唯一显眼按钮,
+  // 别让作者顺手点金色「保留」把攒下来的嗓音丢了。
+  $("learn-keep").classList.toggle("primary", rem.length === 0);
   const wrap = $("learn-recap-wrap");
   if (recap) { $("learn-recap").textContent = recap; wrap.classList.remove("hidden"); }
   else wrap.classList.add("hidden");
+  // 外置大脑随章补充(世界观/人物卡):有就展示,让作者看见 loom 动了哪些设定(只追加、可改可删)
+  const sw = $("learn-supp-wrap"); const sup = supp || {};
+  const segs = [];
+  if (sup.world) segs.push("【世界观】\n" + sup.world);
+  if (sup.chars) segs.push("【人物卡】\n" + sup.chars);
+  if (segs.length) { $("learn-supp").textContent = segs.join("\n\n"); sw.classList.remove("hidden"); }
+  else sw.classList.add("hidden");
   $("learn-overlay").classList.remove("hidden");
 }
 async function revertLearn() {

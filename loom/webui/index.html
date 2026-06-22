@@ -199,11 +199,15 @@
   <div id="learn-overlay" class="overlay hidden">
     <div class="run-card">
       <h3>这次 learn 学到了什么</h3>
-      <p class="hint">下面是写作指纹这次的变化(金=更像你)。若有"形对神错"——句式像你、但内容是你不会写的(比如把剧情/议论当文风),撤销它;或保留后去编辑器手删那一条。</p>
+      <p class="hint">下面是写作指纹这次的变化:<b>金底=新增</b>(更像你);<b>红底划线=删掉</b>(这条原来在你的指纹里、这次被抹掉了)。若有"形对神错",或删掉的是你不想丢的嗓音,点「撤销这次 learn」一键还原。</p>
       <div id="learn-changes" class="learn-changes"></div>
       <div id="learn-recap-wrap" class="hidden">
         <div class="sub-head"><span class="ico" data-ico="pin"></span> 已补进卡章纲的写后摘要</div>
         <div id="learn-recap" class="recap-block"></div>
+      </div>
+      <div id="learn-supp-wrap" class="hidden">
+        <div class="sub-head"><span class="ico" data-ico="brain"></span> 已随章补进外置大脑(追加在文件末尾「AI 补充」区,可改可删)</div>
+        <div id="learn-supp" class="recap-block"></div>
       </div>
       <div class="row-end">
         <button id="learn-revert" class="danger">撤销这次 learn</button>
