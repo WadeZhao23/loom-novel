@@ -17,6 +17,14 @@ def main() -> None:
         import tempfile
         from pathlib import Path
 
+        # Windows 无终端(--noconsole)构建里 sys.stdout/stderr 是 None;
+        # 任何 .isatty()/.write() 都会炸 —— uvicorn 配置日志的 formatter 'default'
+        # 首当其冲(Windows 打不开就是这个)。指到 devnull,给所有库一个能安全写入的空流。
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
         log = Path(tempfile.gettempdir()) / "loom-crash.log"
 
         def _hook(exc_type, exc, tb):
