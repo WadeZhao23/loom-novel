@@ -44,6 +44,27 @@ jobs:
           pip install -e ".[dist]"
       - name: PyInstaller 打包(.exe 文件夹)
         run: pyinstaller --noconfirm --clean packaging/loom.spec
+      - name: 冒烟 —— 真启动一次 exe,确认不闪退
+        shell: pwsh
+        # 无终端构建里 sys.stdout=None,正是 1.0.0 在 Windows 双击即崩的根因。
+        # 这里走 LOOM_NO_WINDOW 兜底(只起服务、不开 webview 窗口),启动十几秒,
+        # 看进程是否还活着、有没有写 crash log。崩了就让这棒失败,绝不裸发。
+        run: |
+          $env:LOOM_NO_WINDOW = "1"
+          $crash = Join-Path $env:TEMP "loom-crash.log"
+          if (Test-Path $crash) { Remove-Item $crash }
+          $p = Start-Process -FilePath "dist/Loom/Loom.exe" -PassThru
+          Start-Sleep -Seconds 12
+          if (Test-Path $crash) {
+            Write-Host "== crash log =="; Get-Content $crash
+            if (-not $p.HasExited) { $p.Kill() }
+            exit 1
+          }
+          if ($p.HasExited) {
+            Write-Host "exe 提前退出,exit code = $($p.ExitCode)"; exit 1
+          }
+          Write-Host "OK:启动 12s 未崩、无 crash log"
+          $p.Kill()
       - name: 压成 zip
         shell: pwsh
         run: Compress-Archive -Path dist/Loom -DestinationPath Loom-win.zip
