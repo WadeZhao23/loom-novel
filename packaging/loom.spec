@@ -79,7 +79,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Loom",
             "CFBundleDisplayName": "Loom · 织布机",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleShortVersionString": "1.0.1",
             "NSHighResolutionCapable": True,
         },
     )

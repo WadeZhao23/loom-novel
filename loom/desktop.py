@@ -81,7 +81,11 @@ def run() -> None:
     """原生窗口。"""
     _set_macos_app_name("Loom")  # 菜单栏首项显示 Loom 而非 Python(须在建菜单前)
     port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # log_config=None:别让 uvicorn 跑 dictConfig 去配彩色 formatter(内嵌服务器用不上,
+    # 且无终端构建里 sys.stdout=None 会让它崩在 formatter 'default')。
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
+    )
     threading.Thread(target=server.run, daemon=True).start()
     _wait_up(port)
 
@@ -103,7 +107,7 @@ def serve() -> None:
     port = _free_port()
     threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
     print(f"Loom 跑在 http://127.0.0.1:{port}  (Ctrl-C 退出)")
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
 
 
 if __name__ == "__main__":
