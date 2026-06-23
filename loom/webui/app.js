@@ -856,6 +856,8 @@ function moveChapter(n, direction) { chapterOp("/api/chapter/move", { root: DATA
 // ---------- write(流式) ----------
 let _wroteChapter = null;
 async function writeChapter(n, force) {
+  // 写章 = 顺手保存后端:不必先点「保存后端」,点写章就把当前后端表单(provider/model/字数/key)落盘
+  try { await persistBackend(true); } catch (e) { toast("保存后端失败:" + e.message, true); return; }
   // 首跑防空转:deepseek 没填 key 就别进面板转半天再报错,直接提示 + 高亮 key 框
   if (DATA && DATA.backend && DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
     toast("先在顶栏填 DeepSeek API Key(或把后端切到 Claude / Codex 免 key)再开写", true);
@@ -983,17 +985,19 @@ async function closeRun() {
 }
 
 // ---------- 后端配置 ----------
-async function saveBackend() {
+async function persistBackend(silent) {
+  // 把顶栏后端表单(provider/model/字数/key)落盘;写章前会静默调一次,免得用户没点「保存后端」就开写
   const key = $("api-key").value.trim();
   DATA = await jreq("PUT", "/api/config", {
     root: DATA.root, provider: $("provider").value, model: $("model").value,
     chapter_chars: parseInt($("chapter-chars").value) || 800,
     api_key: key || null,
   });
-  toast(key ? "后端 + API Key 已保存" : "后端已保存");
+  if (!silent) toast(key ? "后端 + API Key 已保存" : "后端已保存");
   render();
   if (CUR) updateWordCount();
 }
+async function saveBackend() { await persistBackend(false); }
 
 // deepseek 用 key → 显示 key 框;claude/codex 复用客户端登录 → 隐藏 key 框、给「检测连接」按钮
 function applyProviderUI(provider) {
