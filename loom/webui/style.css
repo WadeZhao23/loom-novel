@@ -373,6 +373,41 @@ button:disabled { opacity: .55; cursor: default; }
 #editor:focus { outline: none; border-color: var(--line); box-shadow: var(--shadow-2); }
 #editor[readonly] { background: var(--bg-sunken); }
 
+/* Markdown 渲染预览:给普通用户看渲染版,而不是一脸 # 和 - */
+.md-preview {
+  width: 100%; max-width: 38em; align-self: flex-start; margin: 0 auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-1); padding: var(--space-7) calc(var(--space-7) - 8px);
+  font-family: var(--font-read); font-size: var(--fs-read); line-height: 1.85; color: var(--text);
+  overflow-wrap: break-word;
+}
+.md-preview h1, .md-preview h2, .md-preview h3,
+.md-preview h4, .md-preview h5, .md-preview h6 {
+  font-family: var(--font-ui); color: var(--text); line-height: 1.35;
+  margin: 1.3em 0 .5em; font-weight: 700; }
+.md-preview h1 { font-size: 1.5em; }
+.md-preview h2 { font-size: 1.25em; padding-bottom: .25em; border-bottom: 1px solid var(--line-soft); }
+.md-preview h3 { font-size: 1.1em; color: var(--gold-ink); }
+.md-preview h4, .md-preview h5, .md-preview h6 { font-size: 1em; color: var(--text-soft); }
+.md-preview > :first-child { margin-top: 0; }
+.md-preview p { margin: .6em 0; }
+.md-preview ul, .md-preview ol { margin: .5em 0; padding-left: 1.4em; }
+.md-preview li { margin: .25em 0; }
+.md-preview blockquote {
+  margin: .7em 0; padding: .4em .9em; color: var(--text-soft);
+  border-left: 3px solid var(--gold-line); background: var(--bg-sunken); border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
+.md-preview blockquote p { margin: 0; }
+.md-preview code {
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: .9em;
+  background: var(--bg-sunken); padding: .1em .35em; border-radius: var(--radius-xs); }
+.md-preview hr { border: none; border-top: 1px solid var(--line); margin: 1.2em 0; }
+.md-preview strong { color: var(--text); font-weight: 700; }
+
+/* 生成初稿:引导弹窗里的一句话设定输入 */
+.draft-idea {
+  width: 100%; min-height: 64px; margin-top: var(--space-3); resize: vertical;
+  font-family: var(--font-read); font-size: var(--fs-sm); line-height: 1.6; }
+
 /* 章内搜索条 */
 .search-bar { display: none; align-items: center; gap: var(--space-2);
   padding: var(--space-2) var(--space-5); border-bottom: 1px solid var(--line); background: var(--surface); }

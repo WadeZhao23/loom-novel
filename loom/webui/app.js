@@ -147,6 +147,7 @@ function bind() {
   $("btn-history").onclick = openHistory;
   $("history-close").onclick = () => $("history-overlay").classList.add("hidden");
   $("btn-sensitive").onclick = scanSensitive;
+  $("btn-preview").onclick = () => CUR && setPreview(!CUR.preview);
   $("btn-outline").onclick = () => CUR && CUR.chapter != null && openOutline(CUR.chapter);
   $("btn-outline-regen").onclick = regenOutline;
   $("btn-rewrite").onclick = openRewrite;
@@ -448,7 +449,8 @@ function maybeBrainGuide(rel, content) {
   const empty = !content || !content.trim();
   const isFp = rel.endsWith("写作指纹.md");
   const neutralFp = isFp && /中性默认|还没.{0,4}懂你|还没学到你/.test(content);
-  if (!empty && !neutralFp) return;
+  const isTemplate = !isFp && /占位示例|换成你自己的/.test(content);  // 还是出厂占位模板,也当「没填」引导
+  if (!empty && !neutralFp && !isTemplate) return;
   const name = rel.split("/").pop().replace(/\.md$/, "");
   const desc = BRAIN_GUIDE[name] || "外置大脑的一部分,Agent 写作时会读它。";
   if (neutralFp) {
@@ -460,14 +462,38 @@ function maybeBrainGuide(rel, content) {
       ghost: { label: "先不管" },
     });
   } else {
+    const draftable = ["世界观", "人物卡", "卡章纲"].includes(name);
     showGuide({
-      title: `${name} · 还是空的`,
+      title: `${name} · ${empty ? "还是空的" : "还是占位模板"}`,
       bodyHtml: `<p class="guide-lead">${escHtml(desc)}</p>` +
-        `<p class="hint">这是你来填的「外置大脑」。直接在编辑器里写就行,写得越具体,Agent 越不跑偏。</p>`,
-      primary: { label: "开始填写", fn: () => $("editor").focus() },
-      ghost: { label: "知道了" },
+        (draftable
+          ? `<p class="hint">不想从空白开始?写一句你的故事设定,让 AI 起草<b>世界观 / 人物卡 / 卡章纲</b>三件套,你再改成自己的。</p>` +
+            `<textarea id="draft-idea" class="draft-idea" placeholder="一句话设定(可留空,按书名+题材发挥)。例:灵气复苏的都市,外卖小哥觉醒了能看见别人头顶任务的金手指。"></textarea>`
+          : `<p class="hint">这是你来填的「外置大脑」。直接在编辑器里写就行,写得越具体,Agent 越不跑偏。</p>`),
+      primary: draftable
+        ? { label: "✨ 生成初稿(AI 起草,你再改)", fn: () => draftBrain(($("draft-idea") || {}).value || "") }
+        : { label: "开始填写", fn: () => $("editor").focus() },
+      ghost: { label: draftable ? "我自己填" : "知道了", fn: () => $("editor").focus() },
     });
   }
+}
+async function draftBrain(idea) {
+  // 起草也要后端就绪:顺手保存后端(同写章),deepseek 仍缺 key 才拦
+  try { await persistBackend(true); } catch (e) { toast("先配置好后端:" + e.message, true); return; }
+  if (DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
+    toast("先填 DeepSeek key(或把后端切到 Claude / Codex 免 key)再生成初稿", true);
+    const k = $("api-key"); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); }
+    return;
+  }
+  toast("AI 正在起草 世界观 / 人物卡 / 卡章纲…十几秒,稍候");
+  try {
+    const d = await jreq("POST", "/api/brain/draft", { root: DATA.root, idea: idea || "" });
+    if (d.state) DATA = d.state;
+    render();
+    const w = d.written || [], s = d.skipped || [];
+    toast(`已起草:${w.join(" / ") || "（无）"}${s.length ? `;${s.join("/")}你已填,没动` : ""} —— 打开看看,改成你的`);
+    if (w.includes("世界观")) openFile("外置大脑/世界观.md", true, null);
+  } catch (e) { toast(e.message, true); }
 }
 
 // ---------- 违禁词自检(本地粗筛,只提示不阻断) ----------
@@ -509,6 +535,39 @@ function fillList(id, items, editable) {
   });
 }
 
+// ---------- Markdown 渲染(给普通用户看渲染版,不是一脸 # 和 -) ----------
+function mdEsc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function mdInline(s) {
+  return mdEsc(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+function mdToHtml(md) {
+  const lines = (md || "").replace(/\r\n/g, "\n").split("\n");
+  let html = "", i = 0, inUl = false, inOl = false;
+  const close = () => { if (inUl) { html += "</ul>"; inUl = false; } if (inOl) { html += "</ol>"; inOl = false; } };
+  while (i < lines.length) {
+    const raw = lines[i], l = raw.trim();
+    let m;
+    if (!l) { close(); i++; continue; }
+    if (m = l.match(/^(#{1,6})\s+(.*)$/)) { close(); const lv = m[1].length; html += `<h${lv}>${mdInline(m[2])}</h${lv}>`; i++; continue; }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(l)) { close(); html += "<hr>"; i++; continue; }
+    if (m = l.match(/^>\s?(.*)$/)) { close(); const q = []; while (i < lines.length && (m = lines[i].trim().match(/^>\s?(.*)$/))) { q.push(mdInline(m[1])); i++; } html += `<blockquote>${q.join("<br>")}</blockquote>`; continue; }
+    if (m = l.match(/^[-*+]\s+(.*)$/)) { if (!inUl) { close(); html += "<ul>"; inUl = true; } const ind = raw.length - raw.trimStart().length; html += `<li${ind >= 2 ? ` style="margin-left:${Math.min(ind, 12) * 7}px"` : ""}>${mdInline(m[1])}</li>`; i++; continue; }
+    if (m = l.match(/^\d+[.)]\s+(.*)$/)) { if (!inOl) { close(); html += "<ol>"; inOl = true; } html += `<li>${mdInline(m[1])}</li>`; i++; continue; }
+    close(); const p = []; while (i < lines.length) { const t = lines[i].trim(); if (!t || /^(#{1,6}\s|>|[-*+]\s|\d+[.)]\s|-{3,}$|\*{3,}$|_{3,}$)/.test(t)) break; p.push(mdInline(t)); i++; } html += `<p>${p.join("<br>")}</p>`;
+  }
+  close();
+  return html;
+}
+function setPreview(on) {
+  if (!CUR) return;
+  CUR.preview = on;
+  const ed = $("editor"), pv = $("preview");
+  if (on) { pv.innerHTML = mdToHtml(ed.value); pv.classList.remove("hidden"); ed.classList.add("hidden"); $("btn-preview").innerHTML = icon("edit") + " 编辑"; }
+  else { pv.classList.add("hidden"); ed.classList.remove("hidden"); $("btn-preview").innerHTML = icon("edit") + " 预览"; }
+}
+
 // ---------- 文件编辑 ----------
 async function openFile(rel, editable, chapter, li) {
   if (_dirty && CUR && CUR.editable) { try { await autosave(); } catch (e) { /* 落盘失败也别拦切换 */ } }  // 切文件前先保住手改
@@ -528,6 +587,8 @@ async function openFile(rel, editable, chapter, li) {
   $("btn-rewrite").classList.toggle("hidden", chapter == null);
   $("btn-outline").classList.toggle("hidden", chapter == null);  // 正文章节才给「本章细纲」入口
   $("btn-outline-regen").classList.add("hidden");                 // 默认藏,只在看细纲时由 openOutline 亮出
+  $("btn-preview").classList.remove("hidden");
+  setPreview(!rel.startsWith("正文/"));   // 外置大脑/skills/agents 默认渲染预览;正文/细纲 默认纯文本编辑
   $("status-note").textContent = chapter != null
     ? "改完会自动保存;再点【学这章的手改】把你的风格喂给指纹。" : "";
   updateWordCount();
@@ -839,7 +900,7 @@ async function chapterOp(url, body) {
     const d = await jreq("POST", url, body);
     // 章号变了:收掉当前打开的章节视图,避免指向错号
     CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
-    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-outline", "btn-outline-regen"].forEach((id) => $(id).classList.add("hidden"));
+    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-outline", "btn-outline-regen", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
     document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
     updateWordCount();
     if (d.state) { DATA = d.state; render(); } else { await refresh(); }

@@ -325,6 +325,24 @@ def learn(b: ChapterBody):
             "人物卡补充": chars_supp}
 
 
+class DraftBody(BaseModel):
+    root: str
+    idea: str = ""
+
+
+@app.post("/api/brain/draft")
+def brain_draft(b: DraftBody):
+    """从书名+题材+一句话设定,AI 起草 世界观/人物卡/卡章纲 初稿(只覆盖空白/模板,不动你写的)。"""
+    from .draft import draft_brain
+    root = Path(b.root)
+    try:
+        res = draft_brain(root, b.idea, get_backend(load_config(root)))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"ok": True, "written": list(res["written"].keys()),
+            "skipped": res["skipped"], "state": _state(root)}
+
+
 @app.post("/api/outline/regen")
 def outline_regen(b: ChapterBody):
     """重新生成第 N 章细纲(设定师→大纲师),覆盖 正文/.细纲/第N章.md 并返回。不碰正文。"""

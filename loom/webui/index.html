@@ -129,6 +129,7 @@
           <div class="path"><span class="dirty-dot"></span><span id="editor-path">选左边一个文件来看/改</span></div>
           <div class="editor-actions">
             <button id="btn-search" class="ghost hidden" title="章内搜索 ⌘F" data-ico="search"></button>
+            <button id="btn-preview" class="ghost hidden" title="渲染预览 / 纯文本编辑 切换"><span class="ico" data-ico="edit"></span> 预览</button>
             <button id="btn-history" class="ghost hidden" title="本章版本历史"><span class="ico" data-ico="history"></span> 历史</button>
             <button id="btn-sensitive" class="ghost hidden" title="违禁词自检(本地粗筛,只提示不阻断)"><span class="ico" data-ico="warn"></span> 违禁词</button>
             <button id="btn-outline" class="ghost hidden" title="看/改本章细纲(分镜场景骨头)"><span class="ico" data-ico="outline"></span> 本章细纲</button>
@@ -147,6 +148,7 @@
         </div>
         <div class="editor-scroll">
           <textarea id="editor" spellcheck="false" placeholder=""></textarea>
+          <div id="preview" class="md-preview hidden"></div>
         </div>
         <div id="editor-status" class="editor-status">
           <span id="wordcount" class="wordcount"></span>
