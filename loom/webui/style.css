@@ -215,6 +215,8 @@ button:disabled { opacity: .55; cursor: default; }
 .backend { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
 .backend select { width: auto; }
 .backend .model { width: 122px; }
+.backend select.model { width: 178px; }   /* 模型下拉:预设标签较长,给宽点免得截断 */
+.backend .base-url { width: 208px; }   /* base_url 比模型名长,给宽点 */
 .backend .chars { color: var(--text-soft); font-size: var(--fs-xs); display: flex;
   align-items: center; gap: var(--space-2); white-space: nowrap; }
 .backend .chars input { width: 60px; }
@@ -322,6 +324,10 @@ button:disabled { opacity: .55; cursor: default; }
 .ch-actions { display: flex; gap: 1px; margin-left: auto; flex: none; opacity: 0;
   transition: opacity var(--dur-2); }
 .list li:hover .ch-actions { opacity: 1; }
+/* 章号小而淡作导航锚点,标题为主、过长省略号截断 */
+.ch-no { flex: none; color: var(--text-mute); font-size: var(--fs-caption); }
+.ch-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--text); }
 /* hover 出操作区时,徽标让位(空间紧),避免章号被挤换行 */
 .list li:hover .ch-label .badge { display: none; }
 .ch-act { border: none; background: transparent; color: var(--text-mute); padding: 2px 4px;

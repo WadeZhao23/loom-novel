@@ -6,15 +6,19 @@ Agent 的系统提示词写在 agents/<角色>.md 里(顶部 YAML 声明 reads),
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from . import gates
-from .backends import Backend
+from .backends import Backend, LoomBackendError
+from .chaptertext import compose, strip_title
 from .config import Config
+from .errors import render
 from .fsutil import atomic_write_text, snapshot_chapter
+from .guard import STEP, chapter_profile, validate_output
 
 Progress = Callable[[dict], None]
 
@@ -171,11 +175,37 @@ def _read_files(project_root: Path, rels: list[str], progress: Progress) -> str:
 
 
 def _prev_chapter(project_root: Path, chapter_n: int) -> str:
-    """读上一章【手改后的】正文做行文衔接(不是 .原稿 快照)。"""
+    """读上一章【手改后的】正文做行文衔接(不是 .原稿 快照);去掉标题行,只喂正文体。"""
     if chapter_n <= 1:
         return ""
     p = project_root / "正文" / f"第{chapter_n - 1}章.md"
-    return p.read_text(encoding="utf-8").strip() if p.exists() else ""
+    return strip_title(p.read_text(encoding="utf-8")).strip() if p.exists() else ""
+
+
+# 标题生成(附赠动作:用户选了「自动起标题」。失败/空一律静默回退无标题,绝不阻断出稿)
+_TITLE_SYSTEM = (
+    "你是网文编辑,给这一章起一个【章节标题】。要求:6-16 字,贴合内容、有点钩子、不剧透章末反转;"
+    "不要带「第N章/第一章」之类章号,不要书名号/引号/星号包裹,只输出标题本身这一行,别的什么都不要输出。"
+)
+
+
+def _clean_title(raw: str) -> str:
+    """把模型返回收成一个干净标题:取首行、去包裹、去「第N章」前缀;太长/太短/像句子就当没有。"""
+    if not raw or not raw.strip():
+        return ""
+    t = raw.strip().splitlines()[0].strip().lstrip("#").strip()
+    t = t.strip("「」『』“”‘’《》<>#*`： ").strip()
+    t = re.sub(r"^第\s*[0-9一二三四五六七八九十百零]+\s*章[:：、.\s]*", "", t).strip()
+    return t if 1 < len(t) <= 24 else ""   # 太长多半是模型答非所问吐了一段话 → 回退无标题
+
+
+def _generate_title(backend: Backend, prose: str) -> str:
+    """给本章起个标题。任何失败(网络/空响应/格式不对)都吞掉、回退空串——绝不让附赠动作拖累出稿。"""
+    try:
+        raw = backend.complete(_TITLE_SYSTEM, f"这一章的正文如下,给它起个标题:\n\n{prose[:1200]}", max_chars=24)
+    except Exception:
+        return ""
+    return _clean_title(raw)
 
 
 def _outline_path(project_root: Path, chapter_n: int) -> Path:
@@ -278,22 +308,37 @@ def run_pipeline(
             if gres.remaining:
                 _save_gate_remaining(project_root, chapter_n, label, gres.remaining, progress)
 
+        # 每棒非空闸:任一棒返回空/拒答都不该静默落盘、再被下游与 learn 二次污染——直接报错刹住,
+        # 已完成的工序已进 ledger,修好(换模型)后续跑只重算这一棒,不浪费前面的字数计费。
+        reasons = validate_output(output, STEP)
+        if reasons:
+            raise LoomBackendError(render("model_output_invalid", detail=f"{role}:" + "；".join(reasons)),
+                                   code="model_output_invalid")
         ledger.record_step(project_root, chapter_n, role, output, up_sha)  # 即时落盘=断点可续
         workspace.append((agent.produces, output))
         progress({"type": "agent_done", "role": role, "produces": agent.produces})
         if slow:
             time.sleep(slow)
 
-    final = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
+    final_body = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
+    # 终稿非空硬闸:别把空/残废正文写进 正文+.原稿(空快照会让下次 learn 学到空、二次污染指纹)
+    reasons = validate_output(final_body, chapter_profile(config.chapter_chars))
+    if reasons:
+        raise LoomBackendError(render("model_output_invalid", detail="；".join(reasons)),
+                               code="model_output_invalid")
+    # 自动起标题(附赠,失败回退无标题);标题进正文首行 H1,且 .原稿快照/ledger 都同口径带上它
+    title = _generate_title(backend, final_body)
+    final = compose(title, final_body)
     path = _save_chapter(project_root, chapter_n, final)
-    ledger.record_snapshot(project_root, chapter_n, final)
-    _scan_sensitive(project_root, chapter_n, final, progress)  # 违禁词粗筛(只提示,不阻断)
+    ledger.record_snapshot(project_root, chapter_n, final)  # 与 正文/.原稿 同口径(都含 H1),不会误判 drifted
+    _scan_sensitive(project_root, chapter_n, final_body, progress)  # 违禁词扫正文体即可(标题不必扫)
     progress({
         "type": "chapter_done",
         "chapter": chapter_n,
         "path": str(path),
-        "chars": len(final),
-        "preview": final[:300],
+        "title": title,
+        "chars": len(final_body),
+        "preview": final_body[:300],
         "text": final,
     })
     return path, final
@@ -341,6 +386,9 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         workspace.append((agent.produces, out))
         progress({"type": "agent_done", "role": role, "produces": agent.produces})
         outline = out
+    if not outline.strip():  # 模型这次没出细纲 → 不拿空覆盖你原来的细纲
+        raise LoomBackendError(render("model_output_invalid", detail="细纲:模型这次返回空"),
+                               code="model_output_invalid")
     atomic_write_text(_outline_path(project_root, chapter_n), outline.strip() + "\n")
     progress({"type": "outline_done", "chapter": chapter_n})
     return outline.strip()

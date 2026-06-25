@@ -18,7 +18,7 @@
 
 ---
 
-> 后端可插拔:DeepSeek(国产、不用梯子,自带 key)/ Claude Code / Codex(复用客户端登录、免 key),界面里一键切换 + 检测连接。
+> 后端可插拔:DeepSeek(国产、不用梯子,自带 key)/ Claude Code / Codex(复用客户端登录、免 key)/ **OpenAI 兼容(自定义 base_url,接智谱GLM/Moonshot/Qwen/硅基流动等)**,界面里一键切换 + 检测连接。模型是**可下拉可手填** + 「拉取可用模型」实时列当前真实可用的型号(名字怎么变都不过时);DeepSeek 默认 `deepseek-v4-flash`。
 
 ## 它是什么
 
@@ -58,6 +58,12 @@ flowchart LR
   L --> F["写作指纹更新"] --> N["下一章更像你"]
   N -. 循环 .-> W
 ```
+
+### 1.3 新增
+
+- **多供应商模型路由**:除 DeepSeek / Claude / Codex 外,新增「OpenAI 兼容(自定义)」——自填 base_url + key,接智谱GLM / Moonshot / 通义Qwen / 硅基流动等任意 OpenAI 兼容供应商。模型框改成**可下拉可手填** + 「拉取可用模型」实时拉当前真实可用的型号(模型改名不再过时);DeepSeek 默认升到 `deepseek-v4-flash`(旧名 `deepseek-chat/reasoner` 7/24 停用)。填错模型(如把 `v4-flash` 当 DeepSeek 名)会**软提示**、不阻断。
+- **再也不会「换模型把指纹学空」**:模型这次返回空 / 残废,Loom **宁可不写、明确报错,也绝不拿空内容覆盖**你攒下的写作指纹 / 正文;指纹明显被磨短还会提示「可一键撤销」。(根治一例用户实报的数据丢失。)
+- **每章带标题**:写完一章 AI 自动起个标题、落进正文首行,侧栏直接显示;随时改首行改名。改标题不会被当文风学进指纹、也不触发「手改过」。
 
 ### 1.1 / 1.2 新增
 
@@ -131,8 +137,10 @@ flowchart TD
   WIN["PyWebView 原生窗口<br/>desktop.py"] --> UI["webui 单页界面"]
   UI <--> API["FastAPI · 127.0.0.1<br/>server.py"]
   API --> ENG["Python 引擎<br/>agents · fingerprint · chapters · gates · fsutil"]
-  ENG --> M{"选后端"}
-  M --> DS["DeepSeek API"]
+  ENG --> GUARD["写盘安全闸 guard.py<br/>空/残废输出不覆盖你的数据"]
+  GUARD --> M{"选后端 · PROVIDERS 路由表"}
+  M --> DS["DeepSeek API<br/>deepseek-v4-flash"]
+  M --> OC["OpenAI 兼容<br/>自填 base_url(GLM/Kimi/Qwen…)"]
   M --> CL["claude -p"]
   M --> CX["codex exec"]
 ```

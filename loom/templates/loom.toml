@@ -1,8 +1,10 @@
 # Loom 项目配置
 
 [backend]
-provider = "deepseek"     # deepseek | claude | codex
-model    = "deepseek-chat"
+provider = "deepseek"     # deepseek | claude | codex | openai_compat
+model    = "deepseek-v4-flash"   # DeepSeek V4(旧名 deepseek-chat/reasoner 2026-07-24 停用)
+# openai_compat(接智谱GLM/Moonshot/Qwen/硅基流动等)时再填这家的接口地址,例:
+# base_url = "https://open.bigmodel.cn/api/paas/v4"
 
 [novel]
 title = "__TITLE__"

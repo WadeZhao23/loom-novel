@@ -1,7 +1,15 @@
-"""可插拔后端:一个 complete(system, user) -> str 的协议 + 三个实现。
+"""可插拔后端:一个 complete(system, user) -> str 的协议 + 实现 + 供应商路由表。
 
-DeepSeek 走 OpenAI 兼容接口(自带 key)。Claude 走 `claude -p`、Codex 走 `codex exec`——
-两者都 shell 到本机装好的客户端,复用它自己的登录态(订阅/CLI key),Loom 不碰 key。
+两类后端:
+- OpenAI 兼容(HTTP):DeepSeek 是锁死 base_url 的预设;openai_compat 是用户自填 base_url 的通用口子
+  (接智谱GLM / Moonshot / 通义Qwen / 硅基流动 等),两者共用同一个 OpenAICompatBackend。
+- CLI:Claude 走 `claude -p`、Codex 走 `codex exec`,shell 到本机客户端、复用其登录态,Loom 不碰 key。
+
+路由唯一真相是 PROVIDERS:前端下拉、后端构造、模型校验全从它派生——避免「模型名写死成白名单、
+厂商一改名就过时再炸一遍」(用户实报:DeepSeek 改名 v4-flash/v4-pro 把旧默认 deepseek-chat 顶没了)。
+
+所有 complete 在【正常返回】也会校验非空:空响应一律 raise(带 code),绝不把空串往下传——
+这是用户实报「换模型 → learn 学到空 → 指纹被擦」链条上后端这一环的闸(写盘那一环在 guard.py)。
 """
 
 from __future__ import annotations
@@ -18,6 +26,82 @@ from .errors import render
 
 # 流式回调:每收到一小段生成文本就调一次(让前端"看着它一句句写出来")。
 OnChunk = Callable[[str], None]
+
+
+# ----------------------------- 供应商路由表(唯一真相) -----------------------------
+# kind: "openai"=OpenAI 兼容 HTTP;"cli"=shell 到本机客户端。
+# models 只是【预设建议】,前端是可编辑下拉 + 「拉取可用模型」实时拉真实列表,名字怎么变都不过时。
+PROVIDERS: dict[str, dict] = {
+    "deepseek": {
+        "label": "DeepSeek", "kind": "openai",
+        "base_url": "https://api.deepseek.com", "base_url_locked": True,
+        "key_env": "DEEPSEEK_API_KEY", "needs_key": True,
+        "default_model": "deepseek-v4-flash",
+        # 只列现役 V4;旧名 deepseek-chat/reasoner 官方 2026-07-24 停用,不再当新选项推给用户。
+        # (老项目若 loom.toml 还配着旧名,前端 setModelValue 仍会把它补成一项回显、并照常能用到停用日。)
+        "models": [
+            {"id": "deepseek-v4-flash", "label": "V4 Flash · 快·省钱(默认)"},
+            {"id": "deepseek-v4-pro", "label": "V4 Pro · 更强"},
+        ],
+        "can_list_models": True,
+    },
+    "claude": {
+        "label": "Claude Code", "kind": "cli",
+        "needs_key": False, "default_model": "sonnet",
+        "models": [
+            {"id": "sonnet", "label": "Sonnet · 均衡(默认,别名自动跟最新)"},
+            {"id": "opus", "label": "Opus · 最强"},
+            {"id": "haiku", "label": "Haiku · 最快最省"},
+        ],
+        "can_list_models": False,
+    },
+    "codex": {
+        "label": "Codex(GPT)", "kind": "cli",
+        "needs_key": False, "default_model": "",
+        "models": [
+            {"id": "", "label": "默认(codex 自己选,推荐)"},
+            {"id": "gpt-5.3-codex", "label": "GPT-5.3-Codex · 编码最强"},
+            {"id": "gpt-5.5", "label": "GPT-5.5 · 通用最强"},
+        ],
+        "can_list_models": False,
+    },
+    "openai_compat": {
+        "label": "OpenAI 兼容(自定义)", "kind": "openai",
+        "base_url": "", "base_url_locked": False,
+        "key_env": "LOOM_OPENAI_COMPAT_KEY", "needs_key": True,
+        "default_model": "",
+        "models": [],   # 用户自填 / 点「拉取可用模型」实时拉
+        "hint": "智谱GLM: https://open.bigmodel.cn/api/paas/v4 · Moonshot: https://api.moonshot.cn/v1 · "
+                "通义Qwen: https://dashscope.aliyuncs.com/compatible-mode/v1 · 硅基流动: https://api.siliconflow.cn/v1",
+        "can_list_models": True,
+    },
+}
+
+
+def provider_catalog() -> list[dict]:
+    """给前端的供应商清单(下拉/默认值/预设模型全从这派生)。"""
+    out = []
+    for pid, p in PROVIDERS.items():
+        out.append({
+            "id": pid, "label": p["label"], "kind": p["kind"],
+            "needs_key": p["needs_key"], "default_model": p["default_model"],
+            "base_url": p.get("base_url", ""), "base_url_locked": p.get("base_url_locked", True),
+            "models": p.get("models", []), "hint": p.get("hint", ""),
+            "can_list_models": p.get("can_list_models", False),
+        })
+    return out
+
+
+def validate_model(provider: str, model: str) -> str | None:
+    """启发式软校验(不联网):明显填错就返回一句人话提示,否则 None 放行。只警告、绝不阻断保存。"""
+    model = (model or "").strip()
+    provider = (provider or "").lower()
+    if not model or provider not in PROVIDERS:
+        return None
+    if provider == "deepseek" and "deepseek" not in model.lower():
+        return (f"模型名「{model}」不像 DeepSeek 的模型——DeepSeek 现在是 deepseek-v4-flash / deepseek-v4-pro。"
+                f"如果你本来想用别家的「{model}」,把上面的供应商切到「OpenAI 兼容(自定义)」再填它的 base_url。")
+    return None
 
 
 class LoomBackendError(RuntimeError):
@@ -49,6 +133,18 @@ def _deepseek_error(e: Exception) -> LoomBackendError:
     return LoomBackendError(render(code), code=code)
 
 
+def _openai_compat_error(e: Exception) -> LoomBackendError:
+    """通用 OpenAI 兼容供应商的异常映射(没有 DeepSeek 那么细,够用就好)。"""
+    msg = str(e)
+    status = getattr(e, "status_code", None)
+    if status is None:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+    low = msg.lower()
+    if status == 401 or "authentication" in low or "invalid api key" in low:
+        return LoomBackendError(render("openai_compat_key_missing", detail=msg), code="openai_compat_key_missing")
+    return LoomBackendError(render("model_call_failed", detail=msg), code="model_call_failed")
+
+
 class Backend(Protocol):
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None) -> str:
@@ -56,21 +152,35 @@ class Backend(Protocol):
         ...
 
 
-class DeepSeekBackend:
-    """DeepSeek:OpenAI 兼容接口,base_url=https://api.deepseek.com。"""
+class OpenAICompatBackend:
+    """OpenAI 兼容 HTTP 后端:DeepSeek(锁死 base_url)和 openai_compat(自填 base_url)共用。"""
 
-    def __init__(self, config: Config) -> None:
-        self.model = config.model or "deepseek-chat"
-        api_key = os.environ.get("DEEPSEEK_API_KEY")
+    def __init__(self, config: Config, provider: str) -> None:
+        spec = PROVIDERS[provider]
+        self.provider = provider
+        self.model = (config.model or "").strip() or spec["default_model"]
+        # base_url:锁死的取注册表,自定义的取 config.base_url
+        base_url = spec["base_url"] if spec.get("base_url_locked") else ((config.base_url or "").strip() or spec.get("base_url", ""))
+        self._empty_code = "deepseek_empty_response" if provider == "deepseek" else "model_empty_response"
+        self._map = _deepseek_error if provider == "deepseek" else _openai_compat_error
+
+        if provider != "deepseek" and not self.model:
+            raise LoomBackendError(render("model_name_missing"), code="model_name_missing")
+        if not base_url:
+            raise LoomBackendError(render("openai_compat_base_url_missing"), code="openai_compat_base_url_missing")
+        api_key = os.environ.get(spec["key_env"])
         if not api_key:
-            raise LoomBackendError(render("deepseek_key_missing"), code="deepseek_key_missing")
+            code = "deepseek_key_missing" if provider == "deepseek" else "openai_compat_key_missing"
+            raise LoomBackendError(render(code), code=code)
         # 延迟 import,免得没装 openai 时连 --help 都跑不起来
         try:
             from openai import OpenAI
         except ModuleNotFoundError as e:
             raise LoomBackendError(render("openai_not_installed"), code="openai_not_installed") from e
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
 
-        self._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    def _empty(self) -> LoomBackendError:
+        return LoomBackendError(render(self._empty_code, detail=f"model={self.model}"), code=self._empty_code)
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None) -> str:
@@ -95,13 +205,17 @@ class DeepSeekBackend:
                         buf = ""
                 if buf:
                     on_chunk(buf)
-                return "".join(parts).strip()
-            resp = self._client.chat.completions.create(
-                model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
-            )
+                text = "".join(parts).strip()
+            else:
+                resp = self._client.chat.completions.create(
+                    model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
+                )
+                text = (resp.choices[0].message.content or "").strip()
         except Exception as e:  # 网络/限流/鉴权/余额 —— 映射成可操作的友好错误
-            raise _deepseek_error(e) from e
-        return (resp.choices[0].message.content or "").strip()
+            raise self._map(e) from e
+        if not text:  # 200 空响应(多半模型名不对)→ 报错,绝不把空串往下传去覆盖用户数据
+            raise self._empty()
+        return text
 
 
 class ClaudeCodeBackend:
@@ -110,9 +224,10 @@ class ClaudeCodeBackend:
     def __init__(self, config: Config) -> None:
         if shutil.which("claude") is None:
             raise LoomBackendError(render("claude_not_found"), code="claude_not_found")
-        # 让 loom.toml 的 model 生效;没填/填了 deepseek 默认值时退回 sonnet(写文质量好,禁工具后仍是一次性补全)
+        # 让 loom.toml 的 model 生效;没填/填了别家(deepseek/gpt)默认值时退回 sonnet(写文质量好,禁工具后仍是一次性补全)
         m = (config.model or "").strip()
-        self.model = m if m and "deepseek" not in m else "sonnet"
+        bad = (not m) or ("deepseek" in m) or m.startswith("gpt")
+        self.model = "sonnet" if bad else m
 
     # 护栏:逼 `claude -p` 当"纯文本补全",别当 Claude Code agent(去找文件/反问/解释)
     _GUARD = (
@@ -137,7 +252,11 @@ class ClaudeCodeBackend:
             raise LoomBackendError(f"调用 claude 失败:{e}") from e
         if out.returncode != 0:
             raise LoomBackendError(f"claude 返回非零:{out.stderr.strip()}")
-        return out.stdout.strip()
+        text = out.stdout.strip()
+        if not text:  # 跑完却没吐正文 → 报错,别把空往下传
+            raise LoomBackendError(render("backend_empty_response", detail=f"model={self.model}"),
+                                   code="backend_empty_response")
+        return text
 
 
 class CodexBackend:
@@ -186,12 +305,15 @@ class CodexBackend:
             if out.returncode != 0:
                 raise LoomBackendError(render("codex_call_failed", detail=out.stderr.strip()[:500]),
                                        code="codex_call_failed")
+            text = ""
             if last.exists():
                 text = last.read_text(encoding="utf-8").strip()
-                if text:
-                    return text
-        # 兜底:--output-last-message 没写出来时退回 stdout
-        return out.stdout.strip()
+            if not text:  # 兜底:--output-last-message 没写出来时退回 stdout
+                text = out.stdout.strip()
+        if not text:  # 跑完却没拿到正文 → 报错,别把空往下传
+            raise LoomBackendError(render("backend_empty_response", detail=f"model={self.model or '默认'}"),
+                                   code="backend_empty_response")
+        return text
 
 
 class DemoBackend:
@@ -211,6 +333,8 @@ class DemoBackend:
             return _DEMO["learn"]
         if "剧情脊柱记录员" in system:
             return "摘要:(demo 占位摘要)。\n伏笔:\n- 无"
+        if "起一个" in system or "章节标题" in system:  # 标题生成(demo 占位)
+            return "废矿里的火光"
         for role, key in (("设定师", "anchor"), ("大纲师", "outline"),
                           ("写手", "draft"), ("编辑", "edit"), ("润色师", "final")):
             if role in head:
@@ -282,13 +406,47 @@ _DEMO = {
 }
 
 
+def list_models(provider: str, *, base_url: str = "", api_key: str = "") -> dict:
+    """列出某供应商可选模型。OpenAI 兼容的实时打 GET /models;CLI 类返回预设(别名自动跟最新)。
+
+    只读、不发任何生成请求、不消耗 token。给「拉取可用模型」按钮用。
+    """
+    provider = (provider or "").lower()
+    spec = PROVIDERS.get(provider)
+    if not spec:
+        return {"ok": False, "message": f"未知供应商 {provider}"}
+    if spec["kind"] == "cli":
+        return {"ok": True, "models": spec["models"], "source": "preset",
+                "message": f"{spec['label']} 的可选模型(别名自动跟最新版本)"}
+    burl = (base_url or "").strip() or (spec["base_url"] if spec.get("base_url_locked") else "") or spec.get("base_url", "")
+    if not burl:
+        return {"ok": False, "message": "先填 base_url 再拉取可用模型"}
+    key = (api_key or "").strip() or os.environ.get(spec.get("key_env", ""), "")
+    if not key:
+        return {"ok": False, "message": "先填 API Key 再拉取可用模型"}
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=key, base_url=burl)
+        resp = client.models.list()
+        ids = sorted({m.id for m in resp.data})
+        if not ids:
+            return {"ok": False, "message": "这个 base_url 没返回任何模型(地址或 key 可能不对)"}
+        return {"ok": True, "models": [{"id": i, "label": i} for i in ids], "source": "live",
+                "message": f"拉到 {len(ids)} 个可用模型"}
+    except Exception as e:
+        return {"ok": False, "message": f"拉取失败:{e}"}
+
+
 def probe(provider: str) -> dict:
-    """轻量探活:命令在不在 PATH、能不能跑 --version、(codex)登没登录。
-    只跑本地命令,不发任何 LLM 请求、不消耗 token。给「检测连接」按钮用。"""
+    """轻量探活:命令在不在 PATH、能不能跑 --version、(codex)登没登录、(openai_compat)base_url+key 齐不齐。
+    只跑本地命令 / 查本地配置,不发任何 LLM 请求、不消耗 token。给「检测连接」按钮用。"""
     provider = (provider or "deepseek").lower()
     if provider == "deepseek":
         return {"provider": provider, "ok": True, "kind": "key",
                 "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存后端」即可。"}
+    if provider == "openai_compat":
+        return {"provider": provider, "ok": True, "kind": "key",
+                "message": "OpenAI 兼容供应商:填好 base_url + 模型名 + key,点「保存后端」;不确定模型名就点「拉取可用模型」。"}
     cmd = {"claude": "claude", "codex": "codex"}.get(provider)
     if not cmd:
         return {"provider": provider, "ok": False, "message": f"未知后端 {provider}"}
@@ -326,9 +484,11 @@ def get_backend(config: Config) -> Backend:
         return DemoBackend(config)
     provider = (config.provider or "deepseek").lower()
     if provider == "deepseek":
-        return DeepSeekBackend(config)
+        return OpenAICompatBackend(config, "deepseek")
+    if provider == "openai_compat":
+        return OpenAICompatBackend(config, "openai_compat")
     if provider == "claude":
         return ClaudeCodeBackend(config)
     if provider == "codex":
         return CodexBackend(config)
-    raise LoomBackendError(f"未知后端 provider={provider!r}(支持 deepseek/claude/codex)。")
+    raise LoomBackendError(f"未知后端 provider={provider!r}(支持 deepseek/claude/codex/openai_compat)。")

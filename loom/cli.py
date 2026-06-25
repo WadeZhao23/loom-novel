@@ -191,13 +191,17 @@ def status() -> None:
     if not chapters:
         console.print("[dim]还没写任何一章。[/dim]")
         return
+    from .chaptertext import parse_title, strip_title
     table = Table(title="章节状态")
-    for c in ("章", "写了", "你改过", "学进指纹"):
+    for c in ("章", "标题", "写了", "你改过", "学进指纹"):
         table.add_column(c)
     for n in chapters:
         out, snap = body / f"第{n}章.md", body / ".原稿" / f"第{n}章.md"
-        edited = snap.exists() and out.read_text(encoding="utf-8").strip() != snap.read_text(encoding="utf-8").strip()
-        table.add_row(f"第{n}章", "✓", "[green]✓[/green]" if edited else "—", "[green]✓[/green]" if n in learned else "—")
+        out_text = out.read_text(encoding="utf-8")
+        # 「改过」只看正文体(去标题再比),与 learn/drift 同口径:改标题不算手改
+        edited = snap.exists() and strip_title(out_text).strip() != strip_title(snap.read_text(encoding="utf-8")).strip()
+        table.add_row(f"第{n}章", parse_title(out_text) or "[dim]—[/dim]", "✓",
+                      "[green]✓[/green]" if edited else "—", "[green]✓[/green]" if n in learned else "—")
     console.print(table)
 
 

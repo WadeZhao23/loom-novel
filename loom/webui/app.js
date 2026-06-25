@@ -126,12 +126,15 @@ function bind() {
   };
   $("btn-save-backend").onclick = saveBackend;
   $("btn-probe").onclick = probeBackend;
+  $("btn-fetch-models").onclick = fetchModels;
+  $("model").onchange = onModelSelect;
   $("provider").onchange = () => {
-    // 切后端给个合理默认 model:codex 留空走它自己的默认模型(订阅登录即可),claude 用 sonnet
-    const def = { deepseek: "deepseek-chat", claude: "sonnet", codex: "" };
+    // 切供应商:从服务端下发的供应商表(DATA.backend.providers)派生默认模型 + 下拉预设 + base_url
     const p = $("provider").value;
-    $("model").value = def[p] ?? "";
-    $("model").placeholder = p === "codex" ? "留空=codex 默认模型" : (p === "claude" ? "sonnet" : "deepseek-chat");
+    const spec = providerSpec(p);
+    rebuildModelPresets(p);
+    setModelValue(spec ? spec.default_model : "");
+    if (spec && !spec.base_url_locked) $("base-url").value = $("base-url").value || spec.base_url || "";
     applyProviderUI(p);
   };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
@@ -273,11 +276,12 @@ async function runDoctor() {
 function render() {
   $("proj-title").textContent = DATA.title;
   $("provider").value = DATA.backend.provider;
-  $("model").value = DATA.backend.model;
+  rebuildModelPresets(DATA.backend.provider);
+  setModelValue(DATA.backend.model);
+  $("base-url").value = DATA.backend.base_url || "";
   $("chapter-chars").value = DATA.backend.chapter_chars;
   $("api-key").value = "";
-  $("api-key").placeholder = DATA.backend.key_set ? "API Key 已设置" : "填 DeepSeek API Key";
-  applyProviderUI(DATA.backend.provider);
+  applyProviderUI(DATA.backend.provider);   // 顺带按供应商设 key 框占位/显隐 base_url 与按钮
 
   const fpMap = {
     default: "中性默认 · 还没懂你",
@@ -293,9 +297,11 @@ function render() {
     const li = document.createElement("li");
     const label = document.createElement("span");
     label.className = "ch-label";
-    label.innerHTML = `<span>第${c.n}章</span>` +
+    label.innerHTML = `<span class="ch-no">第${c.n}章</span>` +
+      (c.title ? `<span class="ch-title">${escHtml(c.title)}</span>` : ``) +
       (c.edited ? `<span class="badge on">改过</span>` : ``) +
       (c.learned ? `<span class="badge on">已学</span>` : ``);
+    label.title = c.title ? `第${c.n}章 · ${c.title}` : `第${c.n}章`;
     label.onclick = () => openFile(`正文/第${c.n}章.md`, true, c.n, li);
     const actions = document.createElement("span");
     actions.className = "ch-actions";
@@ -732,6 +738,7 @@ async function learn(n) {
     const d = await jreq("POST", "/api/learn", { root: DATA.root, chapter: n });
     _lastLearnChapter = n;
     toast(`第${n}章手改已学,写后摘要已补进卡章纲`);
+    if (d.warn) toast(d.warn, true);   // 软提示:这次 learn 疑似把指纹磨短,可在弹窗里一键撤销
     await refresh();
     showLearnChanges(d.changes || { added: [], removed: [] }, extractRecap(d["卡章纲"] || "", n),
       { world: d["世界观补充"] || "", chars: d["人物卡补充"] || "" });
@@ -919,11 +926,16 @@ let _wroteChapter = null;
 async function writeChapter(n, force) {
   // 写章 = 顺手保存后端:不必先点「保存后端」,点写章就把当前后端表单(provider/model/字数/key)落盘
   try { await persistBackend(true); } catch (e) { toast("保存后端失败:" + e.message, true); return; }
-  // 首跑防空转:deepseek 没填 key 就别进面板转半天再报错,直接提示 + 高亮 key 框
-  if (DATA && DATA.backend && DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
+  // 首跑防空转:没填 key/base_url 就别进面板转半天再报错,直接提示 + 高亮对应输入框
+  const be = (DATA && DATA.backend) || {};
+  const flash = (id) => { const k = $(id); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); } };
+  if (be.provider === "deepseek" && !be.key_set) {
     toast("先在顶栏填 DeepSeek API Key(或把后端切到 Claude / Codex 免 key)再开写", true);
-    const k = $("api-key"); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); }
-    return;
+    flash("api-key"); return;
+  }
+  if (be.provider === "openai_compat" && (!be.base_url || !be.openai_compat_key_set)) {
+    toast("自定义供应商要先填 base_url + API Key 再开写", true);
+    flash(!be.base_url ? "base-url" : "api-key"); return;
   }
   _wroteChapter = null;
   $("run-title").textContent = `正在写第 ${n} 章…`;
@@ -1046,26 +1058,116 @@ async function closeRun() {
 }
 
 // ---------- 后端配置 ----------
+function providerSpec(pid) {
+  return ((DATA.backend && DATA.backend.providers) || []).find((p) => p.id === pid) || null;
+}
+
+// 用一组 {id,label} 重填模型【下拉】(末尾永远留一个「手动输入…」兜底,但默认是选、不是填)
+function fillModelOptions(models) {
+  const sel = $("model");
+  sel.innerHTML = "";
+  (models || []).forEach((m) => {
+    const o = document.createElement("option");
+    o.value = m.id; o.textContent = m.label || m.id || "（默认)";
+    sel.appendChild(o);
+  });
+  const custom = document.createElement("option");
+  custom.value = "__custom__"; custom.textContent = "✎ 手动输入…";
+  sel.appendChild(custom);
+}
+
+// 切供应商时,用该供应商的预设建议重建下拉
+function rebuildModelPresets(pid) {
+  const spec = providerSpec(pid);
+  fillModelOptions(spec ? spec.models : []);
+}
+
+// 选中某个模型:不在下拉里就先插一项再选(老配置/拉取结果都能正确回显);切到「手动输入」才露文本框
+function setModelValue(model) {
+  const sel = $("model"), custom = $("model-custom");
+  model = model || "";
+  if (model && ![...sel.options].some((o) => o.value === model)) {
+    const o = document.createElement("option");
+    o.value = model; o.textContent = model;
+    sel.insertBefore(o, sel.querySelector('option[value="__custom__"]'));
+  }
+  sel.value = model;
+  if (sel.selectedIndex < 0) sel.selectedIndex = 0;   // 空/没匹配上 → 落到第一项
+  // 若落到了「手动输入…」(例:自定义供应商还没拉取预设)→ 露出文本框给用户填,别让他对着空下拉发愣
+  if (sel.value === "__custom__") { custom.classList.remove("hidden"); custom.value = model && model !== "__custom__" ? model : ""; }
+  else { custom.classList.add("hidden"); custom.value = ""; }
+}
+
+// 读当前选的模型(选了「手动输入」就读文本框)
+function currentModelValue() {
+  const sel = $("model");
+  return sel.value === "__custom__" ? $("model-custom").value.trim() : sel.value;
+}
+
+// 下拉切到「手动输入…」→ 露出文本框聚焦;否则收起
+function onModelSelect() {
+  const custom = $("model-custom");
+  if ($("model").value === "__custom__") { custom.classList.remove("hidden"); custom.focus(); }
+  else custom.classList.add("hidden");
+}
+
 async function persistBackend(silent) {
-  // 把顶栏后端表单(provider/model/字数/key)落盘;写章前会静默调一次,免得用户没点「保存后端」就开写
+  // 把顶栏后端表单(provider/model/base_url/字数/key)落盘;写章前会静默调一次,免得用户没点「保存后端」就开写
   const key = $("api-key").value.trim();
-  DATA = await jreq("PUT", "/api/config", {
-    root: DATA.root, provider: $("provider").value, model: $("model").value,
+  const resp = await jreq("PUT", "/api/config", {
+    root: DATA.root, provider: $("provider").value, model: currentModelValue(),
+    base_url: $("base-url").value.trim() || null,
     chapter_chars: parseInt($("chapter-chars").value) || 800,
     api_key: key || null,
   });
+  DATA = resp;
   if (!silent) toast(key ? "后端 + API Key 已保存" : "后端已保存");
+  if (resp.model_warning) toast(resp.model_warning, true);   // 软提示(如把 v4-flash 填进 DeepSeek),不阻断
   render();
   if (CUR) updateWordCount();
 }
 async function saveBackend() { await persistBackend(false); }
 
-// deepseek 用 key → 显示 key 框;claude/codex 复用客户端登录 → 隐藏 key 框、给「检测连接」按钮
+// 「拉取可用模型」:OpenAI 兼容的实时打 GET /models,CLI 类返回预设。结果灌进下拉。
+async function fetchModels() {
+  const p = $("provider").value;
+  const btn = $("btn-fetch-models");
+  const old = btn.innerHTML; btn.disabled = true; btn.textContent = "拉取中…";
+  try {
+    const d = await jreq("POST", "/api/backend/models", {
+      root: DATA.root, provider: p,
+      base_url: $("base-url").value.trim() || null,
+      api_key: $("api-key").value.trim() || null,
+    });
+    if (d.ok && d.models && d.models.length) {
+      fillModelOptions(d.models);            // 实时列表灌进下拉,默认选第一个
+      $("model").selectedIndex = 0;
+      $("model-custom").classList.add("hidden");
+      toast(d.message || `拉到 ${d.models.length} 个模型,下拉里选一个`);
+      $("model").focus();
+    } else {
+      toast(d.message || "没拉到模型(检查 base_url / API Key)", true);
+    }
+  } catch (e) { toast(e.message, true); }
+  finally { btn.disabled = false; btn.innerHTML = old; }
+}
+
+// 按供应商显隐:key 框(deepseek/自定义)、base_url(仅自定义)、拉取模型按钮、检测连接(claude/codex)
 function applyProviderUI(provider) {
-  const isKey = provider === "deepseek";
-  $("api-key").classList.toggle("hidden", !isKey);
-  $("btn-probe").classList.toggle("hidden", isKey);
-  if (isKey) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
+  const spec = providerSpec(provider);
+  const needsKey = spec ? spec.needs_key : (provider === "deepseek");
+  const isCustom = provider === "openai_compat";
+  const isCli = spec ? spec.kind === "cli" : (provider === "claude" || provider === "codex");
+  $("api-key").classList.toggle("hidden", !needsKey);
+  $("base-url").classList.toggle("hidden", !isCustom);
+  $("btn-fetch-models").classList.toggle("hidden", !(spec && spec.can_list_models));
+  $("btn-probe").classList.toggle("hidden", !isCli);
+  if (!needsKey || !isCli) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
+  if (needsKey) {
+    const keySet = isCustom ? (DATA.backend && DATA.backend.openai_compat_key_set) : (DATA.backend && DATA.backend.key_set);
+    $("api-key").placeholder = keySet ? "API Key 已设置" : (isCustom ? "填这家供应商的 API Key" : "填 DeepSeek API Key");
+  }
+  if (isCustom && spec && spec.hint) $("base-url").title = spec.hint;
 }
 async function probeBackend() {
   const p = $("provider").value;
