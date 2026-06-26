@@ -288,7 +288,7 @@ def probe(provider: str) -> dict:
     provider = (provider or "deepseek").lower()
     if provider == "deepseek":
         return {"provider": provider, "ok": True, "kind": "key",
-                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存后端」即可。"}
+                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存全局 Key」即可;需要本项目覆盖时点「保存后端」。"}
     cmd = {"claude": "claude", "codex": "codex"}.get(provider)
     if not cmd:
         return {"provider": provider, "ok": False, "message": f"未知后端 {provider}"}

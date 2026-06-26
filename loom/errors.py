@@ -21,9 +21,9 @@ class AuthorError:
 author_errors: dict[str, AuthorError] = {
     "deepseek_key_missing": AuthorError(
         title="还没填 DeepSeek 的 API key",
-        reason="Loom 默认用 DeepSeek 写作,但没在项目根的 .env 里读到 DEEPSEEK_API_KEY。",
+        reason="Loom 默认用 DeepSeek 写作,但没读到 DEEPSEEK_API_KEY。可以保存全局 ~/.loom/.env,也可以用项目 .env 覆盖。",
         impact="设定师/大纲师/写手等都需要它,现在一步也跑不了。",
-        next_action="在项目根新建或打开 .env,加一行 DEEPSEEK_API_KEY=sk-你的key(key 在 https://platform.deepseek.com 申请),保存后重试。",
+        next_action="在界面顶栏粘贴 key 后点「保存全局 Key」;需要本项目单独覆盖时,点「保存后端」写入项目 .env。",
     ),
     "openai_not_installed": AuthorError(
         title="缺少 openai 这个依赖包",

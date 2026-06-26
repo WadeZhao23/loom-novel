@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,9 +57,11 @@ def _read_env_key(path: Path) -> str | None:
 
 
 def _replace_env_key(path: Path, key: str) -> None:
+    target_assignment = re.compile(r"^(?:export\s+)?DEEPSEEK_API_KEY\s*=")
+
     def is_target_assignment(line: str) -> bool:
         stripped = line.strip()
-        return stripped.startswith("DEEPSEEK_API_KEY=") or stripped.startswith("export DEEPSEEK_API_KEY=")
+        return bool(target_assignment.match(stripped))
 
     lines: list[str] = []
     if path.exists():

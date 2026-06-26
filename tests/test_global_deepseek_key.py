@@ -214,6 +214,31 @@ class GlobalDeepSeekKeyTests(unittest.TestCase):
             self.assertIn("DEEPSEEK_API_KEY=sk-new", env_text)
             self.assertNotIn("DEEPSEEK_API_KEY=replace-me", env_text)
 
+    def test_set_project_env_key_replaces_spaced_and_exported_deepseek_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "book"
+            write_project(
+                project,
+                "\n".join(
+                    [
+                        "DEEPSEEK_API_KEY = old",
+                        "export DEEPSEEK_API_KEY = exported-old",
+                        "DEEPSEEK_API_KEY_OLD=keep-me",
+                        "OTHER=value",
+                        "",
+                    ]
+                ),
+            )
+
+            config.set_project_env_key(project, "sk-new")
+
+            env_text = (project / ".env").read_text(encoding="utf-8")
+            self.assertEqual(env_text.count("DEEPSEEK_API_KEY=sk-new"), 1)
+            self.assertIn("DEEPSEEK_API_KEY_OLD=keep-me", env_text)
+            self.assertIn("OTHER=value", env_text)
+            self.assertNotIn("DEEPSEEK_API_KEY = old", env_text)
+            self.assertNotIn("export DEEPSEEK_API_KEY = exported-old", env_text)
+
     def test_server_state_includes_key_status_without_raw_key(self) -> None:
         from loom import server
 
