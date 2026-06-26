@@ -171,6 +171,49 @@ class GlobalDeepSeekKeyTests(unittest.TestCase):
             self.assertNotIn("api_key", status)
             self.assertNotIn("sk-project", repr(status))
 
+    def test_key_status_does_not_mutate_owner_marker_for_process_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            project = base / "book"
+            write_project(project, "DEEPSEEK_API_KEY=sk-project\n")
+            os.environ["DEEPSEEK_API_KEY"] = "sk-process"
+            os.environ["_LOOM_DEEPSEEK_KEY_OWNER"] = "1"
+            config._APPLIED_DEEPSEEK_KEY = "sk-other"
+            with mock.patch.object(config.Path, "home", return_value=home):
+                status = config.key_status(project)
+
+            self.assertEqual(os.environ.get("_LOOM_DEEPSEEK_KEY_OWNER"), "1")
+            self.assertEqual(status["source"], "process")
+            self.assertTrue(status["effective"])
+            self.assertTrue(status["process"])
+            self.assertTrue(status["project"])
+
+    def test_set_project_env_key_replaces_only_exact_deepseek_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "book"
+            write_project(
+                project,
+                "\n".join(
+                    [
+                        "DEEPSEEK_API_KEY_OLD=keep-old",
+                        "OTHER=value",
+                        "DEEPSEEK_API_KEY=replace-me",
+                        "DEEPSEEK_API_KEY_BACKUP=keep-backup",
+                        "",
+                    ]
+                ),
+            )
+
+            config.set_project_env_key(project, "sk-new")
+
+            env_text = (project / ".env").read_text(encoding="utf-8")
+            self.assertIn("DEEPSEEK_API_KEY_OLD=keep-old", env_text)
+            self.assertIn("OTHER=value", env_text)
+            self.assertIn("DEEPSEEK_API_KEY_BACKUP=keep-backup", env_text)
+            self.assertIn("DEEPSEEK_API_KEY=sk-new", env_text)
+            self.assertNotIn("DEEPSEEK_API_KEY=replace-me", env_text)
+
 
 if __name__ == "__main__":
     unittest.main()

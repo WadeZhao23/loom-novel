@@ -56,12 +56,16 @@ def _read_env_key(path: Path) -> str | None:
 
 
 def _replace_env_key(path: Path, key: str) -> None:
+    def is_target_assignment(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("DEEPSEEK_API_KEY=") or stripped.startswith("export DEEPSEEK_API_KEY=")
+
     lines: list[str] = []
     if path.exists():
         lines = [
             line
             for line in path.read_text(encoding="utf-8").splitlines()
-            if not line.strip().startswith("DEEPSEEK_API_KEY")
+            if not is_target_assignment(line)
         ]
     lines.append(f"DEEPSEEK_API_KEY={key}")
     atomic_write_text(path, "\n".join(lines) + "\n")
@@ -80,7 +84,6 @@ def resolve_deepseek_key(project_root: Path) -> tuple[str | None, str]:
     """Resolve the effective DeepSeek key without exposing it in API state."""
     process_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if process_key and not _loom_owns_process_key(process_key):
-        os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
         return process_key, "process"
 
     project_key = _read_env_key(project_root / ".env")
