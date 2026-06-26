@@ -131,10 +131,12 @@ class GlobalDeepSeekKeyTests(unittest.TestCase):
 
     def test_key_status_does_not_return_raw_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            project = Path(tmp) / "book"
+            base = Path(tmp)
+            home = base / "home"
+            project = base / "book"
             write_project(project, "DEEPSEEK_API_KEY=sk-project\n")
-
-            status = config.key_status(project)
+            with mock.patch.object(config.Path, "home", return_value=home):
+                status = config.key_status(project)
 
             self.assertEqual(status["source"], "project")
             self.assertTrue(status["effective"])
