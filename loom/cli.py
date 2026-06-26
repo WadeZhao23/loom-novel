@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.tree import Tree
 
 from . import __version__
-from .backends import LoomBackendError, get_backend
+from .backends import LoomBackendError, cheap_backend, get_backend
 from .config import find_project_root, load_config
 from .state import load_state
 
@@ -149,7 +149,8 @@ def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, 
         config = load_config(root)
         console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字[/dim]\n")
         # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序,省 DeepSeek 计费
-        run_pipeline(root, chapter, get_backend(config), config, _render, slow=0.3, resume=not force)
+        run_pipeline(root, chapter, get_backend(config), config, _render, slow=0.3, resume=not force,
+                     critic_backend=cheap_backend(config))
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 
@@ -163,7 +164,8 @@ def learn(chapter: int = typer.Argument(...)) -> None:
         root = find_project_root()
         fp = root / "外置大脑" / "写作指纹.md"
         old = fp.read_text(encoding="utf-8") if fp.exists() else ""
-        do_learn(root, chapter, get_backend(load_config(root)), _render)
+        cfg = load_config(root)
+        do_learn(root, chapter, get_backend(cfg), _render, appraisal_backend=cheap_backend(cfg))
         ch = changed_rules(old, fp.read_text(encoding="utf-8"))
         if ch["added"] or ch["removed"]:
             console.print("\n[bold]本次指纹变化[/bold] [dim](学歪了?在 app 里点撤销,或删 外置大脑/.指纹历史/)[/dim]")

@@ -15,10 +15,12 @@ from .fsutil import atomic_write_text
 class Config:
     provider: str = "deepseek"        # deepseek | claude | codex | openai_compat
     model: str = "deepseek-v4-flash"  # DeepSeek V4(旧名 deepseek-chat/reasoner 2026-07-24 停用)
+    cheap_model: str = ""              # 可选:复审/写后摘要这类「评估」调用走的便宜模型(同供应商换 model);空=全用主模型
     base_url: str = ""                 # 仅 openai_compat 有意义:第三方 OpenAI 兼容供应商的接口地址
     title: str = "我的第一本书"
     chapter_chars: int = 800           # 终稿目标字数;中间工序自然更短
     gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
+    foreshadow_distance: int = 8       # 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写第N章时进留痕提醒(纯提示、不回炉、不阻断);0=关
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -44,10 +46,12 @@ def load_config(project_root: Path) -> Config:
     return Config(
         provider=backend.get("provider", "deepseek"),
         model=backend.get("model", "deepseek-v4-flash"),
+        cheap_model=backend.get("cheap_model", ""),    # 老 toml 没这行 → 空串=不开,行为不变
         base_url=backend.get("base_url", ""),          # 老 toml 没这行 → 兜底空串,无需迁移
         title=novel.get("title", "我的第一本书"),
         chapter_chars=int(novel.get("章节字数", novel.get("chapter_chars", 800))),
         gate_rounds=int(gate.get("轮数", gate.get("rounds", 1))),
+        foreshadow_distance=int(gate.get("伏笔提醒章距", gate.get("foreshadow_distance", 8))),
     )
 
 
@@ -94,11 +98,13 @@ def save_config(project_root: Path, cfg: Config) -> None:
     # base_url 只对 openai_compat 有意义,只在该供应商下写出这一行——deepseek/claude/codex 重写后照旧无该字段
     base_url_line = (f'base_url = "{cfg.base_url}"\n'
                      if cfg.provider == "openai_compat" and cfg.base_url else "")
+    cheap_line = f'cheap_model = "{cfg.cheap_model}"\n' if cfg.cheap_model else ""  # 没设就不写,保持 toml 干净
     content = (
         "# Loom 项目配置\n\n"
         "[backend]\n"
         f'provider = "{cfg.provider}"\n'
         f'model    = "{cfg.model}"\n'
+        f'{cheap_line}'
         f'{base_url_line}'
         "\n"
         "[novel]\n"
@@ -107,5 +113,7 @@ def save_config(project_root: Path, cfg: Config) -> None:
         "[gate]\n"
         "# 质检/去AI味 复审轮数:1=只挑硬伤写进 .审稿留痕/(默认,不自动改稿);≥2 才回炉重写;0=关闭。不打分、不硬阻断(见 ADR-0006)\n"
         f'"轮数" = {int(cfg.gate_rounds)}\n'
+        "# 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写新章时进 .审稿留痕/ 提醒(纯提示,不回炉、不阻断);0=关\n"
+        f'"伏笔提醒章距" = {int(cfg.foreshadow_distance)}\n'
     )
     atomic_write_text(project_root / "loom.toml", content)

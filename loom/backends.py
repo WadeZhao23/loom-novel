@@ -492,3 +492,13 @@ def get_backend(config: Config) -> Backend:
     if provider == "codex":
         return CodexBackend(config)
     raise LoomBackendError(f"未知后端 provider={provider!r}(支持 deepseek/claude/codex/openai_compat)。")
+
+
+def cheap_backend(config: Config) -> Backend | None:
+    """便宜模型后端:仅当 cheap_model 设了且不同于主模型时返回(同 provider/base_url/key,只换 model);
+    否则 None,调用方回退主后端。只给复审/写后摘要这类「评估/管 what」调用用,写作/学指纹始终留给主模型。"""
+    import dataclasses
+    cheap = (getattr(config, "cheap_model", "") or "").strip()
+    if not cheap or cheap == (config.model or "").strip():
+        return None
+    return get_backend(dataclasses.replace(config, model=cheap))

@@ -171,7 +171,8 @@ def _aligned_signal(snapshot: str, edited: str) -> str:
     return "\n".join(parts) if parts else "(没有可识别的句级改动)"
 
 
-def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progress = _noop) -> Path:
+def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progress = _noop,
+          *, appraisal_backend: Backend | None = None) -> Path:
     edited_path = project_root / "正文" / f"第{chapter_n}章.md"
     snap_path = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
     if not snap_path.exists() or not edited_path.exists():
@@ -212,16 +213,18 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     mark_learned(project_root, chapter_n)
     if warn:
         progress({"type": "warn", "message": warn})
+    # 写后摘要 / 外置大脑生长都是「管 what 的附赠」,可走便宜模型;指纹蒸馏(上面)始终用主模型保「像你」
+    appraise = appraisal_backend or backend
     # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
     try:
         from .recap import recap_chapter
-        recap_chapter(project_root, chapter_n, backend, progress)
+        recap_chapter(project_root, chapter_n, appraise, progress)
     except LoomBackendError as e:
         progress({"type": "warn", "message": f"写后摘要没补成(不影响指纹):{e}"})
     # 外置大脑随章生长:把这章新设定/新人物追加进世界观/人物卡(同为附赠,绝不阻断 learn)
     try:
         from .enrich import enrich_chapter
-        enrich_chapter(project_root, chapter_n, backend, progress)
+        enrich_chapter(project_root, chapter_n, appraise, progress)
     except Exception as e:  # 附赠功能,任何失败都不能拖累已落盘的指纹
         progress({"type": "warn", "message": f"外置大脑补充没补成(不影响指纹):{e}"})
     progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n, "shrink_warning": warn})
