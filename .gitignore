@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .DS_Store
 .env
+.worktrees/
 
 # 本地工具 / IDE / agent 配置(别进公开仓)
 .claude/
