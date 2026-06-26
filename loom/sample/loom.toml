@@ -2,7 +2,7 @@
 
 [backend]
 provider = "deepseek"
-model    = "deepseek-chat"
+model    = "deepseek-v4-flash"
 
 [novel]
 title = "重生记忆(样例)"

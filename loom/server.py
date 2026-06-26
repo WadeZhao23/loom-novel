@@ -16,10 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents import run_pipeline
-from .backends import LoomBackendError, get_backend, probe as probe_backend
+from .backends import (LoomBackendError, get_backend, list_models, probe as probe_backend,
+                       provider_catalog, validate_model)
 from . import chapters as chap
+from .chaptertext import parse_title, strip_title
 from . import ledger
-from .config import Config, key_is_set, load_config, save_config, set_env_key
+from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
+                     save_config, set_env_key, set_openai_compat_key)
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
@@ -67,13 +70,18 @@ def _state(root: Path) -> dict:
     chs = []
     for n in chapters:
         out, snap = body / f"第{n}章.md", body / ".原稿" / f"第{n}章.md"
-        edited = snap.exists() and out.read_text(encoding="utf-8").strip() != snap.read_text(encoding="utf-8").strip()
-        chs.append({"n": n, "written": True, "edited": edited, "learned": n in set(st.get("learned", []))})
+        out_text = out.read_text(encoding="utf-8")
+        # 「改过」只看正文体(去掉标题再比):改标题不算手改、不该亮「改过」徽标(与 learn/drift 同口径)
+        edited = snap.exists() and strip_title(out_text).strip() != strip_title(snap.read_text(encoding="utf-8")).strip()
+        chs.append({"n": n, "title": parse_title(out_text), "written": True,
+                    "edited": edited, "learned": n in set(st.get("learned", []))})
     return {
         "root": str(root),
         "title": cfg.title,
-        "backend": {"provider": cfg.provider, "model": cfg.model, "chapter_chars": cfg.chapter_chars,
-                    "key_set": key_is_set(root)},
+        "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
+                    "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
+                    "openai_compat_key_set": openai_compat_key_is_set(root),
+                    "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
         "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
                  + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
@@ -216,12 +224,28 @@ class ConfigBody(BaseModel):
     provider: str
     model: str
     chapter_chars: int
+    base_url: str | None = None
     api_key: str | None = None
 
 
 @app.get("/api/backend/probe")
 def backend_probe(provider: str):
     return probe_backend(provider)
+
+
+class ModelsBody(BaseModel):
+    root: str | None = None
+    provider: str
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+@app.post("/api/backend/models")
+def backend_models(b: ModelsBody):
+    """「拉取可用模型」:OpenAI 兼容的实时打 GET /models,CLI 类返回预设。只读、不耗 token。"""
+    if b.root:
+        load_config(Path(b.root))   # 让项目 .env 里的 key 进 os.environ,拉取时能用上
+    return list_models(b.provider, base_url=b.base_url or "", api_key=b.api_key or "")
 
 
 class ChapterOpBody(BaseModel):
@@ -269,11 +293,23 @@ def sensitive_scan(b: ScanBody):
 def update_config(b: ConfigBody):
     root = Path(b.root)
     cfg = load_config(root)
-    save_config(root, Config(provider=b.provider, model=b.model, title=cfg.title,
+    base_url = (b.base_url or "").strip()
+    if b.provider == "openai_compat" and not base_url:
+        return JSONResponse({"error": "选了「OpenAI 兼容(自定义)」要先填这家供应商的 base_url(接口地址),再保存。"},
+                            status_code=400)
+    save_config(root, Config(provider=b.provider, model=b.model, base_url=base_url, title=cfg.title,
                              chapter_chars=b.chapter_chars, gate_rounds=cfg.gate_rounds))  # 别把回炉轮数静默重置回默认
     if b.api_key:
-        set_env_key(root, b.api_key.strip())
-    return _state(root)
+        # key 按供应商分别落到对的 env var:DeepSeek→DEEPSEEK_API_KEY,自定义→LOOM_OPENAI_COMPAT_KEY(各占一行)
+        if b.provider == "openai_compat":
+            set_openai_compat_key(root, b.api_key.strip())
+        else:
+            set_env_key(root, b.api_key.strip())
+    st = _state(root)
+    warn = validate_model(b.provider, b.model)   # 软提示(如把 v4-flash 填进 deepseek)——只提示,不阻断保存
+    if warn:
+        st["model_warning"] = warn
+    return st
 
 
 # ----------------------------- seed / learn -----------------------------
@@ -307,8 +343,9 @@ def learn(b: ChapterBody):
     fp_file = root / "外置大脑" / "写作指纹.md"
     # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
     old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
+    events: list[dict] = []
     try:
-        fp_learn(root, b.chapter, get_backend(load_config(root)))
+        fp_learn(root, b.chapter, get_backend(load_config(root)), events.append)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     new_fp = fp_file.read_text(encoding="utf-8")
@@ -317,12 +354,14 @@ def learn(b: ChapterBody):
     chars_p = root / "外置大脑" / "人物卡.md"
     world_supp = extract_supplement(world_p.read_text(encoding="utf-8"), b.chapter) if world_p.exists() else ""
     chars_supp = extract_supplement(chars_p.read_text(encoding="utf-8"), b.chapter) if chars_p.exists() else ""
+    done = next((e for e in events if e.get("type") == "learn_done"), {})
     return {"ok": True,
             "fingerprint": new_fp,
             "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8"),
             "changes": changed_rules(old_fp, new_fp),
             "世界观补充": world_supp,
-            "人物卡补充": chars_supp}
+            "人物卡补充": chars_supp,
+            "warn": done.get("shrink_warning") or ""}   # 软提示:疑似把嗓音磨短/丢 anchor,可一键撤销
 
 
 class DraftBody(BaseModel):

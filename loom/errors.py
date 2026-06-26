@@ -97,6 +97,61 @@ author_errors: dict[str, AuthorError] = {
         impact="对应工序无法运行,整章写作中断。",
         next_action="确认 agents/ 目录下五个角色文件齐全(设定师/大纲师/写手/编辑/润色师);缺了就从模板恢复,或重新 init 一个项目对照补回。",
     ),
+    # ---- 模型输出 / 路由相关(写盘安全闸 + 多供应商路由)----
+    "model_output_invalid": AuthorError(
+        title="模型这次没产出有效结果,已为你刹住",
+        reason="后端返回了空/过短/结构不完整的内容(多半是模型名填错、或这个模型答非所问)。",
+        impact="你原来的写作指纹 / 正文【一个字都没动】——Loom 宁可不写,也不拿一坨空的覆盖你攒下的东西。",
+        next_action="把顶栏模型换回该供应商的正常模型(DeepSeek 选 deepseek-v4-flash)再试一次;或点「拉取可用模型」看看这家到底有哪些模型可选。",
+    ),
+    "deepseek_empty_response": AuthorError(
+        title="DeepSeek 返回了空内容",
+        reason="多半是模型名填错——比如把「v4-flash」当成 DeepSeek 模型,但它的正式名是「deepseek-v4-flash」;DeepSeek 不认识的名字会回一个 200 空响应,而不是报错。",
+        impact="这一步没产出,你的指纹和已写章节都【原样保住了】。",
+        next_action="顶栏模型选「deepseek-v4-flash」或「deepseek-v4-pro」(旧名 deepseek-chat/reasoner 2026-07-24 停用);想用别家模型,把供应商切到「OpenAI 兼容(自定义)」再填它的 base_url。",
+    ),
+    "model_empty_response": AuthorError(
+        title="这个模型返回了空内容",
+        reason="OpenAI 兼容接口收到了 200 但内容是空的,常见于模型名不对、或该模型在这个 base_url 下不可用。",
+        impact="这一步没产出,你的稿子和指纹没受影响。",
+        next_action="点「拉取可用模型」确认这家供应商真有你填的这个模型名;或检查 base_url 是否填对(各家地址不同)。",
+    ),
+    "backend_empty_response": AuthorError(
+        title="后端命令返回了空内容",
+        reason="claude / codex 子进程跑完了却没吐出正文(可能模型名不对、或这次被客户端拦下)。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="清空顶栏模型框让它用默认模型再试;或在终端单独跑一次该命令确认它本身能出文字。",
+    ),
+    "model_call_failed": AuthorError(
+        title="调用这个模型没成功",
+        reason="网络不通、base_url/key 不对,或一个还没归类的接口错误。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="检查 base_url 与 API Key 是否填对、网络是否可达;或先切回 DeepSeek 继续写。细节见下方反馈。",
+    ),
+    "openai_compat_base_url_missing": AuthorError(
+        title="还没填这个供应商的 base_url",
+        reason="选了「OpenAI 兼容(自定义)」供应商,但没填它的接口地址(base_url)。",
+        impact="不知道该把请求发到哪,后端起不来。",
+        next_action="在顶栏填该供应商的 base_url(智谱GLM:https://open.bigmodel.cn/api/paas/v4 · Moonshot:https://api.moonshot.cn/v1 · 通义Qwen:https://dashscope.aliyuncs.com/compatible-mode/v1 · 硅基流动:https://api.siliconflow.cn/v1),再填模型名与 key。",
+    ),
+    "openai_compat_key_missing": AuthorError(
+        title="还没填这个供应商的 API Key",
+        reason="选了「OpenAI 兼容(自定义)」供应商,但没在项目 .env 里读到它的 key(LOOM_OPENAI_COMPAT_KEY)。",
+        impact="这家供应商要鉴权,没 key 调不动。",
+        next_action="在顶栏 API Key 框填这家供应商给你的 key,点「保存后端」(它会写进项目 .env,与 DeepSeek 的 key 各占一行,互不覆盖)。",
+    ),
+    "model_name_missing": AuthorError(
+        title="还没填模型名",
+        reason="OpenAI 兼容供应商必须明确指定一个模型名,但模型框是空的。",
+        impact="不知道要调哪个模型,后端起不来。",
+        next_action="在顶栏模型框填这家供应商的一个模型名;不确定有哪些,点「拉取可用模型」让它列出来。",
+    ),
+    "fingerprint_inherit_invalid": AuthorError(
+        title="要继承的指纹文件不像一份有效指纹",
+        reason="选来继承的那份写作指纹文件是空的、或读不出小节结构(可能选错了文件)。",
+        impact="没有继承、你当前的指纹原样保留,没被覆盖。",
+        next_action="确认选的是另一本书 外置大脑/写作指纹.md(里面应有「## 句式偏好」这类小节);选对了再继承。",
+    ),
 }
 
 

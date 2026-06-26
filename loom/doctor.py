@@ -11,7 +11,7 @@ import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .config import key_is_set, load_config
+from .config import key_is_set, load_config, openai_compat_key_is_set
 
 # 单一真相:server.py 也从这里导入,避免清单各存一份漂移
 BRAIN_FILES = ["世界观", "人物卡", "卡章纲", "写作指纹"]   # 外置大脑四件套
@@ -41,13 +41,20 @@ def run_checks(root: Path) -> list[Check]:
                          f"无法读取/解析:{e}", "确认 loom.toml 存在且为合法 TOML,或重新 loom init"))
         return checks  # 没配置,后面的检查无意义,提前返回
     prov = (cfg.provider or "deepseek").lower()
-    # b. provider 凭据(仅 deepseek 需要 key)
+    # b. provider 凭据(deepseek / openai_compat 要 key;自定义还要 base_url)
     if prov == "deepseek":
         checks.append(_c("DEEPSEEK_API_KEY 已配", key_is_set(root),
                          ".env 里没读到 DEEPSEEK_API_KEY",
                          ".env 加一行 DEEPSEEK_API_KEY=sk-你的key(platform.deepseek.com 申请)"))
+    elif prov == "openai_compat":
+        checks.append(_c("自定义供应商 base_url 已填", bool((cfg.base_url or "").strip()),
+                         "loom.toml 里没填 backend.base_url",
+                         "顶栏填这家供应商的接口地址 base_url(如智谱 https://open.bigmodel.cn/api/paas/v4)再保存后端"))
+        checks.append(_c("LOOM_OPENAI_COMPAT_KEY 已配", openai_compat_key_is_set(root),
+                         ".env 里没读到 LOOM_OPENAI_COMPAT_KEY",
+                         "顶栏 API Key 框填这家供应商的 key,点保存后端(写进项目 .env)"))
     # c. provider 对应命令/库
-    if prov == "deepseek":
+    if prov in ("deepseek", "openai_compat"):
         checks.append(_c("openai 库已装", importlib.util.find_spec("openai") is not None,
                          "没装 openai 库", "pip install openai"))
     elif prov == "claude":
@@ -59,7 +66,7 @@ def run_checks(root: Path) -> list[Check]:
                          "装 Codex CLI(npm i -g @openai/codex)并 codex login(复用 ChatGPT 订阅,不用填 key)"))
     else:
         checks.append(_c("provider 受支持", False,
-                         f"未知 provider={prov!r}", "loom.toml 里改成 deepseek/claude/codex"))
+                         f"未知 provider={prov!r}", "loom.toml 里改成 deepseek/claude/codex/openai_compat"))
     # d. 5 个 agent 文件齐
     for n in AGENT_FILES:
         p = root / "agents" / f"{n}.md"

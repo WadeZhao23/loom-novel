@@ -13,8 +13,9 @@ from .fsutil import atomic_write_text
 
 @dataclass
 class Config:
-    provider: str = "deepseek"        # deepseek | claude | codex
-    model: str = "deepseek-chat"
+    provider: str = "deepseek"        # deepseek | claude | codex | openai_compat
+    model: str = "deepseek-v4-flash"  # DeepSeek V4(旧名 deepseek-chat/reasoner 2026-07-24 停用)
+    base_url: str = ""                 # 仅 openai_compat 有意义:第三方 OpenAI 兼容供应商的接口地址
     title: str = "我的第一本书"
     chapter_chars: int = 800           # 终稿目标字数;中间工序自然更短
     gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
@@ -42,40 +43,64 @@ def load_config(project_root: Path) -> Config:
     gate = data.get("gate", {})
     return Config(
         provider=backend.get("provider", "deepseek"),
-        model=backend.get("model", "deepseek-chat"),
+        model=backend.get("model", "deepseek-v4-flash"),
+        base_url=backend.get("base_url", ""),          # 老 toml 没这行 → 兜底空串,无需迁移
         title=novel.get("title", "我的第一本书"),
         chapter_chars=int(novel.get("章节字数", novel.get("chapter_chars", 800))),
         gate_rounds=int(gate.get("轮数", gate.get("rounds", 1))),
     )
 
 
-def set_env_key(project_root: Path, key: str) -> None:
-    """把 DEEPSEEK_API_KEY 写进项目根的 .env(替换已有行)。"""
+def _set_env_var(project_root: Path, name: str, value: str) -> None:
+    """把 name=value 写进项目根的 .env,只替换 name 那一行——多个 key(DeepSeek / 自定义供应商)各占一行,互不覆盖。"""
     env = project_root / ".env"
     lines = []
     if env.exists():
         lines = [l for l in env.read_text(encoding="utf-8").splitlines()
-                 if not l.strip().startswith("DEEPSEEK_API_KEY")]
-    lines.append(f"DEEPSEEK_API_KEY={key}")
+                 if not l.strip().startswith(f"{name}=") and l.strip() != name]
+    lines.append(f"{name}={value}")
     atomic_write_text(env, "\n".join(lines) + "\n")
 
 
-def key_is_set(project_root: Path) -> bool:
+def _env_var_set(project_root: Path, name: str) -> bool:
     env = project_root / ".env"
     if not env.exists():
         return False
     for line in env.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith("DEEPSEEK_API_KEY="):
+        if line.strip().startswith(f"{name}="):
             return bool(line.split("=", 1)[1].strip())
     return False
 
 
+def set_env_key(project_root: Path, key: str) -> None:
+    """把 DEEPSEEK_API_KEY 写进项目根的 .env(替换已有行)。"""
+    _set_env_var(project_root, "DEEPSEEK_API_KEY", key)
+
+
+def key_is_set(project_root: Path) -> bool:
+    return _env_var_set(project_root, "DEEPSEEK_API_KEY")
+
+
+def set_openai_compat_key(project_root: Path, key: str) -> None:
+    """第三方 OpenAI 兼容供应商的 key 写进 .env 的 LOOM_OPENAI_COMPAT_KEY(与 DeepSeek key 各占一行)。"""
+    _set_env_var(project_root, "LOOM_OPENAI_COMPAT_KEY", key)
+
+
+def openai_compat_key_is_set(project_root: Path) -> bool:
+    return _env_var_set(project_root, "LOOM_OPENAI_COMPAT_KEY")
+
+
 def save_config(project_root: Path, cfg: Config) -> None:
+    # base_url 只对 openai_compat 有意义,只在该供应商下写出这一行——deepseek/claude/codex 重写后照旧无该字段
+    base_url_line = (f'base_url = "{cfg.base_url}"\n'
+                     if cfg.provider == "openai_compat" and cfg.base_url else "")
     content = (
         "# Loom 项目配置\n\n"
         "[backend]\n"
         f'provider = "{cfg.provider}"\n'
-        f'model    = "{cfg.model}"\n\n'
+        f'model    = "{cfg.model}"\n'
+        f'{base_url_line}'
+        "\n"
         "[novel]\n"
         f'title = "{cfg.title}"\n'
         f'"章节字数" = {int(cfg.chapter_chars)}\n\n'

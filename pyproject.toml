@@ -1,6 +1,6 @@
 [project]
 name = "loom-novel"
-version = "1.2.0"
+version = "1.3.0"
 description = "把一队分工 Agent 织成一条写小说流水线的命令行工具"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,6 +18,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dist = ["pyinstaller>=6.0"]   # 打包成 .app/.exe:pip install -e ".[dist]"
+dev = ["pytest>=8.0"]         # 跑测试:pip install -e ".[dev]" && pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [project.scripts]
 loom-app = "loom.desktop:run"      # 桌面客户端(原生窗口)

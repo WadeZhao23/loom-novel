@@ -20,7 +20,10 @@ from pathlib import Path
 from typing import Callable
 
 from .backends import Backend, LoomBackendError
+from .chaptertext import strip_title
+from .errors import render
 from .fsutil import atomic_write_text
+from .guard import FINGERPRINT, guard_write, validate_output, visible_len
 from .state import mark_learned, set_fingerprint_source, unmark_learned
 
 Progress = Callable[[dict], None]
@@ -99,7 +102,7 @@ def seed_from_samples(project_root: Path, samples: str, backend: Backend, progre
     )
     fp = backend.complete(_SEED_SYSTEM, user, max_chars=1800)
     path = project_root / FINGERPRINT_REL
-    atomic_write_text(path, fp.strip() + "\n")
+    guard_write(path, fp, FINGERPRINT)   # 空/残缺不覆盖:宁可不种,也不拿一坨空的盖掉默认指纹
     set_fingerprint_source(project_root, "sample")
     progress({"type": "seed_done", "path": str(path), "source": "sample"})
     return path
@@ -108,8 +111,13 @@ def seed_from_samples(project_root: Path, samples: str, backend: Backend, progre
 def seed_from_inherit(project_root: Path, other_fingerprint: Path, progress: Progress = _noop) -> Path:
     if not other_fingerprint.exists():
         raise LoomBackendError(f"找不到要继承的指纹文件:{other_fingerprint}")
+    content = other_fingerprint.read_text(encoding="utf-8")
+    # 轻校验:这是用户主动选的【已有文件】、不是模型输出——只确认它像一份指纹,
+    # 别套「模型没产出、请清空模型框」那套话术(那是给模型空响应用的,语义对不上)。
+    if validate_output(content, FINGERPRINT):
+        raise LoomBackendError(render("fingerprint_inherit_invalid"), code="fingerprint_inherit_invalid")
     path = project_root / FINGERPRINT_REL
-    atomic_write_text(path, other_fingerprint.read_text(encoding="utf-8"))
+    atomic_write_text(path, content)
     set_fingerprint_source(project_root, "inherit")
     progress({"type": "seed_done", "path": str(path), "source": "inherit"})
     return path
@@ -168,8 +176,9 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     snap_path = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
     if not snap_path.exists() or not edited_path.exists():
         raise LoomBackendError(f"第 {chapter_n} 章还没生成过(找不到原稿快照)。先写第 {chapter_n} 章。")
-    edited = edited_path.read_text(encoding="utf-8")
-    snapshot = snap_path.read_text(encoding="utf-8")
+    # 去掉首行标题再比/再 diff:只改标题不算「手改」、绝不被当文风学进指纹(标题与正文体物理隔离)
+    edited = strip_title(edited_path.read_text(encoding="utf-8"))
+    snapshot = strip_title(snap_path.read_text(encoding="utf-8"))
     if edited.strip() == snapshot.strip():
         raise LoomBackendError(
             f"第 {chapter_n} 章你一个字都还没改 —— 没有「你的改动」可学。\n"
@@ -187,11 +196,22 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         f"请按两步走(先判定改写/改情节,再只学改写)输出更新后的【完整新指纹】。"
     )
     new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=1800)
+    # 硬闸(直接修用户实报的数据丢失):空/过短/丢光小节结构 → 保留旧指纹、绝不覆盖,抛友好错误。
+    reasons = validate_output(new_fp, FINGERPRINT)
+    if reasons:
+        raise LoomBackendError(render("model_output_invalid", detail="；".join(reasons)),
+                               code="model_output_invalid")
+    new_fp = new_fp.strip()
+    # 软闸(守 ADR 0001「不自动给指纹打分,把决定权还给人 + 可撤销」):疑似把你攒下的嗓音
+    # 磨短/丢 anchor 时,仍然写入,但显著提示「可一键撤销」——不硬拦,不替你判定 learn 合不合格。
+    warn = _shrink_warning(old_fp, new_fp)
     # 备份 learn 前的指纹,供作者一键撤销(人兜"形对神错"——自动打分兜不住)
     hist = project_root / "外置大脑" / ".指纹历史"
     atomic_write_text(hist / f"第{chapter_n}章-learn前.md", old_fp)
-    atomic_write_text(fp_path, new_fp.strip() + "\n")
+    atomic_write_text(fp_path, new_fp + "\n")
     mark_learned(project_root, chapter_n)
+    if warn:
+        progress({"type": "warn", "message": warn})
     # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
     try:
         from .recap import recap_chapter
@@ -204,7 +224,7 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         enrich_chapter(project_root, chapter_n, backend, progress)
     except Exception as e:  # 附赠功能,任何失败都不能拖累已落盘的指纹
         progress({"type": "warn", "message": f"外置大脑补充没补成(不影响指纹):{e}"})
-    progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n})
+    progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n, "shrink_warning": warn})
     return fp_path
 
 
@@ -242,6 +262,31 @@ def _norm_rule(line: str) -> str:
     免得"只把『他没说话。』的弯引号换成直引号"这种纯标点改动被误报成「删一条又加一条」,
     在弹窗里吓到作者(以为攒下的嗓音被删了)。展示仍用原文,只比对时归一。"""
     return line.strip().translate(_QUOTE_NORM)
+
+
+def _anchor_lines(fp: str) -> list[str]:
+    """指纹里真正的 anchor 例句行(blockquote 且非占位/页眉)。"""
+    return [l for l in fp.splitlines() if l.strip().startswith(">") and _is_rule(l)]
+
+
+def _shrink_warning(old_fp: str, new_fp: str) -> str:
+    """软闸:这次 learn 是否疑似把攒下的嗓音磨短/丢了 anchor。返回提示语(没问题则空串)。
+
+    只提示、不阻断——硬阻断与 ADR 0001「不自动给指纹打分」相悖;真磨短了,人看一眼点撤销即可。
+    """
+    msgs: list[str] = []
+    old_v, new_v = visible_len(old_fp), visible_len(new_fp)
+    if old_v >= 120 and new_v < old_v * 0.6:       # 基线够长才比,避开中性默认指纹→首次 learn 的正常增长
+        msgs.append(f"新指纹比原来短了不少({old_v}→{new_v} 字)")
+    old_anchors = {_norm_rule(l) for l in _anchor_lines(old_fp)}
+    new_anchors = {_norm_rule(l) for l in _anchor_lines(new_fp)}
+    if len(old_anchors) >= 2:                       # 原本就有若干 anchor 才谈「保留率」
+        kept = len(old_anchors & new_anchors)
+        if kept / len(old_anchors) < 0.8:
+            msgs.append(f"保留的 anchor 例句偏少(原 {len(old_anchors)} 条只留下 {kept} 条)")
+    if not msgs:
+        return ""
+    return "这次 learn:" + ";".join(msgs) + "。已写入指纹,但若你觉得不像自己了,点「撤销这次 learn」即可一键还原。"
 
 
 def changed_rules(old_fp: str, new_fp: str) -> dict:

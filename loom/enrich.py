@@ -111,6 +111,9 @@ def enrich_chapter(project_root: Path, chapter_n: int,
             f"## 现有人物卡\n{chars.strip() or '(还没有)'}\n\n"
             f"## 第 {chapter_n} 章定稿正文\n{final}")
     raw = backend.complete(_ENRICH_SYSTEM, user, max_chars=700)
+    if not raw.strip():  # 模型没产出 → 干净跳过(附赠功能,绝不阻断、也不吓人)
+        progress({"type": "enrich_skip", "chapter": chapter_n})
+        return None
     world_body, chars_body = _parse_sections(raw)
 
     result = {"chapter": chapter_n, "世界观": "", "人物卡": ""}

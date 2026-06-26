@@ -15,6 +15,7 @@ from typing import Callable
 from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
+from .guard import DRAFT_SECTION, validate_output
 
 Progress = Callable[[dict], None]
 
@@ -108,7 +109,7 @@ def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progr
     skipped: list[str] = []
     for key, rel in _SECTIONS:
         body = parts.get(key, "")
-        if not body:
+        if not body or validate_output(body, DRAFT_SECTION):  # 缺这段/这段太短 → 跳过(逐段非空,不强求三段齐全)
             continue
         path = project_root / rel
         if not _is_blank_or_template(path):     # 你已经填了真内容 → 不覆盖,跳过

@@ -62,6 +62,9 @@ def recap_chapter(project_root: Path, chapter_n: int,
     final = final_path.read_text(encoding="utf-8").strip()
     progress({"type": "info", "message": f"正在为第 {chapter_n} 章补写后摘要…"})
     raw = backend.complete(_RECAP_SYSTEM, f"第 {chapter_n} 章定稿正文:\n\n{final}", max_chars=600)
+    if not raw.strip():  # 模型没产出 → 干净跳过(附赠功能,绝不阻断 learn)
+        progress({"type": "recap_skip", "chapter": chapter_n})
+        return None
     block = _format_block(chapter_n, raw)
 
     new_card = _append_recap(card, chapter_n, block)

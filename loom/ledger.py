@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from .chaptertext import strip_title
 from .fsutil import atomic_write_text
 from typing import Callable
 
@@ -48,20 +49,22 @@ def record_step(root: Path, n: int, role: str, output: str, upstream_sha: str) -
 
 
 def record_snapshot(root: Path, n: int, final_text: str) -> None:
+    # snapshot_sha 只比【正文体】(去掉首行标题):改标题不算「手改正文」,不该触发 drifted 重写闸。
+    # 老章无 H1 时 strip_title 原样返回,sha 与旧账本一致——向后兼容,无需迁移。
     led = load_ledger(root, n)
-    led["snapshot_sha"] = sha(final_text.strip())
+    led["snapshot_sha"] = sha(strip_title(final_text).strip())
     save_ledger(root, n, led)
 
 
 def chapter_drifted(root: Path, n: int) -> bool:
-    """正文/第N章.md 与上次落盘的终稿不一致(作者手改过)→ True。"""
+    """正文/第N章.md 的【正文体】与上次落盘的终稿不一致(作者手改过正文)→ True。改标题不算。"""
     out = root / "正文" / f"第{n}章.md"
     if not out.exists():
         return False
     led = load_ledger(root, n)
     if not led.get("snapshot_sha"):
         return False
-    return sha(out.read_text(encoding="utf-8").strip()) != led["snapshot_sha"]
+    return sha(strip_title(out.read_text(encoding="utf-8")).strip()) != led["snapshot_sha"]
 
 
 def resume_point(root: Path, n: int,
