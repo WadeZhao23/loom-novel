@@ -273,12 +273,12 @@ async function runDoctor() {
 // ---------- 渲染 ----------
 function keySourceLabel() {
   const st = DATA && DATA.backend && DATA.backend.key_status;
-  if (!st || !st.effective) return "未配置 Key";
+  if (!st || !st.effective) return "未配置";
   const labels = {
     process: "系统环境 Key",
     project: "本项目 Key",
     global: "全局 Key",
-    none: "未配置 Key",
+    none: "未配置",
   };
   return labels[st.source] || "已配置 Key";
 }
