@@ -44,8 +44,8 @@ def run_checks(root: Path) -> list[Check]:
     # b. provider 凭据(仅 deepseek 需要 key)
     if prov == "deepseek":
         checks.append(_c("DEEPSEEK_API_KEY 已配", key_is_set(root),
-                         ".env 里没读到 DEEPSEEK_API_KEY",
-                         ".env 加一行 DEEPSEEK_API_KEY=sk-你的key(platform.deepseek.com 申请)"))
+                         "全局 ~/.loom/.env 和项目 .env 都没读到 DEEPSEEK_API_KEY",
+                         "在顶栏保存全局 DeepSeek Key，或在本项目 .env 加 DEEPSEEK_API_KEY=sk-你的key"))
     # c. provider 对应命令/库
     if prov == "deepseek":
         checks.append(_c("openai 库已装", importlib.util.find_spec("openai") is not None,

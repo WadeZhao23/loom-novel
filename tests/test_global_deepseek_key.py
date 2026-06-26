@@ -214,6 +214,50 @@ class GlobalDeepSeekKeyTests(unittest.TestCase):
             self.assertIn("DEEPSEEK_API_KEY=sk-new", env_text)
             self.assertNotIn("DEEPSEEK_API_KEY=replace-me", env_text)
 
+    def test_server_state_includes_key_status_without_raw_key(self) -> None:
+        from loom import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "book"
+            write_project(project, "DEEPSEEK_API_KEY=sk-project\n")
+            (project / "正文").mkdir()
+
+            state = server._state(project)
+
+            self.assertTrue(state["backend"]["key_set"])
+            self.assertEqual(state["backend"]["key_status"]["source"], "project")
+            self.assertNotIn("sk-project", repr(state))
+
+    def test_global_key_endpoint_saves_key_and_returns_state(self) -> None:
+        from loom import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            project = base / "book"
+            write_project(project)
+            with mock.patch.object(config.Path, "home", return_value=home):
+                body = server.GlobalKeyBody(root=str(project), api_key="sk-global")
+
+                state = server.update_global_key(body)
+
+            self.assertTrue((home / ".loom" / ".env").is_file())
+            self.assertTrue(state["backend"]["key_set"])
+            self.assertEqual(state["backend"]["key_status"]["source"], "global")
+            self.assertNotIn("sk-global", repr(state))
+
+    def test_global_key_endpoint_rejects_empty_key(self) -> None:
+        from loom import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "book"
+            write_project(project)
+            body = server.GlobalKeyBody(root=str(project), api_key="   ")
+
+            response = server.update_global_key(body)
+
+            self.assertEqual(response.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

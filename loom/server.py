@@ -19,7 +19,7 @@ from .agents import run_pipeline
 from .backends import LoomBackendError, get_backend, probe as probe_backend
 from . import chapters as chap
 from . import ledger
-from .config import Config, key_is_set, load_config, save_config, set_env_key
+from .config import Config, key_is_set, key_status, load_config, save_config, set_env_key, set_global_env_key
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
@@ -73,7 +73,7 @@ def _state(root: Path) -> dict:
         "root": str(root),
         "title": cfg.title,
         "backend": {"provider": cfg.provider, "model": cfg.model, "chapter_chars": cfg.chapter_chars,
-                    "key_set": key_is_set(root)},
+                    "key_set": key_is_set(root), "key_status": key_status(root)},
         "fingerprint_source": st.get("fingerprint_source", "default"),
         "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
                  + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
@@ -219,6 +219,11 @@ class ConfigBody(BaseModel):
     api_key: str | None = None
 
 
+class GlobalKeyBody(BaseModel):
+    root: str
+    api_key: str
+
+
 @app.get("/api/backend/probe")
 def backend_probe(provider: str):
     return probe_backend(provider)
@@ -274,6 +279,18 @@ def update_config(b: ConfigBody):
     if b.api_key:
         set_env_key(root, b.api_key.strip())
     return _state(root)
+
+
+@app.post("/api/settings/global-key")
+def update_global_key(b: GlobalKeyBody):
+    key = (b.api_key or "").strip()
+    if not key:
+        return JSONResponse({"error": "API Key 不能为空"}, status_code=400)
+    try:
+        set_global_env_key(key)
+    except OSError as e:
+        return JSONResponse({"error": f"写入全局 API Key 失败:{e}"}, status_code=500)
+    return _state(Path(b.root))
 
 
 # ----------------------------- seed / learn -----------------------------
