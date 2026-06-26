@@ -13,6 +13,7 @@ from .fsutil import atomic_write_text
 
 
 _APPLIED_DEEPSEEK_KEY: str | None = None
+_DEEPSEEK_KEY_OWNER_ENV = "_LOOM_DEEPSEEK_KEY_OWNER"
 
 
 @dataclass
@@ -66,10 +67,20 @@ def _replace_env_key(path: Path, key: str) -> None:
     atomic_write_text(path, "\n".join(lines) + "\n")
 
 
+def _loom_owns_process_key(process_key: str) -> bool:
+    return (
+        bool(process_key)
+        and _APPLIED_DEEPSEEK_KEY is not None
+        and process_key == _APPLIED_DEEPSEEK_KEY
+        and os.environ.get(_DEEPSEEK_KEY_OWNER_ENV) == "1"
+    )
+
+
 def resolve_deepseek_key(project_root: Path) -> tuple[str | None, str]:
     """Resolve the effective DeepSeek key without exposing it in API state."""
     process_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if process_key and process_key != _APPLIED_DEEPSEEK_KEY:
+    if process_key and not _loom_owns_process_key(process_key):
+        os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
         return process_key, "process"
 
     project_key = _read_env_key(project_root / ".env")
@@ -89,10 +100,16 @@ def apply_deepseek_key(project_root: Path) -> str:
     key, source = resolve_deepseek_key(project_root)
     if key:
         os.environ["DEEPSEEK_API_KEY"] = key
-        _APPLIED_DEEPSEEK_KEY = key if source != "process" else None
+        if source == "process":
+            _APPLIED_DEEPSEEK_KEY = None
+            os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
+        else:
+            _APPLIED_DEEPSEEK_KEY = key
+            os.environ[_DEEPSEEK_KEY_OWNER_ENV] = "1"
     else:
-        if _APPLIED_DEEPSEEK_KEY is not None and os.environ.get("DEEPSEEK_API_KEY") == _APPLIED_DEEPSEEK_KEY:
+        if _loom_owns_process_key(os.environ.get("DEEPSEEK_API_KEY", "").strip()):
             os.environ.pop("DEEPSEEK_API_KEY", None)
+        os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
         _APPLIED_DEEPSEEK_KEY = None
     return source
 

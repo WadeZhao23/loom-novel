@@ -34,14 +34,19 @@ def write_project(root: Path, env_text: str = "") -> None:
 class GlobalDeepSeekKeyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.old_env = os.environ.get("DEEPSEEK_API_KEY")
+        self.old_owner = os.environ.get("_LOOM_DEEPSEEK_KEY_OWNER")
         os.environ.pop("DEEPSEEK_API_KEY", None)
+        os.environ.pop("_LOOM_DEEPSEEK_KEY_OWNER", None)
         if hasattr(config, "_APPLIED_DEEPSEEK_KEY"):
             config._APPLIED_DEEPSEEK_KEY = None
 
     def tearDown(self) -> None:
         os.environ.pop("DEEPSEEK_API_KEY", None)
+        os.environ.pop("_LOOM_DEEPSEEK_KEY_OWNER", None)
         if self.old_env is not None:
             os.environ["DEEPSEEK_API_KEY"] = self.old_env
+        if self.old_owner is not None:
+            os.environ["_LOOM_DEEPSEEK_KEY_OWNER"] = self.old_owner
         if hasattr(config, "_APPLIED_DEEPSEEK_KEY"):
             config._APPLIED_DEEPSEEK_KEY = None
 
@@ -119,6 +124,26 @@ class GlobalDeepSeekKeyTests(unittest.TestCase):
                 config.load_config(second)
 
             self.assertIsNone(os.environ.get("DEEPSEEK_API_KEY"))
+
+    def test_matching_real_process_key_is_not_cleared_as_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            first = base / "first"
+            second = base / "second"
+            write_project(first, "DEEPSEEK_API_KEY=sk-same\n")
+            write_project(second)
+            with mock.patch.object(config.Path, "home", return_value=home):
+                config.load_config(first)
+                self.assertEqual(os.environ.get("DEEPSEEK_API_KEY"), "sk-same")
+
+                # Simulate the process owning the same value Loom injected earlier.
+                os.environ["DEEPSEEK_API_KEY"] = "sk-same"
+                os.environ.pop("_LOOM_DEEPSEEK_KEY_OWNER", None)
+
+                config.load_config(second)
+
+            self.assertEqual(os.environ.get("DEEPSEEK_API_KEY"), "sk-same")
 
     def test_set_global_env_key_creates_global_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
