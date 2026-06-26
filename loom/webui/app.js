@@ -125,6 +125,7 @@ function bind() {
     if (a) openFile(a.rel, false, null);
   };
   $("btn-save-backend").onclick = saveBackend;
+  $("btn-save-global-key").onclick = saveGlobalKey;
   $("btn-probe").onclick = probeBackend;
   $("btn-fetch-models").onclick = fetchModels;
   $("model").onchange = onModelSelect;
@@ -273,6 +274,18 @@ async function runDoctor() {
 }
 
 // ---------- 渲染 ----------
+function keySourceLabel() {
+  const st = DATA && DATA.backend && DATA.backend.key_status;
+  if (!st || !st.effective) return "未配置";
+  const labels = {
+    process: "系统环境 Key",
+    project: "本项目 Key",
+    global: "全局 Key",
+    none: "未配置",
+  };
+  return labels[st.source] || "已配置 Key";
+}
+
 function render() {
   $("proj-title").textContent = DATA.title;
   $("provider").value = DATA.backend.provider;
@@ -281,6 +294,9 @@ function render() {
   $("base-url").value = DATA.backend.base_url || "";
   $("chapter-chars").value = DATA.backend.chapter_chars;
   $("api-key").value = "";
+  const keyEffective = DATA.backend.key_status ? DATA.backend.key_status.effective : DATA.backend.key_set;
+  $("api-key").placeholder = keyEffective ? keySourceLabel() + " 已生效" : "填 DeepSeek API Key";
+  $("key-source").textContent = DATA.backend.provider === "deepseek" ? keySourceLabel() : "";
   applyProviderUI(DATA.backend.provider);   // 顺带按供应商设 key 框占位/显隐 base_url 与按钮
 
   const fpMap = {
@@ -1121,12 +1137,29 @@ async function persistBackend(silent) {
     api_key: key || null,
   });
   DATA = resp;
-  if (!silent) toast(key ? "后端 + API Key 已保存" : "后端已保存");
+  if (!silent) toast(key ? "后端 + 本项目 Key 覆盖已保存" : "后端已保存");
   if (resp.model_warning) toast(resp.model_warning, true);   // 软提示(如把 v4-flash 填进 DeepSeek),不阻断
   render();
   if (CUR) updateWordCount();
 }
 async function saveBackend() { await persistBackend(false); }
+
+async function saveGlobalKey() {
+  const key = $("api-key").value.trim();
+  if (!key) {
+    toast("先填 DeepSeek API Key", true);
+    $("api-key").focus();
+    return;
+  }
+  try {
+    DATA = await jreq("POST", "/api/settings/global-key", { root: DATA.root, api_key: key });
+    toast("全局 DeepSeek Key 已保存");
+    render();
+    if (CUR) updateWordCount();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
 
 // 「拉取可用模型」:OpenAI 兼容的实时打 GET /models,CLI 类返回预设。结果灌进下拉。
 async function fetchModels() {
@@ -1156,16 +1189,22 @@ async function fetchModels() {
 function applyProviderUI(provider) {
   const spec = providerSpec(provider);
   const needsKey = spec ? spec.needs_key : (provider === "deepseek");
+  const isDeepSeek = provider === "deepseek";
   const isCustom = provider === "openai_compat";
   const isCli = spec ? spec.kind === "cli" : (provider === "claude" || provider === "codex");
   $("api-key").classList.toggle("hidden", !needsKey);
   $("base-url").classList.toggle("hidden", !isCustom);
+  $("btn-save-global-key").classList.toggle("hidden", !isDeepSeek);
+  $("key-source").classList.toggle("hidden", !isDeepSeek);
+  $("key-source").textContent = isDeepSeek ? keySourceLabel() : "";
   $("btn-fetch-models").classList.toggle("hidden", !(spec && spec.can_list_models));
   $("btn-probe").classList.toggle("hidden", !isCli);
   if (!needsKey || !isCli) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
   if (needsKey) {
     const keySet = isCustom ? (DATA.backend && DATA.backend.openai_compat_key_set) : (DATA.backend && DATA.backend.key_set);
-    $("api-key").placeholder = keySet ? "API Key 已设置" : (isCustom ? "填这家供应商的 API Key" : "填 DeepSeek API Key");
+    $("api-key").placeholder = isDeepSeek
+      ? (keySet ? keySourceLabel() + " 已生效" : "填 DeepSeek API Key")
+      : (keySet ? "API Key 已设置" : "填这家供应商的 API Key");
   }
   if (isCustom && spec && spec.hint) $("base-url").title = spec.hint;
 }

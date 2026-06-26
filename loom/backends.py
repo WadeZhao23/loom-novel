@@ -443,7 +443,7 @@ def probe(provider: str) -> dict:
     provider = (provider or "deepseek").lower()
     if provider == "deepseek":
         return {"provider": provider, "ok": True, "kind": "key",
-                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存后端」即可。"}
+                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存全局 Key」即可;需要本项目覆盖时点「保存后端」。"}
     if provider == "openai_compat":
         return {"provider": provider, "ok": True, "kind": "key",
                 "message": "OpenAI 兼容供应商:填好 base_url + 模型名 + key,点「保存后端」;不确定模型名就点「拉取可用模型」。"}

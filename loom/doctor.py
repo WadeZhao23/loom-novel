@@ -44,8 +44,8 @@ def run_checks(root: Path) -> list[Check]:
     # b. provider 凭据(deepseek / openai_compat 要 key;自定义还要 base_url)
     if prov == "deepseek":
         checks.append(_c("DEEPSEEK_API_KEY 已配", key_is_set(root),
-                         ".env 里没读到 DEEPSEEK_API_KEY",
-                         ".env 加一行 DEEPSEEK_API_KEY=sk-你的key(platform.deepseek.com 申请)"))
+                         "全局 ~/.loom/.env 和项目 .env 都没读到 DEEPSEEK_API_KEY",
+                         "在顶栏保存全局 DeepSeek Key,或在本项目 .env 加 DEEPSEEK_API_KEY=sk-你的key"))
     elif prov == "openai_compat":
         checks.append(_c("自定义供应商 base_url 已填", bool((cfg.base_url or "").strip()),
                          "loom.toml 里没填 backend.base_url",

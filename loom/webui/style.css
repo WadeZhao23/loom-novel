@@ -228,6 +228,19 @@ button:disabled { opacity: .55; cursor: default; }
 .backend-status.ok { color: var(--accent-ink); }
 .backend-status.bad { color: var(--danger); }
 .backend-status .stat-ico { width: 13px; height: 13px; flex: none; }
+.key-source {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text-soft);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.key-source:empty { display: none; }
+#btn-save-global-key { white-space: nowrap; }
 
 /* 顶栏图标按钮(主题/自检/专注) */
 .icon-btn { padding: 7px 9px; line-height: 1; color: var(--text-soft); }

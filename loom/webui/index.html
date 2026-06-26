@@ -79,7 +79,9 @@
         <select id="model" class="model" title="选择模型(下拉选;第三方供应商点「拉取可用模型」拉真实列表)"></select>
         <input id="model-custom" type="text" class="model hidden" autocomplete="off" placeholder="手动输入模型名" title="列表里没有想要的型号时,手动输入一个模型名" />
         <input id="base-url" type="text" class="model base-url hidden" title="第三方 OpenAI 兼容供应商的接口地址 base_url" placeholder="base_url(自定义供应商)" />
-        <input id="api-key" type="password" class="model" title="DeepSeek / 自定义供应商需填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <input id="api-key" type="password" class="model" title="DeepSeek 可保存为全局默认 Key,也可通过保存后端写入本项目 .env 覆盖;自定义供应商写入项目 .env;Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <button id="btn-save-global-key" class="ghost hidden" title="保存为所有项目共用的 DeepSeek Key"><span class="ico" data-ico="key"></span> 保存全局 Key</button>
+        <span id="key-source" class="key-source"></span>
         <button id="btn-fetch-models" class="ghost hidden" title="拉取这个供应商当前真实可用的模型列表(只读、不耗 token)"><span class="ico" data-ico="focus"></span> 拉取可用模型</button>
         <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
         <span id="backend-status" class="backend-status"></span>
