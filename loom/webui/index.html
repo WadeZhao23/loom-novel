@@ -76,7 +76,9 @@
           <option value="codex">Codex</option>
         </select>
         <input id="model" type="text" class="model" title="模型" />
-        <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <input id="api-key" type="password" class="model" title="只对 DeepSeek 必填;可存为全局默认 Key,也可通过保存后端写入本项目 .env 覆盖;Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <button id="btn-save-global-key" class="ghost" title="保存为所有项目共用的 DeepSeek Key"><span class="ico" data-ico="key"></span> 存全局 Key</button>
+        <span id="key-source" class="key-source"></span>
         <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
         <span id="backend-status" class="backend-status"></span>
         <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>

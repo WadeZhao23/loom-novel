@@ -125,6 +125,7 @@ function bind() {
     if (a) openFile(a.rel, false, null);
   };
   $("btn-save-backend").onclick = saveBackend;
+  $("btn-save-global-key").onclick = saveGlobalKey;
   $("btn-probe").onclick = probeBackend;
   $("provider").onchange = () => {
     // 切后端给个合理默认 model:codex 留空走它自己的默认模型(订阅登录即可),claude 用 sonnet
@@ -270,13 +271,27 @@ async function runDoctor() {
 }
 
 // ---------- 渲染 ----------
+function keySourceLabel() {
+  const st = DATA && DATA.backend && DATA.backend.key_status;
+  if (!st || !st.effective) return "未配置 Key";
+  const labels = {
+    process: "系统环境 Key",
+    project: "本项目 Key",
+    global: "全局 Key",
+    none: "未配置 Key",
+  };
+  return labels[st.source] || "已配置 Key";
+}
+
 function render() {
   $("proj-title").textContent = DATA.title;
   $("provider").value = DATA.backend.provider;
   $("model").value = DATA.backend.model;
   $("chapter-chars").value = DATA.backend.chapter_chars;
   $("api-key").value = "";
-  $("api-key").placeholder = DATA.backend.key_set ? "API Key 已设置" : "填 DeepSeek API Key";
+  const keyEffective = DATA.backend.key_status ? DATA.backend.key_status.effective : DATA.backend.key_set;
+  $("api-key").placeholder = keyEffective ? keySourceLabel() + " 已生效" : "填 DeepSeek API Key";
+  $("key-source").textContent = DATA.backend.provider === "deepseek" ? keySourceLabel() : "";
   applyProviderUI(DATA.backend.provider);
 
   const fpMap = {
@@ -1054,16 +1069,35 @@ async function persistBackend(silent) {
     chapter_chars: parseInt($("chapter-chars").value) || 800,
     api_key: key || null,
   });
-  if (!silent) toast(key ? "后端 + API Key 已保存" : "后端已保存");
+  if (!silent) toast(key ? "后端 + 本项目 Key 覆盖已保存" : "后端已保存");
   render();
   if (CUR) updateWordCount();
 }
 async function saveBackend() { await persistBackend(false); }
 
+async function saveGlobalKey() {
+  const key = $("api-key").value.trim();
+  if (!key) {
+    toast("先填 DeepSeek API Key", true);
+    $("api-key").focus();
+    return;
+  }
+  try {
+    DATA = await jreq("POST", "/api/settings/global-key", { root: DATA.root, api_key: key });
+    toast("全局 DeepSeek Key 已保存");
+    render();
+    if (CUR) updateWordCount();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 // deepseek 用 key → 显示 key 框;claude/codex 复用客户端登录 → 隐藏 key 框、给「检测连接」按钮
 function applyProviderUI(provider) {
   const isKey = provider === "deepseek";
   $("api-key").classList.toggle("hidden", !isKey);
+  $("btn-save-global-key").classList.toggle("hidden", !isKey);
+  $("key-source").classList.toggle("hidden", !isKey);
   $("btn-probe").classList.toggle("hidden", isKey);
   if (isKey) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
 }
