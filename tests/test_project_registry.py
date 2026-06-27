@@ -37,6 +37,7 @@ class ProjectRegistryTests(TestCase):
         self.assertEqual(Path(entry["path"]), root.resolve())
         self.assertTrue(entry["created"])
         self.assertTrue(entry["last_open"])
+        self.assertTrue(entry["exists"])
 
         listed = projects.list_all()
         self.assertTrue(listed["projects"]["Alpha"]["exists"])
@@ -64,6 +65,43 @@ class ProjectRegistryTests(TestCase):
         path.write_text("{bad json", encoding="utf-8")
         self.assertEqual(projects.load_registry(), {"default_dir": "", "projects": {}})
 
+    def test_save_registry_normalizes_data_before_persisting(self):
+        root = self.make_project("Alpha")
+        projects.save_registry({
+            "default_dir": 123,
+            "projects": {
+                "Alpha": {
+                    "path": str(root),
+                    "created": "2026-06-27T10:00:00",
+                    "last_open": "2026-06-27T10:01:00",
+                    "extra": "ignored",
+                },
+                "Broken": "not a dict",
+                "No path": {"created": "2026-06-27T10:00:00"},
+                "Non-string timestamps": {
+                    "path": str(root),
+                    "created": 123,
+                    "last_open": None,
+                },
+            },
+        })
+
+        self.assertEqual(projects.load_registry(), {
+            "default_dir": "",
+            "projects": {
+                "Alpha": {
+                    "path": str(root),
+                    "created": "2026-06-27T10:00:00",
+                    "last_open": "2026-06-27T10:01:00",
+                },
+                "Non-string timestamps": {
+                    "path": str(root),
+                    "created": "",
+                    "last_open": "",
+                },
+            },
+        })
+
     def test_remove_is_idempotent(self):
         root = self.make_project("Alpha")
         projects.register(root)
@@ -72,8 +110,11 @@ class ProjectRegistryTests(TestCase):
         self.assertEqual(projects.list_all()["projects"], {})
 
     def test_set_default_dir_expands_and_saves_path(self):
+        root = self.make_project("Alpha")
+        projects.register(root)
         default = Path(self.tmp.name) / "books"
         data = projects.set_default_dir(default)
         self.assertEqual(Path(data["default_dir"]), default.resolve())
+        self.assertTrue(data["projects"]["Alpha"]["exists"])
         self.assertEqual(Path(projects.load_registry()["default_dir"]), default.resolve())
         self.assertEqual(Path(projects.get_default_dir()), default.resolve())

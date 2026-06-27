@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +12,35 @@ from .fsutil import atomic_write_text
 
 def _empty_registry() -> dict:
     return {"default_dir": "", "projects": {}}
+
+
+def _string_value(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _normalize(data: object) -> dict:
+    if not isinstance(data, dict):
+        return _empty_registry()
+
+    registry = _empty_registry()
+    registry["default_dir"] = _string_value(data.get("default_dir"))
+
+    raw_projects = data.get("projects")
+    if not isinstance(raw_projects, dict):
+        return registry
+
+    for name, entry in raw_projects.items():
+        if not isinstance(entry, dict):
+            continue
+        path = _string_value(entry.get("path"))
+        if not path:
+            continue
+        registry["projects"][str(name)] = {
+            "path": path,
+            "created": _string_value(entry.get("created")),
+            "last_open": _string_value(entry.get("last_open")),
+        }
+    return registry
 
 
 def registry_path() -> Path:
@@ -26,19 +54,11 @@ def load_registry() -> dict:
     except (OSError, json.JSONDecodeError):
         return _empty_registry()
 
-    if not isinstance(data, dict):
-        return _empty_registry()
-
-    registry = _empty_registry()
-    if isinstance(data.get("default_dir"), str):
-        registry["default_dir"] = data["default_dir"]
-    if isinstance(data.get("projects"), dict):
-        registry["projects"] = deepcopy(data["projects"])
-    return registry
+    return _normalize(data)
 
 
 def save_registry(data: dict) -> None:
-    text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    text = json.dumps(_normalize(data), ensure_ascii=False, indent=2) + "\n"
     atomic_write_text(registry_path(), text)
 
 
@@ -89,7 +109,7 @@ def register(path: Path, *, default_dir: Path | None = None) -> dict:
         data["default_dir"] = str(_resolve(default_dir))
 
     save_registry(data)
-    return data
+    return list_all()
 
 
 def list_all() -> dict:
@@ -112,7 +132,7 @@ def set_default_dir(path: Path) -> dict:
     data = load_registry()
     data["default_dir"] = str(_resolve(path))
     save_registry(data)
-    return data
+    return list_all()
 
 
 def get_default_dir() -> str:
