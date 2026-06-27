@@ -60,6 +60,26 @@ def test_plan_chapters_starts_from_requested_chapter(project: Path) -> None:
     assert [e["chapter"] for e in events if e["type"] == "done"] == [3, 4, 5]
 
 
+def test_plan_chapters_includes_selected_genre_context_in_prompt(project: Path) -> None:
+    genre_dir = project / "skills" / "题材"
+    genre_dir.mkdir(parents=True, exist_ok=True)
+    (genre_dir / "修仙.md").write_text("修仙题材规则：灵根、宗门、境界推进。\n", encoding="utf-8")
+    (genre_dir / "README.md").write_text("README 不应进入规划提示词。\n", encoding="utf-8")
+    backend = backend_for_chapters()
+
+    plan_chapters(project, total=1, backend=backend)
+
+    user_prompt = backend.calls[0][1]
+    assert "修仙题材规则：灵根、宗门、境界推进。" in user_prompt
+    assert "README 不应进入规划提示词。" not in user_prompt
+
+
+def test_progress_none_succeeds(project: Path) -> None:
+    result = plan_chapters(project, total=1, backend=backend_for_chapters(), progress=None)
+
+    assert result == {"planned": 1, "skipped": 0, "chapters": [1]}
+
+
 def test_existing_outline_is_skipped_without_force(project: Path) -> None:
     existing = outline_path(project, 2)
     existing.parent.mkdir(parents=True, exist_ok=True)

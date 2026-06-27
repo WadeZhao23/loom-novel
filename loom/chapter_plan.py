@@ -102,10 +102,26 @@ def _sync_card_outline(project_root: Path, chapter_n: int, outline: str) -> None
     atomic_write_text(path, "\n\n".join(pieces).rstrip() + "\n")
 
 
+def _read_genre_context(project_root: Path) -> str:
+    genre_dir = project_root / "skills" / "题材"
+    if not genre_dir.is_dir():
+        return ""
+
+    parts: list[str] = []
+    for path in sorted(genre_dir.glob("*.md")):
+        if path.name.lower() == "readme.md":
+            continue
+        content = _read_if_exists(path)
+        if content:
+            parts.append(f"### {path.stem}\n{content}")
+    return _background("\n\n".join(parts))
+
+
 def _build_prompt(project_root: Path, chapter_n: int, total: int, title: str) -> tuple[str, str]:
     world = _background(_read_if_exists(project_root / "外置大脑" / "世界观.md"))
     characters = _background(_read_if_exists(project_root / "外置大脑" / "人物卡.md"))
     card_outline = _background(_read_if_exists(card_outline_path(project_root)))
+    genre_context = _read_genre_context(project_root)
     previous = _background(_read_if_exists(outline_path(project_root, chapter_n - 1)), 1200) if chapter_n > 1 else ""
 
     system = (
@@ -116,6 +132,7 @@ def _build_prompt(project_root: Path, chapter_n: int, total: int, title: str) ->
         [
             f"# 书名：{title}",
             f"# 当前任务：为第 {chapter_n} 章生成细纲（全书预计 {total} 章）",
+            _section("题材设定", genre_context),
             _section("卡章纲", card_outline),
             _section("世界观", world),
             _section("人物卡", characters),
@@ -133,8 +150,9 @@ def plan_chapters(
     *,
     start_from: int = 1,
     force: bool = False,
-    progress: Progress = _noop,
+    progress: Progress | None = None,
 ) -> dict:
+    progress = progress or _noop
     _validate(project_root, total, start_from)
     config = load_config(project_root)
 
