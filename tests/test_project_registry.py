@@ -155,6 +155,9 @@ class ProjectRegistryTests(TestCase):
     def client(self):
         return TestClient(app, base_url="http://127.0.0.1")
 
+    def client_without_server_exceptions(self):
+        return TestClient(app, base_url="http://127.0.0.1", raise_server_exceptions=False)
+
     def test_open_project_registers_valid_project(self):
         root = self.make_project("OpenMe")
 
@@ -211,6 +214,20 @@ class ProjectRegistryTests(TestCase):
         self.assertEqual(Path(data["projects"]["CreatedBook"]["path"]), (parent / "CreatedBook").resolve())
         self.assertTrue(data["projects"]["CreatedBook"]["exists"])
 
+    def test_create_project_does_not_register_when_state_cannot_load(self):
+        parent = Path(self.tmp.name) / "created"
+        parent.mkdir()
+
+        with patch("loom.server._state", side_effect=ValueError("broken state")):
+            response = self.client_without_server_exceptions().post(
+                "/api/project/create",
+                json={"name": "BrokenBook", "parent": str(parent), "genre": None},
+            )
+
+        self.assertEqual(projects.list_all()["projects"], {})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json(), {"error": "broken state"})
+
     def test_sample_open_registers_sample_and_parent_as_default_dir(self):
         parent = Path(self.tmp.name) / "samples"
         parent.mkdir()
@@ -224,3 +241,19 @@ class ProjectRegistryTests(TestCase):
         entry = next(iter(data["projects"].values()))
         self.assertTrue(Path(entry["path"]).is_relative_to(parent.resolve()))
         self.assertTrue(entry["exists"])
+
+    def test_sample_open_does_not_register_existing_invalid_sample_folder(self):
+        from loom.scaffold import open_sample
+
+        probe_parent = Path(self.tmp.name) / "probe"
+        probe_parent.mkdir()
+        sample_name = open_sample(probe_parent).name
+        parent = Path(self.tmp.name) / "samples"
+        parent.mkdir()
+        (parent / sample_name).mkdir()
+
+        response = self.client_without_server_exceptions().post("/api/sample/open", json={"parent": str(parent)})
+
+        self.assertEqual(projects.list_all()["projects"], {})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("error", response.json())

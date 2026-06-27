@@ -145,8 +145,12 @@ def create_project(b: CreateBody):
         root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    try:
+        state = _state(root)
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     project_registry.register(root, default_dir=Path(b.parent).expanduser())
-    return _state(root)
+    return state
 
 
 class ParentBody(BaseModel):
@@ -159,8 +163,12 @@ def sample_open(b: ParentBody):
     from .scaffold import open_sample
     parent = Path(b.parent).expanduser()
     root = open_sample(parent)
+    try:
+        state = _state(root)
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
     project_registry.register(root, default_dir=parent)
-    return _state(root)
+    return state
 
 
 @app.post("/api/project/open")
