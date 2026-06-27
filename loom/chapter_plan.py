@@ -61,16 +61,28 @@ def _section(title: str, body: str) -> str:
     return f"## {title}\n{body}"
 
 
-def _managed_card_blocks(text: str) -> dict[int, str]:
+def _strip_managed_heading(text: str) -> str:
+    lines = text.strip().splitlines()
+    if lines and lines[0].strip() == "## AI 批量章节规划":
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+def _managed_card_parts(text: str) -> tuple[dict[int, str], str]:
     blocks: dict[int, str] = {}
+    leftovers: list[str] = []
+    cursor = 0
     for match in _CHAPTER_BLOCK_RE.finditer(text):
+        leftovers.append(text[cursor:match.start()])
         chapter_n = int(match.group(1))
         content = match.group(2).strip()
         heading = f"### 第{chapter_n}章"
         if content.startswith(heading):
             content = content[len(heading):].strip()
         blocks[chapter_n] = content
-    return blocks
+        cursor = match.end()
+    leftovers.append(text[cursor:])
+    return blocks, _strip_managed_heading("".join(leftovers))
 
 
 def _chapter_start(chapter_n: int) -> str:
@@ -81,8 +93,10 @@ def _chapter_end(chapter_n: int) -> str:
     return f"<!-- LOOM:CHAPTER-PLAN:CHAPTER:{chapter_n}:END -->"
 
 
-def _render_managed_card(blocks: dict[int, str]) -> str:
+def _render_managed_card(blocks: dict[int, str], unparsed: str = "") -> str:
     parts = [_CARD_START, "## AI 批量章节规划"]
+    if unparsed.strip():
+        parts.append(unparsed.strip())
     for chapter_n in sorted(blocks):
         parts.append(
             "\n".join(
@@ -116,13 +130,13 @@ def _sync_card_outline(project_root: Path, chapter_n: int, outline: str) -> None
     original = path.read_text(encoding="utf-8") if path.is_file() else ""
     prefix, managed, suffix = _split_valid_managed_section(original)
 
-    blocks = _managed_card_blocks(managed)
+    blocks, unparsed = _managed_card_parts(managed)
     blocks[chapter_n] = outline.strip()
 
     pieces = []
     if prefix:
         pieces.append(prefix)
-    pieces.append(_render_managed_card(blocks))
+    pieces.append(_render_managed_card(blocks, unparsed))
     if suffix:
         pieces.append(suffix)
     atomic_write_text(path, "\n\n".join(pieces).rstrip() + "\n")

@@ -165,6 +165,40 @@ def test_malformed_card_start_without_end_preserves_existing_text_across_runs(pr
     assert "第1章：第二版目标、冲突、反转、章末钩子。" in updated
 
 
+def test_malformed_chapter_block_inside_valid_managed_section_is_preserved(project: Path) -> None:
+    damaged = (
+        "<!-- LOOM:CHAPTER-PLAN:CHAPTER:4:START -->\n"
+        "### 第4章\n"
+        "人工修补中的托管块，缺了结束标记，但内容不能丢。\n"
+    )
+    card_outline_path(project).write_text(
+        "\n\n".join(
+            [
+                "<!-- LOOM:CHAPTER-PLAN:START -->",
+                "## AI 批量章节规划",
+                damaged.rstrip(),
+                "<!-- LOOM:CHAPTER-PLAN:END -->",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    plan_chapters(project, total=2, start_from=2, backend=backend_for_chapters())
+    plan_chapters(
+        project,
+        total=2,
+        start_from=2,
+        backend=FakeBackend(lambda system, user: "第2章：第二版目标、冲突、反转、章末钩子。"),
+        force=True,
+    )
+
+    updated = card_outline_path(project).read_text(encoding="utf-8")
+    assert "人工修补中的托管块，缺了结束标记，但内容不能丢。" in updated
+    assert updated.count("人工修补中的托管块") == 1
+    assert "第2章：第二版目标、冲突、反转、章末钩子。" in updated
+
+
 def test_outline_headings_that_look_like_chapters_stay_inside_their_chapter_block(project: Path) -> None:
     nested = "第1章：主线目标。\n### 第9章\n这是章内误导标题，仍属于第一章。"
 
