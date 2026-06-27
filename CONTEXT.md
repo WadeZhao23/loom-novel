@@ -89,7 +89,7 @@ _Avoid_: 自动改卡章纲(它是人写的规划,只提示作者同步章号)
 _Avoid_: 把「第N章」写进标题内容(重编号后会陈旧);拿标题单独存 state/独立文件(多一套要同步搬的真相)
 
 **模型路由(多供应商)**:
-`backends.py` 的 `PROVIDERS` 注册表作路由唯一真相;四个一等公民:`deepseek`(自带 key、锁死 base_url)、`claude` / `codex`(复用客户端登录免 key)、`openai_compat`(**自填 base_url** 的通用口子,接智谱GLM/Moonshot/Qwen/硅基流动等)。模型框是**可编辑下拉 + 「拉取可用模型」**(实时 `GET /models`),不写死会过时的白名单。默认模型 `deepseek-v4-flash`(旧名 `deepseek-chat/reasoner` 2026-07-24 停用)。可选 `cheap_model`:复审(质检/去AI味)+ 写后摘要/补设定这类**「评估、管 what」**调用走便宜模型(`cheap_backend()` 同 provider/base_url/key 换 model),**写作与学指纹始终用主模型保「像你」**;空=全用主模型。粗粒度一刀切,**不**做 inkos 的逐 agent 模型矩阵。
+`backends.py` 的 `PROVIDERS` 注册表作路由唯一真相;四个一等公民:`deepseek`(自带 key、锁死 base_url)、`claude` / `codex`(复用客户端登录免 key)、`openai_compat`(**自填 base_url** 的通用口子,接智谱GLM/Moonshot/Qwen/硅基流动等)。模型框是**可编辑下拉 + 「拉取可用模型」**(实时 `GET /models`),不写死会过时的白名单。默认模型 `deepseek-v4-pro`(更强;更快更省可选 `deepseek-v4-flash`)。**DeepSeek V4 是思考型**:它先把推理写进 `reasoning_content`、答案才进 `content`,而推理也吃 `max_tokens`——故 `backends._budget_tokens` 为 DeepSeek 留思考余量(底线 6144、封顶 8192;别家供应商维持原样),否则短步骤(标题/复审)的预算被思考占满、正文空着回来报空响应(用户实报、2.0.1 修)。可选 `cheap_model`:复审(质检/去AI味)+ 写后摘要/补设定这类**「评估、管 what」**调用走便宜模型(`cheap_backend()` 同 provider/base_url/key 换 model),**写作与学指纹始终用主模型保「像你」**;空=全用主模型。粗粒度一刀切,**不**做 inkos 的逐 agent 模型矩阵。
 _Avoid_: 把模型名硬编码成固定白名单(厂商一改名就过时再炸);自建代理 / 卖订阅(见记忆「自带 key 决策」);把 `cheap_model` 铺到写作/学指纹上(省钱省到「像你」头上)
 
 **写盘安全闸**:
