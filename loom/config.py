@@ -14,7 +14,7 @@ from .fsutil import atomic_write_text
 @dataclass
 class Config:
     provider: str = "deepseek"        # deepseek | claude | codex | openai_compat
-    model: str = "deepseek-v4-flash"  # DeepSeek V4(旧名 deepseek-chat/reasoner 2026-07-24 停用)
+    model: str = "deepseek-v4-pro"    # DeepSeek V4 默认 pro(更强);更快更省可填 v4-flash。都是思考型,见 backends 预算
     cheap_model: str = ""              # 可选:复审/写后摘要这类「评估」调用走的便宜模型(同供应商换 model);空=全用主模型
     base_url: str = ""                 # 仅 openai_compat 有意义:第三方 OpenAI 兼容供应商的接口地址
     title: str = "我的第一本书"
@@ -45,7 +45,7 @@ def load_config(project_root: Path) -> Config:
     gate = data.get("gate", {})
     return Config(
         provider=backend.get("provider", "deepseek"),
-        model=backend.get("model", "deepseek-v4-flash"),
+        model=backend.get("model", "deepseek-v4-pro"),
         cheap_model=backend.get("cheap_model", ""),    # 老 toml 没这行 → 空串=不开,行为不变
         base_url=backend.get("base_url", ""),          # 老 toml 没这行 → 兜底空串,无需迁移
         title=novel.get("title", "我的第一本书"),

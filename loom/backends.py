@@ -36,12 +36,12 @@ PROVIDERS: dict[str, dict] = {
         "label": "DeepSeek", "kind": "openai",
         "base_url": "https://api.deepseek.com", "base_url_locked": True,
         "key_env": "DEEPSEEK_API_KEY", "needs_key": True,
-        "default_model": "deepseek-v4-flash",
-        # 只列现役 V4;旧名 deepseek-chat/reasoner 官方 2026-07-24 停用,不再当新选项推给用户。
-        # (老项目若 loom.toml 还配着旧名,前端 setModelValue 仍会把它补成一项回显、并照常能用到停用日。)
+        "default_model": "deepseek-v4-pro",
+        # 现役 V4 都是【思考型】模型(deepseek-chat 非思考别名已停用);backend 已为思考预留 token 预算
+        # (见 OpenAICompatBackend.complete)。默认 pro(更强);更快更省可选 flash。
         "models": [
-            {"id": "deepseek-v4-flash", "label": "V4 Flash · 快·省钱(默认)"},
-            {"id": "deepseek-v4-pro", "label": "V4 Pro · 更强"},
+            {"id": "deepseek-v4-pro", "label": "V4 Pro · 更强(默认)"},
+            {"id": "deepseek-v4-flash", "label": "V4 Flash · 更快·更省"},
         ],
         "can_list_models": True,
     },
@@ -152,6 +152,21 @@ class Backend(Protocol):
         ...
 
 
+def _budget_tokens(provider: str, max_chars: int | None) -> int:
+    """max_tokens 预算。中文 ~1.6 token/字 + 余量。
+
+    DeepSeek V4(v4-flash/v4-pro)是【思考型】:reasoning 也吃 max_tokens,小预算步骤(标题/复审)
+    易被思考占满 → content 空(deepseek_empty_response 的真因)。给思考留足余量(+4096)+ 底线(6144)、
+    封顶 8192(DeepSeek 接受的上限)。其它 OpenAI 兼容供应商维持原样——它们各家模型输出上限不同,
+    贸然抬高 max_tokens 可能被拒。"""
+    if not max_chars:
+        return 8192 if provider == "deepseek" else 2048
+    base = int(max_chars * 2.2)
+    if provider == "deepseek":
+        return min(8192, max(6144, base + 4096))
+    return base
+
+
 class OpenAICompatBackend:
     """OpenAI 兼容 HTTP 后端:DeepSeek(锁死 base_url)和 openai_compat(自填 base_url)共用。"""
 
@@ -184,8 +199,7 @@ class OpenAICompatBackend:
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None) -> str:
-        # 中文按 ~1.6 token/字 粗估,留点余量
-        max_tokens = int(max_chars * 2.2) if max_chars else 2048
+        max_tokens = _budget_tokens(self.provider, max_chars)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
             if on_chunk is not None:  # 流式:边写边回调
