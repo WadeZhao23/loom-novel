@@ -12,12 +12,7 @@ from .guard import STEP, validate_output
 Progress = Callable[[dict], None]
 _CARD_START = "<!-- LOOM:CHAPTER-PLAN:START -->"
 _CARD_END = "<!-- LOOM:CHAPTER-PLAN:END -->"
-_CHAPTER_BLOCK_RE = re.compile(
-    r"<!-- LOOM:CHAPTER-PLAN:CHAPTER:(\d+):START -->\s*\n"
-    r"(.*?)"
-    r"\n?<!-- LOOM:CHAPTER-PLAN:CHAPTER:\1:END -->",
-    re.DOTALL,
-)
+_CHAPTER_START_RE = re.compile(r"<!-- LOOM:CHAPTER-PLAN:CHAPTER:(\d+):START -->")
 
 
 def _noop(event: dict) -> None:
@@ -72,16 +67,32 @@ def _managed_card_parts(text: str) -> tuple[dict[int, str], str]:
     blocks: dict[int, str] = {}
     leftovers: list[str] = []
     cursor = 0
-    for match in _CHAPTER_BLOCK_RE.finditer(text):
-        leftovers.append(text[cursor:match.start()])
-        chapter_n = int(match.group(1))
-        content = match.group(2).strip()
+
+    while True:
+        start = _CHAPTER_START_RE.search(text, cursor)
+        if start is None:
+            leftovers.append(text[cursor:])
+            break
+
+        leftovers.append(text[cursor:start.start()])
+        chapter_n = int(start.group(1))
+        next_start = _CHAPTER_START_RE.search(text, start.end())
+        search_end = next_start.start() if next_start else len(text)
+        end_marker = _chapter_end(chapter_n)
+        end = text.find(end_marker, start.end(), search_end)
+
+        if end == -1:
+            leftovers.append(text[start.start():search_end])
+            cursor = search_end
+            continue
+
+        content = text[start.end():end].strip()
         heading = f"### 第{chapter_n}章"
         if content.startswith(heading):
             content = content[len(heading):].strip()
         blocks[chapter_n] = content
-        cursor = match.end()
-    leftovers.append(text[cursor:])
+        cursor = end + len(end_marker)
+
     return blocks, _strip_managed_heading("".join(leftovers))
 
 

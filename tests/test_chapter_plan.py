@@ -199,6 +199,45 @@ def test_malformed_chapter_block_inside_valid_managed_section_is_preserved(proje
     assert "第2章：第二版目标、冲突、反转、章末钩子。" in updated
 
 
+def test_malformed_same_chapter_block_survives_repeated_force_regeneration(project: Path) -> None:
+    human_text = "人工保留的第2章托管残块，连续重生第2章也不能丢。"
+    card_outline_path(project).write_text(
+        "\n\n".join(
+            [
+                "<!-- LOOM:CHAPTER-PLAN:START -->",
+                "## AI 批量章节规划",
+                "<!-- LOOM:CHAPTER-PLAN:CHAPTER:2:START -->",
+                "### 第2章",
+                human_text,
+                "<!-- LOOM:CHAPTER-PLAN:END -->",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    plan_chapters(
+        project,
+        total=2,
+        start_from=2,
+        backend=FakeBackend(lambda system, user: "第2章：第一次强制重生。"),
+        force=True,
+    )
+    plan_chapters(
+        project,
+        total=2,
+        start_from=2,
+        backend=FakeBackend(lambda system, user: "第2章：第二次强制重生。"),
+        force=True,
+    )
+
+    updated = card_outline_path(project).read_text(encoding="utf-8")
+    assert human_text in updated
+    assert updated.count(human_text) == 1
+    assert "第2章：第二次强制重生。" in updated
+    assert "第2章：第一次强制重生。" not in updated
+
+
 def test_outline_headings_that_look_like_chapters_stay_inside_their_chapter_block(project: Path) -> None:
     nested = "第1章：主线目标。\n### 第9章\n这是章内误导标题，仍属于第一章。"
 
