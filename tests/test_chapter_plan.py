@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeBackend
-from loom.chapter_plan import outline_path, plan_chapters
+from loom.chapter_plan import card_outline_path, outline_path, plan_chapters
 
 
 def outline_text(chapter: int) -> str:
@@ -64,13 +64,45 @@ def test_existing_outline_is_skipped_without_force(project: Path) -> None:
     existing = outline_path(project, 2)
     existing.parent.mkdir(parents=True, exist_ok=True)
     existing.write_text("作者手写的第2章细纲\n", encoding="utf-8")
+    card_outline_path(project).write_text("人工卡章纲\n", encoding="utf-8")
     events: list[dict] = []
 
     result = plan_chapters(project, total=2, backend=backend_for_chapters(), progress=events.append)
 
     assert result == {"planned": 1, "skipped": 1, "chapters": [1]}
     assert existing.read_text(encoding="utf-8") == "作者手写的第2章细纲\n"
+    card_outline = card_outline_path(project).read_text(encoding="utf-8")
+    assert "### 第1章" in card_outline
+    assert "### 第2章" not in card_outline
     assert any(e["type"] == "skip" and e["chapter"] == 2 for e in events)
+
+
+def test_generated_outlines_sync_to_card_outline_and_force_replaces_managed_block(project: Path) -> None:
+    card = card_outline_path(project)
+    card.write_text("人工卡章纲\n", encoding="utf-8")
+
+    plan_chapters(project, total=2, backend=backend_for_chapters())
+
+    first = card.read_text(encoding="utf-8")
+    assert first.startswith("人工卡章纲\n")
+    assert "<!-- LOOM:CHAPTER-PLAN:START -->" in first
+    assert "<!-- LOOM:CHAPTER-PLAN:END -->" in first
+    assert "### 第1章\n" + outline_text(1) in first
+    assert "### 第2章\n" + outline_text(2) in first
+
+    plan_chapters(
+        project,
+        total=1,
+        backend=FakeBackend(lambda system, user: "第1章：新版目标、冲突、反转、章末钩子。"),
+        force=True,
+    )
+
+    updated = card.read_text(encoding="utf-8")
+    assert updated.startswith("人工卡章纲\n")
+    assert updated.count("### 第1章") == 1
+    assert "第1章：新版目标、冲突、反转、章末钩子。" in updated
+    assert outline_text(1) not in updated
+    assert "### 第2章\n" + outline_text(2) in updated
 
 
 def test_existing_outline_is_overwritten_with_force(project: Path) -> None:

@@ -10,6 +10,8 @@ from .fsutil import atomic_write_text
 from .guard import STEP, validate_output
 
 Progress = Callable[[dict], None]
+_CARD_START = "<!-- LOOM:CHAPTER-PLAN:START -->"
+_CARD_END = "<!-- LOOM:CHAPTER-PLAN:END -->"
 
 
 def _noop(event: dict) -> None:
@@ -56,6 +58,48 @@ def _section(title: str, body: str) -> str:
     if not body:
         body = "（暂无）"
     return f"## {title}\n{body}"
+
+
+def _managed_card_blocks(text: str) -> dict[int, str]:
+    blocks: dict[int, str] = {}
+    for match in re.finditer(r"^### 第(\d+)章\s*\n(.*?)(?=^### 第\d+章\s*\n|\Z)", text, re.MULTILINE | re.DOTALL):
+        blocks[int(match.group(1))] = match.group(2).strip()
+    return blocks
+
+
+def _render_managed_card(blocks: dict[int, str]) -> str:
+    parts = [_CARD_START, "## AI 批量章节规划"]
+    for chapter_n in sorted(blocks):
+        parts.append(f"### 第{chapter_n}章\n{blocks[chapter_n].strip()}")
+    parts.append(_CARD_END)
+    return "\n\n".join(parts)
+
+
+def _sync_card_outline(project_root: Path, chapter_n: int, outline: str) -> None:
+    path = card_outline_path(project_root)
+    original = path.read_text(encoding="utf-8") if path.is_file() else ""
+    start = original.find(_CARD_START)
+    end = original.find(_CARD_END)
+
+    if start != -1 and end != -1 and start < end:
+        managed = original[start + len(_CARD_START):end]
+        prefix = original[:start].rstrip()
+        suffix = original[end + len(_CARD_END):].strip()
+    else:
+        managed = ""
+        prefix = original.rstrip()
+        suffix = ""
+
+    blocks = _managed_card_blocks(managed)
+    blocks[chapter_n] = outline.strip()
+
+    pieces = []
+    if prefix:
+        pieces.append(prefix)
+    pieces.append(_render_managed_card(blocks))
+    if suffix:
+        pieces.append(suffix)
+    atomic_write_text(path, "\n\n".join(pieces).rstrip() + "\n")
 
 
 def _build_prompt(project_root: Path, chapter_n: int, total: int, title: str) -> tuple[str, str]:
@@ -114,6 +158,7 @@ def plan_chapters(
             raise LoomBackendError("细纲生成失败:" + "；".join(reasons), code="model_output_invalid")
 
         atomic_write_text(path, outline + "\n")
+        _sync_card_outline(project_root, chapter_n, outline)
         planned += 1
         planned_chapters.append(chapter_n)
         progress({"type": "done", "chapter": chapter_n, "outline": outline, "path": str(path)})
