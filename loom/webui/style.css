@@ -197,6 +197,33 @@ button:disabled { opacity: .55; cursor: default; }
 .welcome-intro p { margin: 0 0 var(--space-3); font-size: var(--fs-sm); line-height: 1.8; color: var(--text-soft); }
 .welcome-intro b { color: var(--accent-ink); font-weight: 700; }
 .welcome-intro .primary { width: 100%; }
+.project-library { width: 100%; margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--line-soft); }
+.welcome-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
+.welcome-row h3 { margin: 0; font-size: var(--fs-h2); font-weight: 700; }
+.welcome-row .mini { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; }
+.project-list { display: grid; gap: var(--space-2); }
+.project-item { display: grid; grid-template-columns: minmax(0, 1fr) 34px; gap: var(--space-2); align-items: stretch; min-width: 0; }
+.project-open {
+  display: grid; gap: 2px; min-width: 0; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg-sunken);
+}
+.project-open:hover { border-color: var(--accent); background: var(--accent-tint); }
+.project-open:disabled { transform: none; }
+.project-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; line-height: 1.35; }
+.project-title, .project-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-title { display: block; }
+.project-path { display: block; color: var(--text-mute); font-size: var(--fs-xs); line-height: 1.35; }
+.project-missing {
+  flex: none; padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--danger-tint); color: var(--danger); font-size: var(--fs-caption); font-weight: 600;
+}
+.project-remove {
+  display: inline-flex; align-items: center; justify-content: center; width: 34px;
+  padding: 0; border-radius: var(--radius-sm); color: var(--text-mute);
+}
+.project-remove:hover { background: var(--danger-tint); color: var(--danger); border-color: transparent; }
+.project-item.missing { opacity: .78; }
+.project-item.missing .project-open { background: var(--line-soft); color: var(--text-mute); }
 .welcome-help { margin-top: var(--space-4); font-size: var(--fs-sm); color: var(--text-soft); }
 .welcome-help summary { cursor: pointer; color: var(--text); }
 .welcome-help ol { margin: var(--space-2) 0 0; padding-left: 20px; line-height: 1.85; }

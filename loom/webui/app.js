@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 let DATA = null;            // 当前项目 state
+let PROJECTS = null;        // 欢迎页项目库 registry
 let CUR = null;             // 当前打开的文件 {rel, editable, chapter}
 let _lastLearnChapter = null;  // 最近一次 learn 的章号(供撤销)
 let _rewriteSel = null;        // 当前重写的选区 {start, end, span}
@@ -92,8 +93,10 @@ window.addEventListener("DOMContentLoaded", () => {
   initTheme();
   bind();
   loadGenres();
-  const saved = localStorage.getItem("loom_root");
-  if (saved) openProject(saved, true);
+  loadProjects().finally(() => {
+    const saved = localStorage.getItem("loom_root");
+    if (saved) openProject(saved, true);
+  });
 });
 
 async function loadGenres() {
@@ -112,6 +115,8 @@ function bind() {
   $("btn-create").onclick = createProject;
   $("btn-sample").onclick = openSample;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
+  const refreshProjects = $("btn-refresh-projects");
+  if (refreshProjects) refreshProjects.onclick = loadProjects;
   $("btn-close-proj").onclick = () => { localStorage.removeItem("loom_root"); showWelcome(); };
   $("btn-theme").onclick = toggleTheme;
   $("btn-focus").onclick = toggleFocus;
@@ -218,6 +223,7 @@ async function openProject(root, silent) {
 function showWelcome() {
   $("app").classList.add("hidden");
   $("welcome").classList.remove("hidden");
+  loadProjects();
 }
 function enterProject(d) {
   DATA = d;
@@ -225,6 +231,79 @@ function enterProject(d) {
   $("welcome").classList.add("hidden");
   $("app").classList.remove("hidden");
   render();
+  loadProjects();
+}
+
+async function loadProjects() {
+  try {
+    PROJECTS = await jreq("GET", "/api/projects");
+    renderProjects();
+    const parent = $("new-parent");
+    if (PROJECTS.default_dir && parent && !parent.value.trim()) parent.value = PROJECTS.default_dir;
+  } catch (e) {
+    PROJECTS = null;
+    renderProjects();
+  }
+}
+
+function renderProjects() {
+  const section = $("project-library");
+  const list = $("project-list");
+  if (!section || !list) return;
+
+  const projects = PROJECTS && PROJECTS.projects ? PROJECTS.projects : {};
+  const entries = Object.entries(projects).sort(([an, a], [bn, b]) => {
+    const at = Date.parse((a && (a.last_open || a.created)) || "") || 0;
+    const bt = Date.parse((b && (b.last_open || b.created)) || "") || 0;
+    if (bt !== at) return bt - at;
+    return an.localeCompare(bn);
+  });
+
+  list.innerHTML = "";
+  section.classList.toggle("hidden", entries.length === 0);
+  if (!entries.length) return;
+
+  entries.forEach(([name, meta]) => {
+    const info = meta || {};
+    const path = info.path || "";
+    const exists = info.exists !== false;
+
+    const item = document.createElement("div");
+    item.className = "project-item" + (exists ? "" : " missing");
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "project-open";
+    open.title = path || name;
+    open.disabled = !exists;
+    open.innerHTML =
+      `<span class="project-name"><span class="project-title">${escHtml(name)}</span>${exists ? "" : `<span class="project-missing">不存在</span>`}</span>` +
+      `<span class="project-path">${escHtml(path)}</span>`;
+    if (exists) open.onclick = () => openProject(path, false);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "project-remove ghost";
+    remove.title = `从项目库移除: ${name}`;
+    remove.innerHTML = icon("trash");
+    remove.onclick = (e) => {
+      e.stopPropagation();
+      removeProject(name);
+    };
+
+    item.appendChild(open);
+    item.appendChild(remove);
+    list.appendChild(item);
+  });
+}
+
+async function removeProject(name) {
+  try {
+    PROJECTS = await jreq("DELETE", `/api/projects/${encodeURIComponent(name)}`);
+    renderProjects();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 async function refresh() {
