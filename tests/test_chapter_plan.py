@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,9 @@ def outline_text(chapter: int) -> str:
 
 def backend_for_chapters() -> FakeBackend:
     def respond(system: str, user: str) -> str:
-        for n in range(1, 10):
-            if f"第 {n} 章" in user or f"第{n}章" in user:
-                return outline_text(n)
+        match = re.search(r"当前任务：为第\s*(\d+)\s*章", user)
+        if match:
+            return outline_text(int(match.group(1)))
         return "第X章：备用细纲。"
 
     return FakeBackend(respond)
@@ -74,6 +75,20 @@ def test_plan_chapters_includes_selected_genre_context_in_prompt(project: Path) 
     assert "README 不应进入规划提示词。" not in user_prompt
 
 
+def test_prompt_preserves_original_chapter_phrasing_from_context(project: Path) -> None:
+    (project / "外置大脑" / "世界观.md").write_text(
+        "第1章发生在旧矿洞，后续章节必须承接这个钩子。\n",
+        encoding="utf-8",
+    )
+    backend = backend_for_chapters()
+
+    plan_chapters(project, total=2, start_from=2, backend=backend)
+
+    user_prompt = backend.calls[0][1]
+    assert "第1章发生在旧矿洞" in user_prompt
+    assert "第1节发生在旧矿洞" not in user_prompt
+
+
 def test_progress_none_succeeds(project: Path) -> None:
     result = plan_chapters(project, total=1, backend=backend_for_chapters(), progress=None)
 
@@ -123,6 +138,42 @@ def test_generated_outlines_sync_to_card_outline_and_force_replaces_managed_bloc
     assert "第1章：新版目标、冲突、反转、章末钩子。" in updated
     assert outline_text(1) not in updated
     assert "### 第2章\n" + outline_text(2) in updated
+
+
+def test_malformed_card_start_without_end_preserves_existing_text_across_runs(project: Path) -> None:
+    malformed = (
+        "人工卡章纲\n"
+        "<!-- LOOM:CHAPTER-PLAN:START -->\n"
+        "未闭合的人工笔记\n"
+        "### 第8章\n"
+        "这段不是 AI 托管区，不能丢。\n"
+    )
+    card = card_outline_path(project)
+    card.write_text(malformed, encoding="utf-8")
+
+    plan_chapters(project, total=1, backend=backend_for_chapters())
+    plan_chapters(
+        project,
+        total=1,
+        backend=FakeBackend(lambda system, user: "第1章：第二版目标、冲突、反转、章末钩子。"),
+        force=True,
+    )
+
+    updated = card.read_text(encoding="utf-8")
+    assert malformed in updated
+    assert updated.count("未闭合的人工笔记") == 1
+    assert "第1章：第二版目标、冲突、反转、章末钩子。" in updated
+
+
+def test_outline_headings_that_look_like_chapters_stay_inside_their_chapter_block(project: Path) -> None:
+    nested = "第1章：主线目标。\n### 第9章\n这是章内误导标题，仍属于第一章。"
+
+    plan_chapters(project, total=1, backend=FakeBackend(lambda system, user: nested))
+    plan_chapters(project, total=2, start_from=2, backend=backend_for_chapters())
+
+    card = card_outline_path(project).read_text(encoding="utf-8")
+    assert card.index("### 第9章") < card.index("### 第2章")
+    assert "<!-- LOOM:CHAPTER-PLAN:CHAPTER:9:START -->" not in card
 
 
 def test_existing_outline_is_overwritten_with_force(project: Path) -> None:
