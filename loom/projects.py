@@ -51,7 +51,7 @@ def load_registry() -> dict:
     path = registry_path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return _empty_registry()
 
     return _normalize(data)
@@ -71,9 +71,12 @@ def _resolve(path: Path) -> Path:
 
 
 def _name_for_path(projects: dict, path: Path) -> str | None:
-    resolved = str(path)
     for name, entry in projects.items():
-        if entry.get("path") == resolved:
+        try:
+            entry_path = Path(entry.get("path", "")).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if entry_path == path:
             return name
     return None
 

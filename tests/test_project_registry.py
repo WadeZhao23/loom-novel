@@ -44,10 +44,34 @@ class ProjectRegistryTests(TestCase):
 
     def test_register_same_path_updates_last_open_without_duplicate(self):
         root = self.make_project("Alpha")
-        first = projects.register(root)
-        second = projects.register(root)
+        with patch("loom.projects._now", side_effect=["2026-06-27T10:00:00", "2026-06-27T10:01:00"]):
+            first = projects.register(root)
+            second = projects.register(root)
         self.assertEqual(list(second["projects"]), ["Alpha"])
         self.assertEqual(second["projects"]["Alpha"]["created"], first["projects"]["Alpha"]["created"])
+        self.assertEqual(second["projects"]["Alpha"]["created"], "2026-06-27T10:00:00")
+        self.assertEqual(second["projects"]["Alpha"]["last_open"], "2026-06-27T10:01:00")
+
+    def test_register_matches_existing_entry_with_equivalent_path_spelling(self):
+        root = self.home / "Alpha"
+        root.mkdir()
+        projects.save_registry({
+            "default_dir": "",
+            "projects": {
+                "Alpha": {
+                    "path": str(root / ".." / "Alpha"),
+                    "created": "2026-06-27T10:00:00",
+                    "last_open": "2026-06-27T10:00:00",
+                },
+            },
+        })
+
+        with patch("loom.projects._now", return_value="2026-06-27T10:01:00"):
+            data = projects.register(root.resolve())
+
+        self.assertEqual(list(data["projects"]), ["Alpha"])
+        self.assertEqual(data["projects"]["Alpha"]["created"], "2026-06-27T10:00:00")
+        self.assertEqual(data["projects"]["Alpha"]["last_open"], "2026-06-27T10:01:00")
 
     def test_register_same_name_different_path_gets_suffix(self):
         root1 = self.make_project("Alpha")
@@ -63,6 +87,12 @@ class ProjectRegistryTests(TestCase):
         path = projects.registry_path()
         path.parent.mkdir(parents=True)
         path.write_text("{bad json", encoding="utf-8")
+        self.assertEqual(projects.load_registry(), {"default_dir": "", "projects": {}})
+
+    def test_non_utf8_registry_falls_back_to_empty_registry(self):
+        path = projects.registry_path()
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"\xff\xfe\x00")
         self.assertEqual(projects.load_registry(), {"default_dir": "", "projects": {}})
 
     def test_save_registry_normalizes_data_before_persisting(self):
