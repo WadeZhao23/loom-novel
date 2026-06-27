@@ -12,9 +12,12 @@ class ProjectRegistryTests(TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name) / "home"
         self.home.mkdir()
-        self.patcher = patch("loom.projects.Path.home", return_value=self.home)
-        self.patcher.start()
-        self.addCleanup(self.patcher.stop)
+        self.config_home_patcher = patch("loom.config.Path.home", return_value=self.home)
+        self.projects_home_patcher = patch("loom.projects.Path.home", return_value=self.home)
+        self.config_home_patcher.start()
+        self.projects_home_patcher.start()
+        self.addCleanup(self.projects_home_patcher.stop)
+        self.addCleanup(self.config_home_patcher.stop)
 
     def make_project(self, name="Book"):
         root = Path(self.tmp.name) / name
@@ -23,6 +26,7 @@ class ProjectRegistryTests(TestCase):
         return root
 
     def test_empty_registry_has_default_shape(self):
+        self.assertEqual(projects.registry_path(), self.home / ".loom" / "projects.json")
         data = projects.load_registry()
         self.assertEqual(data, {"default_dir": "", "projects": {}})
 
