@@ -3,7 +3,10 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
 from loom import projects
+from loom.server import app
 
 
 class ProjectRegistryTests(TestCase):
@@ -148,3 +151,76 @@ class ProjectRegistryTests(TestCase):
         self.assertTrue(data["projects"]["Alpha"]["exists"])
         self.assertEqual(Path(projects.load_registry()["default_dir"]), default.resolve())
         self.assertEqual(Path(projects.get_default_dir()), default.resolve())
+
+    def client(self):
+        return TestClient(app, base_url="http://127.0.0.1")
+
+    def test_open_project_registers_valid_project(self):
+        root = self.make_project("OpenMe")
+
+        response = self.client().post("/api/project/open", json={"root": str(root)})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = self.client().get("/api/projects").json()
+        self.assertEqual(Path(data["projects"]["OpenMe"]["path"]), root.resolve())
+        self.assertTrue(data["projects"]["OpenMe"]["exists"])
+
+    def test_register_rejects_non_project_folder(self):
+        folder = Path(self.tmp.name) / "NotAProject"
+        folder.mkdir()
+
+        response = self.client().post("/api/projects/register", json={"root": str(folder)})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+        self.assertEqual(projects.list_all()["projects"], {})
+
+    def test_delete_project_is_idempotent_and_returns_updated_list(self):
+        root = self.make_project("Alpha")
+        projects.register(root)
+
+        first = self.client().delete("/api/projects/Alpha")
+        second = self.client().delete("/api/projects/Alpha")
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(first.json()["projects"], {})
+        self.assertEqual(second.json()["projects"], {})
+
+    def test_default_dir_endpoint_updates_and_returns_resolved_path(self):
+        default = Path(self.tmp.name) / "books"
+
+        response = self.client().put("/api/projects/default-dir", json={"path": str(default)})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(Path(response.json()["default_dir"]), default.resolve())
+        self.assertEqual(Path(projects.get_default_dir()), default.resolve())
+
+    def test_create_project_registers_project_and_parent_as_default_dir(self):
+        parent = Path(self.tmp.name) / "created"
+        parent.mkdir()
+
+        response = self.client().post(
+            "/api/project/create",
+            json={"name": "CreatedBook", "parent": str(parent), "genre": None},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = projects.list_all()
+        self.assertEqual(Path(data["default_dir"]), parent.resolve())
+        self.assertEqual(Path(data["projects"]["CreatedBook"]["path"]), (parent / "CreatedBook").resolve())
+        self.assertTrue(data["projects"]["CreatedBook"]["exists"])
+
+    def test_sample_open_registers_sample_and_parent_as_default_dir(self):
+        parent = Path(self.tmp.name) / "samples"
+        parent.mkdir()
+
+        response = self.client().post("/api/sample/open", json={"parent": str(parent)})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        data = self.client().get("/api/projects").json()
+        self.assertEqual(Path(data["default_dir"]), parent.resolve())
+        self.assertEqual(len(data["projects"]), 1)
+        entry = next(iter(data["projects"].values()))
+        self.assertTrue(Path(entry["path"]).is_relative_to(parent.resolve()))
+        self.assertTrue(entry["exists"])

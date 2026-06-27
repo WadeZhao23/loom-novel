@@ -19,6 +19,7 @@ from .agents import run_pipeline
 from .backends import (LoomBackendError, get_backend, list_models, probe as probe_backend,
                        provider_catalog, validate_model)
 from . import chapters as chap
+from . import projects as project_registry
 from .chaptertext import parse_title, strip_title
 from . import ledger
 from .config import (Config, key_is_set, key_status, load_config, openai_compat_key_is_set,
@@ -105,9 +106,37 @@ class RootBody(BaseModel):
     root: str
 
 
+class DefaultDirBody(BaseModel):
+    path: str
+
+
 @app.get("/api/genres")
 def genres():
     return {"genres": available_genres()}
+
+
+@app.get("/api/projects")
+def projects_list():
+    return project_registry.list_all()
+
+
+@app.post("/api/projects/register")
+def register_project(b: RootBody):
+    root = Path(b.root).expanduser()
+    if not _is_project(root):
+        return JSONResponse({"error": f"{root} is not a loom project (missing loom.toml)."}, status_code=400)
+    return project_registry.register(root)
+
+
+@app.delete("/api/projects/{name}")
+def delete_project(name: str):
+    project_registry.remove(name)
+    return project_registry.list_all()
+
+
+@app.put("/api/projects/default-dir")
+def update_default_dir(b: DefaultDirBody):
+    return project_registry.set_default_dir(Path(b.path))
 
 
 @app.post("/api/project/create")
@@ -116,6 +145,7 @@ def create_project(b: CreateBody):
         root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    project_registry.register(root, default_dir=Path(b.parent).expanduser())
     return _state(root)
 
 
@@ -127,7 +157,10 @@ class ParentBody(BaseModel):
 def sample_open(b: ParentBody):
     """拷一份内置样例书到 parent 并打开,让陌生作者先看一本跑通的书。"""
     from .scaffold import open_sample
-    return _state(open_sample(Path(b.parent).expanduser()))
+    parent = Path(b.parent).expanduser()
+    root = open_sample(parent)
+    project_registry.register(root, default_dir=parent)
+    return _state(root)
 
 
 @app.post("/api/project/open")
@@ -136,9 +169,11 @@ def open_project(b: RootBody):
     if not _is_project(root):
         return JSONResponse({"error": f"{root} 不是 loom 项目(没有 loom.toml)。"}, status_code=400)
     try:
-        return _state(root)
+        state = _state(root)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    project_registry.register(root)
+    return state
 
 
 @app.get("/api/project/state")
