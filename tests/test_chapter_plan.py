@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from conftest import FakeBackend
+from loom.chapter_plan import outline_path, plan_chapters
+
+
+def outline_text(chapter: int) -> str:
+    return f"第{chapter}章：目标、冲突、反转、章末钩子都清楚。"
+
+
+def backend_for_chapters() -> FakeBackend:
+    def respond(system: str, user: str) -> str:
+        for n in range(1, 10):
+            if f"第 {n} 章" in user or f"第{n}章" in user:
+                return outline_text(n)
+        return "第X章：备用细纲。"
+
+    return FakeBackend(respond)
+
+
+def test_plan_chapters_writes_each_outline_and_emits_events(project: Path) -> None:
+    events: list[dict] = []
+
+    result = plan_chapters(project, total=3, backend=backend_for_chapters(), progress=events.append)
+
+    assert result == {"planned": 3, "skipped": 0, "chapters": [1, 2, 3]}
+    assert outline_path(project, 1).read_text(encoding="utf-8").strip() == outline_text(1)
+    assert outline_path(project, 2).read_text(encoding="utf-8").strip() == outline_text(2)
+    assert outline_path(project, 3).read_text(encoding="utf-8").strip() == outline_text(3)
+    assert [e["type"] for e in events] == [
+        "progress",
+        "done",
+        "progress",
+        "done",
+        "progress",
+        "done",
+        "complete",
+    ]
+    assert events[-1] == {"type": "complete", "planned": 3, "skipped": 0}
+
+
+def test_plan_chapters_starts_from_requested_chapter(project: Path) -> None:
+    events: list[dict] = []
+
+    result = plan_chapters(
+        project,
+        total=5,
+        start_from=3,
+        backend=backend_for_chapters(),
+        progress=events.append,
+    )
+
+    assert result["chapters"] == [3, 4, 5]
+    assert not outline_path(project, 2).exists()
+    assert outline_path(project, 3).read_text(encoding="utf-8").strip() == outline_text(3)
+    assert [e["chapter"] for e in events if e["type"] == "done"] == [3, 4, 5]
+
+
+def test_existing_outline_is_skipped_without_force(project: Path) -> None:
+    existing = outline_path(project, 2)
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("作者手写的第2章细纲\n", encoding="utf-8")
+    events: list[dict] = []
+
+    result = plan_chapters(project, total=2, backend=backend_for_chapters(), progress=events.append)
+
+    assert result == {"planned": 1, "skipped": 1, "chapters": [1]}
+    assert existing.read_text(encoding="utf-8") == "作者手写的第2章细纲\n"
+    assert any(e["type"] == "skip" and e["chapter"] == 2 for e in events)
+
+
+def test_existing_outline_is_overwritten_with_force(project: Path) -> None:
+    existing = outline_path(project, 1)
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("旧细纲\n", encoding="utf-8")
+
+    plan_chapters(project, total=1, backend=backend_for_chapters(), force=True)
+
+    assert existing.read_text(encoding="utf-8").strip() == outline_text(1)
+
+
+@pytest.mark.parametrize(
+    ("total", "start_from"),
+    [(0, 1), (1, 0), (2, 3)],
+)
+def test_invalid_ranges_raise_value_error(project: Path, total: int, start_from: int) -> None:
+    with pytest.raises(ValueError):
+        plan_chapters(project, total=total, start_from=start_from, backend=backend_for_chapters())
