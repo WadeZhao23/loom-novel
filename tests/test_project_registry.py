@@ -71,3 +71,5 @@ class ProjectRegistryTests(TestCase):
         default = Path(self.tmp.name) / "books"
         data = projects.set_default_dir(default)
         self.assertEqual(Path(data["default_dir"]), default.resolve())
+        self.assertEqual(Path(projects.load_registry()["default_dir"]), default.resolve())
+        self.assertEqual(Path(projects.get_default_dir()), default.resolve())
