@@ -3,6 +3,8 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null;            // 当前项目 state
 let PROJECTS = null;        // 欢迎页项目库 registry
+let PROJECTS_REQ = 0;       // 项目库请求序号，避免旧响应覆盖新状态
+let NEW_PARENT_DIRTY = false;
 let CUR = null;             // 当前打开的文件 {rel, editable, chapter}
 let _lastLearnChapter = null;  // 最近一次 learn 的章号(供撤销)
 let _rewriteSel = null;        // 当前重写的选区 {start, end, span}
@@ -117,6 +119,8 @@ function bind() {
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
   const refreshProjects = $("btn-refresh-projects");
   if (refreshProjects) refreshProjects.onclick = loadProjects;
+  const newParent = $("new-parent");
+  if (newParent) newParent.addEventListener("input", () => { NEW_PARENT_DIRTY = true; });
   $("btn-close-proj").onclick = () => { localStorage.removeItem("loom_root"); showWelcome(); };
   $("btn-theme").onclick = toggleTheme;
   $("btn-focus").onclick = toggleFocus;
@@ -235,12 +239,16 @@ function enterProject(d) {
 }
 
 async function loadProjects() {
+  const req = ++PROJECTS_REQ;
   try {
-    PROJECTS = await jreq("GET", "/api/projects");
+    const projects = await jreq("GET", "/api/projects");
+    if (req !== PROJECTS_REQ) return;
+    PROJECTS = projects;
     renderProjects();
     const parent = $("new-parent");
-    if (PROJECTS.default_dir && parent && !parent.value.trim()) parent.value = PROJECTS.default_dir;
+    if (PROJECTS.default_dir && parent && !NEW_PARENT_DIRTY) parent.value = PROJECTS.default_dir;
   } catch (e) {
+    if (req !== PROJECTS_REQ) return;
     PROJECTS = null;
     renderProjects();
   }
@@ -285,6 +293,7 @@ function renderProjects() {
     remove.type = "button";
     remove.className = "project-remove ghost";
     remove.title = `从项目库移除: ${name}`;
+    remove.setAttribute("aria-label", `从项目库移除 ${name}`);
     remove.innerHTML = icon("trash");
     remove.onclick = (e) => {
       e.stopPropagation();
@@ -298,6 +307,7 @@ function renderProjects() {
 }
 
 async function removeProject(name) {
+  ++PROJECTS_REQ;
   try {
     PROJECTS = await jreq("DELETE", `/api/projects/${encodeURIComponent(name)}`);
     renderProjects();
