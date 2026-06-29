@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from .agents import run_pipeline
 from .backends import (LoomBackendError, get_backend, list_models, probe as probe_backend,
                        provider_catalog, validate_model)
+from . import chapter_plan
 from . import chapters as chap
 from . import projects as project_registry
 from .chaptertext import parse_title, strip_title
@@ -508,6 +509,13 @@ class WriteBody(BaseModel):
     force: bool = False
 
 
+class PlanGenerateBody(BaseModel):
+    root: str
+    total_chapters: int
+    start_from: int = 1
+    force: bool = False
+
+
 @app.post("/api/write")
 def write(b: WriteBody):
     root = Path(b.root)
@@ -543,6 +551,42 @@ def write(b: WriteBody):
             if ev is None:
                 break
             yield json.dumps(ev, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.post("/api/plan/generate")
+def plan_generate(b: PlanGenerateBody):
+    root = Path(b.root).expanduser()
+    q: queue.Queue = queue.Queue()
+
+    def worker():
+        try:
+            cfg = load_config(root)
+            backend = get_backend(cfg)
+            chapter_plan.plan_chapters(
+                root,
+                b.total_chapters,
+                backend,
+                start_from=b.start_from,
+                force=b.force,
+                progress=q.put,
+            )
+        except (LoomBackendError, ValueError, FileNotFoundError) as e:
+            q.put({"type": "error", "message": str(e)})
+        except Exception as e:
+            q.put({"type": "error", "message": f"意外错误:{e}"})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        while True:
+            event = q.get()
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=False) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
