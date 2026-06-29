@@ -148,6 +148,8 @@ function bind() {
     applyProviderUI(p);
   };
   $("btn-write-next").onclick = () => writeChapter(DATA.next_chapter, false);
+  const planBtn = $("btn-plan-generate");
+  if (planBtn) planBtn.onclick = generateChapterPlan;
   $("btn-export").onclick = exportBook;
   $("btn-backup").onclick = backupBook;
   $("btn-seed").onclick = openSeed;
@@ -425,6 +427,14 @@ function render() {
     ch.appendChild(li);
   });
   $("btn-write-next").innerHTML = `写第${DATA.next_chapter}章 ` + icon("writeNext");
+  const planTotal = $("plan-total");
+  const planStart = $("plan-start");
+  if (planTotal && (!planTotal.value || Number(planTotal.value) < 1)) {
+    planTotal.value = Math.max(DATA.next_chapter, 1);
+  }
+  if (planStart && (!planStart.value || Number(planStart.value) < 1)) {
+    planStart.value = DATA.next_chapter || 1;
+  }
 
   fillList("brain", DATA.brain, true);
   fillSkills(DATA.skills);
@@ -1025,6 +1035,92 @@ function deleteChapter(n) {
 }
 function insertAfter(n) { chapterOp("/api/chapter/insert", { root: DATA.root, n }); }
 function moveChapter(n, direction) { chapterOp("/api/chapter/move", { root: DATA.root, n, direction }); }
+
+// ---------- 章节规划(流式) ----------
+function appendPlanResult(chapter, outline, skipped) {
+  const list = $("plan-results");
+  chapter = Number(chapter);
+  if (!list || !Number.isInteger(chapter) || chapter < 1) return;
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "plan-result" + (skipped ? " skipped" : "");
+  const label = document.createElement("span");
+  label.textContent = `第${chapter}章`;
+  const summary = document.createElement("small");
+  summary.textContent = skipped ? "已跳过" : String(outline || "").slice(0, 36);
+  row.append(label, summary);
+  row.onclick = () => openOutline(chapter);
+  list.appendChild(row);
+}
+
+function handlePlanEvent(ev) {
+  const status = $("plan-status");
+  if (ev.type === "progress") {
+    status.textContent = `正在规划第 ${ev.chapter} 章 / 共 ${ev.total} 章`;
+  } else if (ev.type === "done") {
+    status.textContent = `第 ${ev.chapter} 章细纲已生成`;
+    appendPlanResult(ev.chapter, ev.outline, false);
+  } else if (ev.type === "skip") {
+    status.textContent = `第 ${ev.chapter} 章已有细纲，已跳过`;
+    appendPlanResult(ev.chapter, "", true);
+  } else if (ev.type === "complete") {
+    status.textContent = `完成：生成 ${ev.planned} 章，跳过 ${ev.skipped} 章`;
+    toast(status.textContent);
+  } else if (ev.type === "error") {
+    status.textContent = ev.message || "规划失败";
+    toast(status.textContent, true);
+  }
+}
+
+async function generateChapterPlan() {
+  if (!DATA) return;
+  const total = parseInt($("plan-total").value, 10);
+  const start = parseInt($("plan-start").value, 10) || 1;
+  const force = $("plan-force").checked;
+  const btn = $("btn-plan-generate");
+  const status = $("plan-status");
+  const results = $("plan-results");
+  if (!total || total < 1 || start < 1 || start > total) {
+    toast("检查总章数和起始章", true);
+    return;
+  }
+
+  btn.disabled = true;
+  status.textContent = "规划中…";
+  results.innerHTML = "";
+  try {
+    await persistBackend(true);
+    const response = await fetch("/api/plan/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: DATA.root, total_chapters: total, start_from: start, force }),
+    });
+    if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+    if (!response.body) throw new Error("浏览器不支持流式响应");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.trim()) handlePlanEvent(JSON.parse(line));
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handlePlanEvent(JSON.parse(buffer));
+    await refresh();
+  } catch (e) {
+    status.textContent = e.message;
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ---------- write(流式) ----------
 let _wroteChapter = null;

@@ -377,6 +377,34 @@ button:disabled { opacity: .55; cursor: default; }
 .book-actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 .book-actions .mini { flex: 1; }
 
+.plan-panel {
+  margin: var(--space-3) 0 var(--space-4); padding: var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-sunken);
+}
+.plan-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-2);
+  color: var(--text-soft); font-size: var(--fs-xs); font-weight: 700;
+}
+.plan-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
+.plan-grid label, .check-row { color: var(--text-soft); font-size: var(--fs-caption); }
+.plan-grid input { width: 100%; min-width: 0; margin-top: 3px; padding: 5px 7px; }
+.check-row { display: flex; align-items: center; gap: 6px; margin: var(--space-2) 0; }
+.check-row input { width: auto; }
+#btn-plan-generate { width: 100%; }
+.plan-status {
+  min-height: 18px; margin-top: var(--space-2); color: var(--text-mute);
+  font-size: var(--fs-caption); overflow-wrap: anywhere;
+}
+.plan-results { display: grid; gap: 4px; margin-top: var(--space-2); }
+.plan-results:empty { display: none; }
+.plan-result {
+  display: grid; gap: 2px; width: 100%; min-width: 0; padding: 6px 8px;
+  text-align: left; background: var(--surface);
+}
+.plan-result span, .plan-result small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-result small { color: var(--text-mute); font-size: var(--fs-caption); }
+.plan-result.skipped { opacity: .72; }
+
 /* 嗓音指纹卡 */
 .voice-card {
   margin-top: var(--space-2); padding: var(--space-3); border-radius: var(--radius-md);

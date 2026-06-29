@@ -111,6 +111,19 @@
             <button id="btn-write-next" class="mini primary">写下一章 <span class="ico" data-ico="writeNext"></span></button>
           </div>
           <ul id="chapters" class="list"></ul>
+          <div class="plan-panel">
+            <div class="plan-head">
+              <span><span class="ico" data-ico="outline"></span> 章节规划</span>
+            </div>
+            <div class="plan-grid">
+              <label>总章数 <input id="plan-total" type="number" min="1" step="1" /></label>
+              <label>起始章 <input id="plan-start" type="number" min="1" step="1" /></label>
+            </div>
+            <label class="check-row"><input id="plan-force" type="checkbox" /> 覆盖已有细纲</label>
+            <button id="btn-plan-generate" class="mini"><span class="ico" data-ico="outline"></span> 批量生成细纲</button>
+            <div id="plan-status" class="plan-status" aria-live="polite"></div>
+            <div id="plan-results" class="plan-results"></div>
+          </div>
           <div class="book-actions">
             <button id="btn-export" class="mini"><span class="ico" data-ico="export"></span> 导出全书</button>
             <button id="btn-backup" class="mini"><span class="ico" data-ico="backup"></span> 备份整本</button>
