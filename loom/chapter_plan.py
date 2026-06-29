@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -13,6 +14,14 @@ Progress = Callable[[dict], None]
 _CARD_START = "<!-- LOOM:CHAPTER-PLAN:START -->"
 _CARD_END = "<!-- LOOM:CHAPTER-PLAN:END -->"
 _CHAPTER_START_RE = re.compile(r"<!-- LOOM:CHAPTER-PLAN:CHAPTER:(\d+):START -->")
+_PROJECT_LOCKS: dict[Path, threading.RLock] = {}
+_PROJECT_LOCKS_GUARD = threading.Lock()
+
+
+def _project_lock(project_root: Path) -> threading.RLock:
+    key = project_root.expanduser().resolve()
+    with _PROJECT_LOCKS_GUARD:
+        return _PROJECT_LOCKS.setdefault(key, threading.RLock())
 
 
 def _noop(event: dict) -> None:
@@ -205,6 +214,26 @@ def plan_chapters(
 ) -> dict:
     progress = progress or _noop
     _validate(project_root, total, start_from)
+    with _project_lock(project_root):
+        return _plan_chapters_locked(
+            project_root,
+            total,
+            backend,
+            start_from=start_from,
+            force=force,
+            progress=progress,
+        )
+
+
+def _plan_chapters_locked(
+    project_root: Path,
+    total: int,
+    backend: Backend,
+    *,
+    start_from: int,
+    force: bool,
+    progress: Progress,
+) -> dict:
     config = load_config(project_root)
 
     planned = 0
@@ -215,7 +244,9 @@ def plan_chapters(
         path = outline_path(project_root, chapter_n)
         progress({"type": "progress", "chapter": chapter_n, "total": total})
 
-        if not force and _read_if_exists(path):
+        existing_outline = _read_if_exists(path)
+        if not force and existing_outline:
+            _sync_card_outline(project_root, chapter_n, existing_outline)
             skipped += 1
             progress({"type": "skip", "chapter": chapter_n, "path": str(path)})
             continue

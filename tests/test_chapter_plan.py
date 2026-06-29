@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -108,8 +110,75 @@ def test_existing_outline_is_skipped_without_force(project: Path) -> None:
     assert existing.read_text(encoding="utf-8") == "作者手写的第2章细纲\n"
     card_outline = card_outline_path(project).read_text(encoding="utf-8")
     assert "### 第1章" in card_outline
-    assert "### 第2章" not in card_outline
+    assert "### 第2章" in card_outline
     assert any(e["type"] == "skip" and e["chapter"] == 2 for e in events)
+
+
+def test_same_project_planning_is_serialized_and_preserves_all_card_blocks(project: Path) -> None:
+    active = 0
+    max_active = 0
+    state_lock = threading.Lock()
+    start = threading.Barrier(3)
+    errors: list[BaseException] = []
+
+    class SlowBackend:
+        def complete(self, system: str, user: str, *, max_chars=None, on_chunk=None) -> str:
+            nonlocal active, max_active
+            match = re.search(r"当前任务：为第\s*(\d+)\s*章", user)
+            assert match is not None
+            chapter_n = int(match.group(1))
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.1)
+                return outline_text(chapter_n)
+            finally:
+                with state_lock:
+                    active -= 1
+
+    backend = SlowBackend()
+
+    def run(*, total: int, start_from: int) -> None:
+        try:
+            start.wait()
+            plan_chapters(project, total=total, start_from=start_from, backend=backend)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=run, kwargs={"total": 1, "start_from": 1}),
+        threading.Thread(target=run, kwargs={"total": 2, "start_from": 2}),
+    ]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert max_active == 1
+    card = card_outline_path(project).read_text(encoding="utf-8")
+    assert "### 第1章\n" + outline_text(1) in card
+    assert "### 第2章\n" + outline_text(2) in card
+
+
+def test_skipped_outline_repairs_missing_card_block_without_backend_call(project: Path) -> None:
+    existing_outline = outline_text(1)
+    path = outline_path(project, 1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(existing_outline + "\n", encoding="utf-8")
+    card_outline_path(project).write_text("人工卡章纲\n", encoding="utf-8")
+
+    class ForbiddenBackend:
+        def complete(self, system: str, user: str, *, max_chars=None, on_chunk=None) -> str:
+            raise AssertionError("backend must not be called for an existing outline")
+
+    result = plan_chapters(project, total=1, backend=ForbiddenBackend())
+
+    assert result == {"planned": 0, "skipped": 1, "chapters": []}
+    card = card_outline_path(project).read_text(encoding="utf-8")
+    assert "### 第1章\n" + existing_outline in card
 
 
 def test_generated_outlines_sync_to_card_outline_and_force_replaces_managed_block(project: Path) -> None:
