@@ -83,36 +83,37 @@ def run_parse(
     # Validate the public option before changing durable task state.
     chunk_chapters([], char_budget=char_budget)
 
-    with store.lock(task_id):
-        task = store.get(task_id)
-        status = task.get("status")
-        if status == "running":
-            raise ImportJobConflict("Import job is already running")
-        if status == "completed":
-            raise ImportJobConflict("Completed import job cannot be parsed again")
-        if status not in {"ready", "failed", "interrupted"}:
-            raise ValueError(f"Import job is not ready for parsing: {status}")
+    while True:
+        with store.lock(task_id):
+            task = store.get(task_id)
+            _validate_parse_status(task.get("status"))
+            revision = task["chapter_revision"]
 
         all_chapters = store.get_chapters(task_id)
         selected = sorted(
             (chapter for chapter in all_chapters if chapter.get("selected") is True),
             key=lambda chapter: chapter["order"],
         )
-        if not selected:
-            raise ValueError("At least one selected chapter is required")
-
-        revision = task["chapter_revision"]
         selected_ids = [chapter["id"] for chapter in selected]
         chunks = chunk_chapters(selected, char_budget=char_budget)
         extraction_units = len(chunks) + max(0, len(chunks) - 1)
         total = extraction_units * 3 + len(selected)
-        store.update(
-            task_id,
-            status="running",
-            phase=None,
-            progress={"completed": 0, "total": total},
-            error=None,
-        )
+
+        with store.lock(task_id):
+            current = store.get(task_id)
+            _validate_parse_status(current.get("status"))
+            if current.get("chapter_revision") != revision:
+                continue
+            if not selected:
+                raise ValueError("At least one selected chapter is required")
+            store.update(
+                task_id,
+                status="running",
+                phase=None,
+                progress={"completed": 0, "total": total},
+                error=None,
+            )
+        break
 
     completed = 0
     current_phase: str | None = None
@@ -218,6 +219,15 @@ def run_parse(
             }
         )
         raise
+
+
+def _validate_parse_status(status: object) -> None:
+    if status == "running":
+        raise ImportJobConflict("Import job is already running")
+    if status == "completed":
+        raise ImportJobConflict("Completed import job cannot be parsed again")
+    if status not in {"ready", "failed", "interrupted"}:
+        raise ValueError(f"Import job is not ready for parsing: {status}")
 
 
 def _run_extraction_phase(
@@ -427,11 +437,10 @@ def _read_checkpoint(
     store: ImportJobStore, task_id: str, phase: str
 ) -> dict | None:
     path = store.checkpoint_path(task_id, phase)
-    with store.lock(task_id):
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
-            return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        return None
     if not isinstance(value, dict) or set(value) != {"phase", "revision", "chunks", "merged"}:
         return None
     return value
