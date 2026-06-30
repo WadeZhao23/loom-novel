@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 import queue
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -30,13 +31,42 @@ from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_samples
 from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
+from .import_jobs import (ImportJobConflict, ImportJobError, ImportJobNotFound,
+                          ImportJobStore)
+from .import_project import materialize_import
+from .reverse_parse import decode_txt, run_parse, split_chapters, validate_chapters
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
 from .state import load_state
 
 WEBUI_DIR = Path(__file__).parent / "webui"
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
 
-app = FastAPI(title="Loom")
+_import_recovery_done = False
+_import_recovery_lock = threading.Lock()
+_import_parse_start_lock = threading.Lock()
+
+
+def _import_store() -> ImportJobStore:
+    return ImportJobStore()
+
+
+def _recover_imports() -> None:
+    global _import_recovery_done
+    with _import_recovery_lock:
+        if _import_recovery_done:
+            return
+        _import_store().recover_interrupted()
+        _import_recovery_done = True
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _recover_imports()
+    yield
+
+
+app = FastAPI(title="Loom", lifespan=_lifespan)
 
 # 本地服务的两道安全闸(本地无鉴权模型成立的前提):
 # 1) 只认 Host=127.0.0.1/localhost → 挡 DNS rebinding(恶意网站把域名重绑到本机再调本地端点)
@@ -596,4 +626,219 @@ def plan_generate(b: PlanGenerateBody):
 
 
 # 静态界面挂在最后(/api/* 已先匹配)
+class ImportChaptersBody(BaseModel):
+    chapters: list[dict]
+
+
+class ImportResultsBody(BaseModel):
+    worldview: str
+    system: str
+    characters: str
+    outlines: str
+
+
+class ImportCreateBody(BaseModel):
+    name: str
+    parent_dir: str
+    genre: str | None = None
+    include_source_chapters: bool = True
+
+
+def _import_error(error: Exception, status_code: int, **extra: object) -> JSONResponse:
+    return JSONResponse({"error": str(error), **extra}, status_code=status_code)
+
+
+def _import_detail(store: ImportJobStore, task_id: str) -> dict:
+    return {
+        **store.get(task_id),
+        "chapters": store.get_chapters(task_id),
+        "results": store.get_results(task_id),
+    }
+
+
+@app.post("/api/imports", status_code=201)
+async def create_import(file: UploadFile = File(...)) -> dict:
+    filename = file.filename or ""
+    if Path(filename).suffix.lower() != ".txt":
+        return _import_error(ValueError("Only .txt files can be imported"), 400)
+
+    raw = bytearray()
+    try:
+        while chunk := await file.read(1024 * 1024):
+            raw.extend(chunk)
+            if len(raw) > MAX_IMPORT_BYTES:
+                return _import_error(
+                    ValueError(f"TXT exceeds the {MAX_IMPORT_BYTES}-byte import limit"),
+                    413,
+                )
+    finally:
+        await file.close()
+
+    try:
+        text, encoding = decode_txt(bytes(raw))
+        split = split_chapters(text)
+        task = _import_store().create(
+            filename,
+            bytes(raw),
+            text,
+            encoding,
+            split.chapters,
+            split.confidence,
+        )
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+    return JSONResponse(task, status_code=201)
+
+
+@app.get("/api/imports")
+def list_imports() -> list[dict]:
+    store = _import_store()
+    return [
+        {**task, "chapter_count": len(store.get_chapters(task["id"]))}
+        for task in store.list()
+    ]
+
+
+@app.get("/api/imports/{task_id}")
+def get_import(task_id: str) -> dict:
+    try:
+        return _import_detail(_import_store(), task_id)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.put("/api/imports/{task_id}/chapters")
+def put_import_chapters(task_id: str, body: ImportChaptersBody) -> dict:
+    store = _import_store()
+    try:
+        with store.lock(task_id):
+            if store.get(task_id).get("status") == "running":
+                raise ImportJobConflict("A running import job cannot be edited")
+            validate_chapters(body.chapters)
+            return store.save_chapters(task_id, body.chapters)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.post("/api/imports/{task_id}/parse")
+def parse_import(task_id: str) -> StreamingResponse:
+    store = _import_store()
+    with _import_parse_start_lock:
+        try:
+            task = store.get(task_id)
+            status = task.get("status")
+            if status == "running":
+                raise ImportJobConflict("Import job is already running")
+            if status in {"completed", "created"}:
+                raise ImportJobConflict("Completed import job cannot be parsed again")
+            if status not in {"ready", "failed", "interrupted"}:
+                raise ValueError(f"Import job is not ready to parse: {status!r}")
+            if not any(
+                chapter.get("selected") is True
+                for chapter in store.get_chapters(task_id)
+            ):
+                raise ValueError("At least one selected chapter is required")
+            backend = get_backend(load_config(store.runtime_root(task_id)))
+        except ImportJobNotFound as error:
+            return _import_error(error, 404)
+        except ImportJobConflict as error:
+            return JSONResponse(
+                {"error": str(error), "task": task}, status_code=409
+            )
+        except (ImportJobError, LoomBackendError, ValueError, FileNotFoundError) as error:
+            return _import_error(error, 400)
+
+        events: queue.Queue = queue.Queue()
+        finished = threading.Event()
+
+        def worker() -> None:
+            try:
+                run_parse(store, task_id, backend, progress=events.put)
+            except Exception:
+                pass
+            finally:
+                events.put(None)
+                finished.set()
+
+        threading.Thread(target=worker, daemon=True).start()
+        while not finished.is_set():
+            current = store.get(task_id)
+            if (
+                current.get("status") != status
+                or current.get("updated_at") != task.get("updated_at")
+            ):
+                break
+            finished.wait(0.001)
+
+    def stream():
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.put("/api/imports/{task_id}/results")
+def put_import_results(task_id: str, body: ImportResultsBody) -> dict:
+    store = _import_store()
+    try:
+        with store.lock(task_id):
+            if store.get(task_id).get("status") == "running":
+                raise ImportJobConflict("A running import job cannot be edited")
+            return store.save_results(task_id, body.model_dump())
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.post("/api/imports/{task_id}/create-project")
+def create_import_project(task_id: str, body: ImportCreateBody) -> dict:
+    store = _import_store()
+    parent = Path(body.parent_dir).expanduser()
+    destination = parent / body.name
+    try:
+        return materialize_import(
+            store,
+            task_id,
+            name=body.name,
+            parent_dir=parent,
+            genre=body.genre,
+            include_source_chapters=body.include_source_chapters,
+            state_loader=_state,
+            register=lambda root: project_registry.register(root, default_dir=parent),
+        )
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except (ImportJobConflict, FileExistsError) as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError) as error:
+        return _import_error(error, 400)
+    except Exception as error:
+        return _import_error(error, 500, path=str(destination))
+
+
+@app.delete("/api/imports/{task_id}")
+def delete_import(task_id: str) -> Response:
+    try:
+        _import_store().delete(task_id)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError) as error:
+        return _import_error(error, 400)
+    return Response(status_code=204)
+
+
 app.mount("/", StaticFiles(directory=str(WEBUI_DIR), html=True), name="ui")
