@@ -59,6 +59,10 @@ def chunk_chapters(
     current_size = 0
     for chapter in chapters:
         size = len(_render_chapters([chapter]))
+        if size > char_budget:
+            raise ValueError(
+                f"Chapter {chapter.get('title', '')!r} exceeds char_budget"
+            )
         separator_size = 2 if current else 0
         if current and current_size + separator_size + size > char_budget:
             chunks.append(current)
@@ -82,6 +86,7 @@ def run_parse(
 ) -> dict:
     # Validate the public option before changing durable task state.
     chunk_chapters([], char_budget=char_budget)
+    run_id = str(uuid.uuid4())
 
     while True:
         with store.lock(task_id):
@@ -109,6 +114,7 @@ def run_parse(
             store.update(
                 task_id,
                 status="running",
+                run_id=run_id,
                 phase=None,
                 progress={"completed": 0, "total": total},
                 error=None,
@@ -120,13 +126,20 @@ def run_parse(
 
     def emit(event: dict) -> None:
         if progress is not None:
-            progress(event)
+            try:
+                progress(event)
+            except Exception:
+                # Progress delivery is observational and cannot affect the run.
+                pass
 
     def begin_phase(phase: str) -> None:
         nonlocal current_phase
         current_phase = phase
-        store.update(
+        _update_owned_task(
+            store,
             task_id,
+            revision,
+            run_id,
             phase=phase,
             progress={"completed": completed, "total": total},
         )
@@ -135,7 +148,13 @@ def run_parse(
     def advance(phase: str) -> None:
         nonlocal completed
         completed += 1
-        store.update(task_id, progress={"completed": completed, "total": total})
+        _update_owned_task(
+            store,
+            task_id,
+            revision,
+            run_id,
+            progress={"completed": completed, "total": total},
+        )
         emit(
             {
                 "type": "progress",
@@ -156,6 +175,7 @@ def run_parse(
                 phase,
                 chunks,
                 revision,
+                run_id,
                 selected_ids,
                 char_budget,
                 advance,
@@ -177,6 +197,7 @@ def run_parse(
             backend,
             selected,
             revision,
+            run_id,
             selected_ids,
             char_budget,
             advance,
@@ -191,10 +212,13 @@ def run_parse(
         )
 
         with store.lock(task_id):
+            current = store.get(task_id)
+            _require_run_owner(current, revision, run_id)
             store.save_results(task_id, results)
             store.update(
                 task_id,
                 status="completed",
+                run_id=None,
                 result_revision=revision,
                 progress={"completed": total, "total": total},
                 error=None,
@@ -203,14 +227,21 @@ def run_parse(
         return results
     except Exception as exc:
         message = str(exc)
-        with store.lock(task_id):
-            store.update(
-                task_id,
-                status="failed",
-                phase=current_phase,
-                progress={"completed": completed, "total": total},
-                error={"message": message},
-            )
+        try:
+            with store.lock(task_id):
+                current = store.get(task_id)
+                if _is_run_owner(current, revision, run_id):
+                    store.update(
+                        task_id,
+                        status="failed",
+                        run_id=None,
+                        phase=current_phase,
+                        progress={"completed": completed, "total": total},
+                        error={"message": message},
+                    )
+        except Exception:
+            # Failure persistence must never replace the pipeline exception.
+            pass
         emit(
             {
                 "type": "error",
@@ -230,6 +261,32 @@ def _validate_parse_status(status: object) -> None:
         raise ValueError(f"Import job is not ready for parsing: {status}")
 
 
+def _is_run_owner(task: dict, revision: int, run_id: str) -> bool:
+    return (
+        task.get("status") == "running"
+        and task.get("chapter_revision") == revision
+        and task.get("run_id") == run_id
+    )
+
+
+def _require_run_owner(task: dict, revision: int, run_id: str) -> None:
+    if not _is_run_owner(task, revision, run_id):
+        raise ImportJobConflict("Reverse parse run ownership was lost")
+
+
+def _update_owned_task(
+    store: ImportJobStore,
+    task_id: str,
+    revision: int,
+    run_id: str,
+    **changes: object,
+) -> None:
+    with store.lock(task_id):
+        current = store.get(task_id)
+        _require_run_owner(current, revision, run_id)
+        store.update(task_id, **changes)
+
+
 def _run_extraction_phase(
     store: ImportJobStore,
     task_id: str,
@@ -237,6 +294,7 @@ def _run_extraction_phase(
     phase: str,
     chunks: list[list[dict]],
     revision: int,
+    run_id: str,
     selected_ids: list[str],
     char_budget: int,
     advance: Callable[[str], None],
@@ -288,6 +346,7 @@ def _run_extraction_phase(
                 task_id,
                 phase,
                 revision,
+                run_id,
                 [records[key] for key in sorted(records)],
                 "",
             )
@@ -304,7 +363,9 @@ def _run_extraction_phase(
         merged = _merge_outputs(backend, phase, outputs, char_budget, advance)
 
     final_records = [records[index] for index in range(len(chunks))]
-    _commit_checkpoint(store, task_id, phase, revision, final_records, merged)
+    _commit_checkpoint(
+        store, task_id, phase, revision, run_id, final_records, merged
+    )
     return merged
 
 
@@ -345,6 +406,7 @@ def _run_outlines_phase(
     backend: Backend,
     chapters: list[dict],
     revision: int,
+    run_id: str,
     selected_ids: list[str],
     char_budget: int,
     advance: Callable[[str], None],
@@ -397,6 +459,7 @@ def _run_outlines_phase(
                 task_id,
                 phase,
                 revision,
+                run_id,
                 [records[key] for key in sorted(records)],
                 "",
             )
@@ -407,7 +470,9 @@ def _run_outlines_phase(
         f"## {chapter['title']}\n\n{output}" for chapter, output in zip(chapters, outputs)
     )
     final_records = [records[index] for index in range(len(chapters))]
-    _commit_checkpoint(store, task_id, phase, revision, final_records, merged)
+    _commit_checkpoint(
+        store, task_id, phase, revision, run_id, final_records, merged
+    )
     return merged
 
 
@@ -451,6 +516,7 @@ def _commit_checkpoint(
     task_id: str,
     phase: str,
     revision: int,
+    run_id: str,
     chunks: list[dict],
     merged: str,
 ) -> None:
@@ -463,6 +529,8 @@ def _commit_checkpoint(
     payload = json.dumps(checkpoint, ensure_ascii=False, indent=2).encode("utf-8")
     path = store.checkpoint_path(task_id, phase)
     with store.lock(task_id):
+        current = store.get(task_id)
+        _require_run_owner(current, revision, run_id)
         _atomic_write(path, payload)
 
 

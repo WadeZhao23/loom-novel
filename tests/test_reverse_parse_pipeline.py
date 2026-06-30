@@ -4,6 +4,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
+from uuid import UUID
 
 import pytest
 
@@ -48,16 +49,19 @@ def phase_responder(system: str, user: str) -> str:
 def test_chunk_chapters_honors_budget_without_splitting_chapters() -> None:
     rows = chapters()
 
-    chunks = chunk_chapters(rows, char_budget=10)
+    chunks = chunk_chapters(rows, char_budget=20)
 
     assert chunks == [[rows[0]], [rows[1]], [rows[2]]]
     assert all(chunk[0] is rows[index] for index, chunk in enumerate(chunks))
 
 
-def test_chunk_chapters_keeps_one_oversized_chapter_as_one_chunk() -> None:
-    oversized = [{**chapters()[0], "content": "x" * 20}]
+def test_chunk_chapters_rejects_rendered_chapter_over_budget() -> None:
+    chapter = {**chapters()[0], "title": "T", "content": "xxxxx"}
+    rendered_size = len("# T\n\nxxxxx")
 
-    assert chunk_chapters(oversized, char_budget=5) == [oversized]
+    assert chunk_chapters([chapter], char_budget=rendered_size) == [[chapter]]
+    with pytest.raises(ValueError, match="(?i)chapter.*budget"):
+        chunk_chapters([chapter], char_budget=rendered_size - 1)
 
 
 @pytest.mark.parametrize("budget", [0, -1, True, 1.5])
@@ -81,7 +85,7 @@ def test_pipeline_completes_all_phases_persists_results_and_events(
         task_id,
         FakeBackend(phase_responder),
         progress=events.append,
-        char_budget=6,
+        char_budget=20,
     )
 
     assert set(results) == set(PHASES)
@@ -89,6 +93,7 @@ def test_pipeline_completes_all_phases_persists_results_and_events(
     task = store.get(task_id)
     assert task["status"] == "completed"
     assert task["result_revision"] == task["chapter_revision"]
+    assert task["run_id"] is None
     assert [event["phase"] for event in events if event["type"] == "phase"] == list(PHASES)
     assert [event["phase"] for event in events if event["type"] == "phase_done"] == list(PHASES)
     assert [event["type"] for event in events].count("progress") == 11
@@ -98,6 +103,30 @@ def test_pipeline_completes_all_phases_persists_results_and_events(
         for event in events
         if "completed" in event
     )
+
+
+@pytest.mark.parametrize("event_type", ["phase", "progress", "phase_done", "complete"])
+def test_progress_callback_failure_does_not_change_successful_completion(
+    store: ImportJobStore, event_type: str
+) -> None:
+    task_id = create_ready_job(store)
+
+    def fail_on_event(event: dict) -> None:
+        if event["type"] == event_type:
+            raise RuntimeError(f"callback failed on {event_type}")
+
+    results = run_parse(
+        store,
+        task_id,
+        FakeBackend(phase_responder),
+        progress=fail_on_event,
+        char_budget=100,
+    )
+
+    task = store.get(task_id)
+    assert task["status"] == "completed"
+    assert task["result_revision"] == task["chapter_revision"]
+    assert store.get_results(task_id) == results
 
 
 def test_pipeline_sends_only_selected_chapter_titles_and_content(
@@ -114,6 +143,28 @@ def test_pipeline_sends_only_selected_chapter_titles_and_content(
     assert "第二章" not in payload and "乙乙乙" not in payload
 
 
+def test_pipeline_rejects_oversized_chapter_before_running(
+    store: ImportJobStore,
+) -> None:
+    row = {
+        "id": "large",
+        "order": 1,
+        "title": "Large chapter",
+        "content": "x" * 20,
+        "selected": True,
+    }
+    task_id = create_ready_job(store, [row])
+    backend = FakeBackend(phase_responder)
+
+    with pytest.raises(ValueError, match="(?i)chapter.*budget"):
+        run_parse(store, task_id, backend, char_budget=20)
+
+    task = store.get(task_id)
+    assert task["status"] == "ready"
+    assert task.get("run_id") is None
+    assert backend.calls == []
+
+
 def test_pipeline_resumes_completed_chunks_after_later_call_fails(
     store: ImportJobStore,
 ) -> None:
@@ -128,10 +179,10 @@ def test_pipeline_resumes_completed_chunks_after_later_call_fails(
         return phase_responder(system, user)
 
     with pytest.raises(RuntimeError, match="merge failed"):
-        run_parse(store, task_id, FakeBackend(fail_worldview_merge), char_budget=6)
+        run_parse(store, task_id, FakeBackend(fail_worldview_merge), char_budget=20)
 
     resumed = FakeBackend(phase_responder)
-    run_parse(store, task_id, resumed, char_budget=6)
+    run_parse(store, task_id, resumed, char_budget=20)
 
     assert "merge" in resumed.calls[0][0].lower()
     assert len(resumed.calls) == 9
@@ -152,7 +203,7 @@ def test_stale_checkpoint_is_rejected_and_recomputed(
         return phase_responder(system, user)
 
     with pytest.raises(RuntimeError):
-        run_parse(store, task_id, FakeBackend(fail_merge), char_budget=6)
+        run_parse(store, task_id, FakeBackend(fail_merge), char_budget=20)
 
     checkpoint_path = store.checkpoint_path(task_id, "worldview")
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -174,7 +225,7 @@ def test_stale_checkpoint_is_rejected_and_recomputed(
         chapters_path.write_text(json.dumps(persisted, ensure_ascii=False), encoding="utf-8")
 
     resumed = FakeBackend(phase_responder)
-    run_parse(store, task_id, resumed, char_budget=6)
+    run_parse(store, task_id, resumed, char_budget=20)
 
     assert "merge" not in resumed.calls[0][0].lower()
 
@@ -182,7 +233,7 @@ def test_stale_checkpoint_is_rejected_and_recomputed(
 def test_checkpoints_have_exact_schema(store: ImportJobStore) -> None:
     task_id = create_ready_job(store)
 
-    run_parse(store, task_id, FakeBackend(phase_responder), char_budget=6)
+    run_parse(store, task_id, FakeBackend(phase_responder), char_budget=20)
 
     for phase in PHASES:
         checkpoint = json.loads(store.checkpoint_path(task_id, phase).read_text(encoding="utf-8"))
@@ -218,6 +269,77 @@ def test_running_task_rejects_second_caller(store: ImportJobStore) -> None:
 
     assert first_backend.calls
     assert second_backend.calls == []
+
+
+def test_stale_worker_cannot_write_after_chapters_change(
+    store: ImportJobStore,
+) -> None:
+    task_id = create_ready_job(store)
+    backend_started = Event()
+    release_backend = Event()
+
+    def blocking_responder(system: str, user: str) -> str:
+        backend_started.set()
+        assert release_backend.wait(timeout=5)
+        return phase_responder(system, user)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        parsing = pool.submit(
+            run_parse, store, task_id, FakeBackend(blocking_responder), char_budget=100
+        )
+        assert backend_started.wait(timeout=5)
+        try:
+            running = store.get(task_id)
+            assert str(UUID(running["run_id"])) == running["run_id"]
+
+            revised = [dict(chapter) for chapter in store.get_chapters(task_id)]
+            revised[0]["content"] = "new revision content"
+            store.save_chapters(task_id, revised)
+        finally:
+            release_backend.set()
+
+        with pytest.raises(ImportJobConflict, match="ownership"):
+            parsing.result(timeout=5)
+
+    task = store.get(task_id)
+    assert task["status"] == "ready"
+    assert task["chapter_revision"] == 2
+    assert task["result_revision"] is None
+    assert store.get_results(task_id) == {}
+    assert list((store.root / task_id / "checkpoints").iterdir()) == []
+
+
+def test_stale_worker_cannot_overwrite_newer_run_owner(
+    store: ImportJobStore,
+) -> None:
+    task_id = create_ready_job(store)
+    backend_started = Event()
+    release_backend = Event()
+
+    def blocking_responder(system: str, user: str) -> str:
+        backend_started.set()
+        assert release_backend.wait(timeout=5)
+        return phase_responder(system, user)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        parsing = pool.submit(
+            run_parse, store, task_id, FakeBackend(blocking_responder), char_budget=100
+        )
+        assert backend_started.wait(timeout=5)
+        try:
+            store.update(task_id, status="running", run_id="newer-owner")
+        finally:
+            release_backend.set()
+
+        with pytest.raises(ImportJobConflict, match="ownership"):
+            parsing.result(timeout=5)
+
+    task = store.get(task_id)
+    assert task["status"] == "running"
+    assert task["run_id"] == "newer-owner"
+    assert task["error"] is None
+    assert store.get_results(task_id) == {}
+    assert list((store.root / task_id / "checkpoints").iterdir()) == []
 
 
 def test_chapter_loading_does_not_hold_task_lock(store: ImportJobStore) -> None:
@@ -334,7 +456,34 @@ def test_failure_persists_phase_and_error_emits_event_and_reraises(
     assert task["status"] == "failed"
     assert task["phase"] == "system"
     assert task["error"] == {"message": "system exploded"}
+    assert task["run_id"] is None
     assert events[-1] == {"type": "error", "phase": "system", "message": "system exploded"}
+
+
+def test_error_callback_failure_does_not_mask_backend_failure(
+    store: ImportJobStore,
+) -> None:
+    task_id = create_ready_job(store)
+
+    def backend_failure(system: str, user: str) -> str:
+        raise RuntimeError("backend exploded")
+
+    def callback_failure(event: dict) -> None:
+        if event["type"] == "error":
+            raise RuntimeError("callback exploded")
+
+    with pytest.raises(RuntimeError, match="backend exploded"):
+        run_parse(
+            store,
+            task_id,
+            FakeBackend(backend_failure),
+            progress=callback_failure,
+            char_budget=100,
+        )
+
+    task = store.get(task_id)
+    assert task["status"] == "failed"
+    assert task["error"] == {"message": "backend exploded"}
 
 
 @pytest.mark.parametrize(
