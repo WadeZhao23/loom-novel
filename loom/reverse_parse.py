@@ -15,7 +15,9 @@ _HEADING_RE = re.compile(
     r"^[ \t]*(?P<title>"
     r"(?:第[0-9零〇一二两三四五六七八九十百千万]+[章回]|"
     r"卷[0-9零〇一二两三四五六七八九十百千万]+|序章|楔子|后记)"
-    r"(?:[ \t]+[^\r\n]*)?)[ \t]*$",
+    r"(?:[ \t]+(?![ \t]*[:：\-—])[^\r\n]*|"
+    r"[ \t]*[:：\-—][ \t]*[^\r\n \t:：\-—][^\r\n]*)?)"
+    r"[ \t]*$",
     re.MULTILINE,
 )
 
@@ -63,18 +65,22 @@ def split_chapters(text: str, *, fallback_chars: int = 12_000) -> ChapterSplit:
         return ChapterSplit(chapters=chapters, confidence="low")
 
     chapters: list[dict] = []
-    preface = text[: matches[0].start()].strip()
-    if preface:
+    preface = text[: matches[0].start()]
+    if preface.strip():
         chapters.append(_new_chapter(1, "序章", preface))
 
     for index, match in enumerate(matches):
         content_start = match.end()
+        if text.startswith("\r\n", content_start):
+            content_start += 2
+        elif content_start < len(text) and text[content_start] in "\r\n":
+            content_start += 1
         content_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         chapters.append(
             _new_chapter(
                 len(chapters) + 1,
                 match.group("title").strip(),
-                text[content_start:content_end].strip(),
+                text[content_start:content_end],
             )
         )
     return ChapterSplit(chapters=chapters, confidence="high")
@@ -204,26 +210,25 @@ def _new_chapter(order: int, title: str, content: str) -> dict:
 
 
 def _fallback_chunks(text: str, limit: int) -> list[str]:
-    paragraphs = [part.strip() for part in re.split(r"\n[ \t]*\n+", text.strip()) if part.strip()]
+    boundary_ends = [match.end() for match in re.finditer(r"\n[ \t]*\n+", text)]
     chunks: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        while len(paragraph) > limit:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(paragraph[:limit])
-            paragraph = paragraph[limit:]
-        if not paragraph:
-            continue
-        candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-        if len(candidate) <= limit:
-            current = candidate
-        else:
-            chunks.append(current)
-            current = paragraph
-    if current:
-        chunks.append(current)
+    start = 0
+    boundary_index = 0
+    while len(text) - start > limit:
+        maximum_end = start + limit
+        preferred_end = None
+        while (
+            boundary_index < len(boundary_ends)
+            and boundary_ends[boundary_index] <= maximum_end
+        ):
+            if boundary_ends[boundary_index] > start:
+                preferred_end = boundary_ends[boundary_index]
+            boundary_index += 1
+        end = preferred_end if preferred_end is not None else maximum_end
+        chunks.append(text[start:end])
+        start = end
+    if start < len(text):
+        chunks.append(text[start:])
     return chunks
 
 
@@ -247,8 +252,4 @@ def _renumber(chapters: list[dict]) -> list[dict]:
 
 
 def _join_content(left: str, right: str) -> str:
-    if not left:
-        return right
-    if not right:
-        return left
-    return f"{left.rstrip()}\n\n{right.lstrip()}"
+    return left + right

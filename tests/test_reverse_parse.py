@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from copy import deepcopy
 from uuid import UUID
 
@@ -73,7 +75,7 @@ def test_split_chapters_detects_common_headings_with_high_confidence() -> None:
 
     assert result.confidence == "high"
     assert [row["title"] for row in result.chapters] == ["第1章 初见", "第2章 冲突"]
-    assert [row["content"] for row in result.chapters] == ["甲。", "乙。"]
+    assert [row["content"] for row in result.chapters] == ["甲。\n\n", "乙。\n"]
     assert [row["order"] for row in result.chapters] == [1, 2]
     assert [row["selected"] for row in result.chapters] == [True, True]
     assert len({row["id"] for row in result.chapters}) == 2
@@ -89,14 +91,44 @@ def test_split_chapters_supports_required_heading_forms(title: str) -> None:
 
     assert result.confidence == "high"
     assert result.chapters[0]["title"] == title
+    assert result.chapters[0]["content"] == "正文。\n"
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["第12章：风起", "第12章:风起", "第12章-风起", "第12章—风起"],
+)
+def test_split_chapters_supports_bounded_punctuation_separators(title: str) -> None:
+    result = split_chapters(f"{title}\n正文。")
+
+    assert result.confidence == "high"
+    assert result.chapters[0]["title"] == title
     assert result.chapters[0]["content"] == "正文。"
 
 
-def test_split_chapters_only_matches_headings_at_line_starts() -> None:
-    result = split_chapters("他说第1章不该被识别。\n下一段。", fallback_chars=100)
+@pytest.mark.parametrize(
+    "text",
+    [
+        "他说第1章不该被识别。\n下一段。",
+        "正文中的第12章：风起不是标题。\n下一段。",
+        "旁白提到第12章-风起仍在正文行内。\n下一段。",
+    ],
+)
+def test_split_chapters_only_matches_whole_headings_at_line_starts(text: str) -> None:
+    result = split_chapters(text, fallback_chars=100)
 
     assert result.confidence == "low"
     assert len(result.chapters) == 1
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["第12章::风起", "第12章--风起", "第12章: ：风起", "第12章：   ", "第12章/风起"],
+)
+def test_split_chapters_rejects_unbounded_heading_separators(title: str) -> None:
+    result = split_chapters(f"{title}\n正文。", fallback_chars=100)
+
+    assert result.confidence == "low"
 
 
 def test_split_chapters_preserves_non_whitespace_preface() -> None:
@@ -104,7 +136,25 @@ def test_split_chapters_preserves_non_whitespace_preface() -> None:
 
     assert result.confidence == "high"
     assert [row["title"] for row in result.chapters] == ["序章", "第1章 开始"]
-    assert result.chapters[0]["content"] == "写在前面"
+    assert result.chapters[0]["content"] == "写在前面\n\n"
+
+
+def test_heading_split_preserves_preface_and_content_whitespace_exactly() -> None:
+    text = (
+        "  写在前面  \n\n\n"
+        "第1章 开始\n"
+        "  缩进正文  \n\n\n末尾空格  \n"
+        "第2章 继续\n"
+        " 第二章正文 \n\n"
+    )
+
+    result = split_chapters(text)
+
+    assert [row["content"] for row in result.chapters] == [
+        "  写在前面  \n\n\n",
+        "  缩进正文  \n\n\n末尾空格  \n",
+        " 第二章正文 \n\n",
+    ]
 
 
 def test_heading_free_text_falls_back_at_paragraph_boundaries_and_budget() -> None:
@@ -113,8 +163,8 @@ def test_heading_free_text_falls_back_at_paragraph_boundaries_and_budget() -> No
 
     assert result.confidence == "low"
     assert [row["content"] for row in result.chapters] == [
-        "甲" * 5,
-        "乙" * 5,
+        "甲" * 5 + "\n\n",
+        "乙" * 5 + "\n\n",
         "丙" * 10,
         "丙" * 3,
     ]
@@ -125,6 +175,33 @@ def test_heading_free_text_falls_back_at_paragraph_boundaries_and_budget() -> No
         "第4章",
     ]
     assert all(str(UUID(row["id"])) == row["id"] for row in result.chapters)
+
+
+def test_fallback_chunks_reconstruct_all_source_whitespace_exactly() -> None:
+    text = "  第一段  \n\n\n  第二段 \n\n末尾  \n"
+
+    result = split_chapters(text, fallback_chars=8)
+
+    assert "".join(row["content"] for row in result.chapters) == text
+    assert all(len(row["content"]) <= 8 for row in result.chapters)
+
+
+def test_large_single_paragraph_fallback_completes_in_linear_time() -> None:
+    code = (
+        "from loom.reverse_parse import split_chapters; "
+        "text = 'x' * (48 * 1024 * 1024); "
+        "result = split_chapters(text, fallback_chars=12_000); "
+        "assert ''.join(row['content'] for row in result.chapters) == text"
+    )
+
+    # Ten seconds is deliberately generous for one linear pass over a 48 MiB upload.
+    subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 @pytest.mark.parametrize(
@@ -210,6 +287,16 @@ def test_split_chapter_rejects_offsets_outside_content(offset: int) -> None:
     assert chapters == original
 
 
+def test_split_then_merge_previous_reconstructs_exact_content() -> None:
+    content = "  第一段  \n\n\n 第二段 \n"
+    chapters = [chapter("c1", 1, "第一章", content)]
+
+    split = split_chapter(chapters, "c1", 7)
+    result = merge_chapters(split, split[1]["id"], direction="previous")
+
+    assert result == [chapter("c1", 1, "第一章", content)]
+
+
 def test_merge_chapter_with_previous_preserves_previous_identity_and_selection() -> None:
     chapters = [
         chapter("c1", 1, "第一章", "甲", selected=False),
@@ -220,13 +307,13 @@ def test_merge_chapter_with_previous_preserves_previous_identity_and_selection()
     result = merge_chapters(chapters, "c2", direction="previous")
 
     assert chapters == original
-    assert result == [chapter("c1", 1, "第一章", "甲\n\n乙")]
+    assert result == [chapter("c1", 1, "第一章", "甲乙")]
 
 
 def test_merge_chapter_with_next_preserves_current_identity_and_title() -> None:
     result = merge_chapters(sample_chapters(), "c1", direction="next")
 
-    assert result == [chapter("c1", 1, "第一章", "甲。\n乙。\n\n丙。")]
+    assert result == [chapter("c1", 1, "第一章", "甲。\n乙。丙。")]
 
 
 @pytest.mark.parametrize(
