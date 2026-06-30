@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -82,6 +83,33 @@ def test_recover_interrupted_is_explicit_and_preserves_phase(store: ImportJobSto
     assert loaded["status"] == "interrupted"
     assert loaded["phase"] == "worldview"
     assert restarted.recover_interrupted() == 0
+
+
+def test_recover_interrupted_does_not_overwrite_concurrent_completion(
+    store: ImportJobStore,
+) -> None:
+    task = create_job(store)
+    store.update(task["id"], status="running", phase="worldview")
+    listed = Event()
+    resume_recovery = Event()
+
+    class PausingImportJobStore(ImportJobStore):
+        def list(self) -> list[dict]:
+            tasks = super().list()
+            listed.set()
+            assert resume_recovery.wait(timeout=5)
+            return tasks
+
+    recovering = PausingImportJobStore(store.root)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        recovery = pool.submit(recovering.recover_interrupted)
+        assert listed.wait(timeout=5)
+        store.update(task["id"], status="completed")
+        resume_recovery.set()
+        assert recovery.result(timeout=5) == 0
+
+    assert store.get(task["id"])["status"] == "completed"
 
 
 def test_save_chapters_invalidates_stale_outputs(store: ImportJobStore) -> None:

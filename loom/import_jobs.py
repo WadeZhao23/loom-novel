@@ -137,10 +137,13 @@ class ImportJobStore:
     def recover_interrupted(self) -> int:
         recovered = 0
         for task in self.list():
-            if task.get("status") != "running":
-                continue
-            self.update(task["id"], status="interrupted")
-            recovered += 1
+            task_id = task["id"]
+            with self.lock(task_id):
+                current = self.get(task_id)
+                if current.get("status") != "running":
+                    continue
+                self.update(task_id, status="interrupted")
+                recovered += 1
         return recovered
 
     def get_chapters(self, task_id: str) -> list[dict]:
