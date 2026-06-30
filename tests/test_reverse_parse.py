@@ -148,6 +148,32 @@ def test_validate_chapters_rejects_malformed_data_without_mutation(chapters: lis
     assert chapters == original
 
 
+def test_validate_chapters_rejects_empty_id_without_mutating_nested_data() -> None:
+    chapters = [chapter("", 1, "第一章", "甲。")]
+    chapters[0]["metadata"] = {"notes": ["keep"]}
+    original = deepcopy(chapters)
+
+    with pytest.raises(ValueError):
+        validate_chapters(chapters)
+
+    assert chapters == original
+
+
+@pytest.mark.parametrize("selected", [1, None], ids=["integer", "none"])
+def test_validate_chapters_rejects_non_bool_selected_without_mutating_nested_data(
+    selected: object,
+) -> None:
+    chapters = [chapter("c1", 1, "第一章", "甲。")]
+    chapters[0]["selected"] = selected
+    chapters[0]["metadata"] = {"notes": ["keep"]}
+    original = deepcopy(chapters)
+
+    with pytest.raises(ValueError):
+        validate_chapters(chapters)
+
+    assert chapters == original
+
+
 def test_validate_chapters_accepts_well_formed_data_without_mutation() -> None:
     chapters = sample_chapters()
     original = deepcopy(chapters)
