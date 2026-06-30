@@ -16,13 +16,35 @@ _BRAIN_RESULTS = {
     "outlines": "卡章纲.md",
 }
 _UNSAFE_FILENAME = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
+_MAX_CHAPTER_FILENAME_BYTES = 120
 
 
 def safe_chapter_filename(order: int, title: str) -> str:
+    prefix = f"{order:04d}-"
+    suffix = ".md"
     safe_title = _UNSAFE_FILENAME.sub("-", title.strip()).rstrip(" .")
     if not safe_title:
         safe_title = "未命名"
-    return f"{order:04d}-{safe_title}.md"
+    title_limit = (
+        _MAX_CHAPTER_FILENAME_BYTES - len(prefix.encode()) - len(suffix.encode())
+    )
+    safe_title = safe_title.encode()[:title_limit].decode("utf-8", errors="ignore")
+    safe_title = safe_title.rstrip(" .") or "未命名"
+    return f"{prefix}{safe_title}{suffix}"
+
+
+def _validate_project_name(name: str) -> None:
+    candidate = Path(name)
+    if (
+        not name.strip()
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or candidate.is_absolute()
+        or candidate.drive
+        or candidate.name != name
+    ):
+        raise ValueError("Project name must be a nonempty single path component")
 
 
 def materialize_import(
@@ -36,13 +58,15 @@ def materialize_import(
     state_loader: Callable[[Path], dict],
     register: Callable[[Path], dict],
 ) -> dict:
-    destination = Path(parent_dir).expanduser() / name
+    _validate_project_name(name)
+    parent = Path(parent_dir).expanduser()
 
     with store.lock(task_id):
         task = store.get(task_id)
-        if task.get("status") != "completed":
+        if task.get("status") not in {"completed", "created"}:
             raise ImportJobConflict(
-                f"Import task status must be completed, got {task.get('status')!r}"
+                "Import task status must be completed or created, "
+                f"got {task.get('status')!r}"
             )
         if task.get("result_revision") != task.get("chapter_revision"):
             raise ImportJobConflict("Import results are stale for the current chapter revision")
@@ -52,11 +76,18 @@ def materialize_import(
             raise ImportJobConflict("Import results are missing or incomplete")
         chapters = store.get_chapters(task_id)
 
-        if destination.exists():
-            raise FileExistsError(f"Destination already exists: {destination}")
+        parent.mkdir(parents=True, exist_ok=True)
+        parent = parent.resolve()
+        destination = (parent / name).resolve()
+        if destination.parent != parent:
+            raise ValueError("Project destination must be directly under the parent path")
+        try:
+            destination.mkdir(exist_ok=False)
+        except FileExistsError as exc:
+            raise FileExistsError(f"Destination already exists: {destination}") from exc
 
         try:
-            root = scaffold.init(name, Path(parent_dir).expanduser(), genre)
+            root = scaffold.init(name, parent, genre)
             brain_dir = root / "外置大脑"
             for result_name, filename in _BRAIN_RESULTS.items():
                 content = results[result_name]
@@ -85,5 +116,5 @@ def materialize_import(
         except Exception as exc:
             message = f"{exc} (project preserved at {destination})"
             if isinstance(exc, ValueError):
-                raise type(exc)(message) from exc
+                raise ValueError(message) from exc
             raise RuntimeError(message) from exc
