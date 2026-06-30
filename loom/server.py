@@ -67,6 +67,10 @@ def _is_project(p: Path) -> bool:
 def _state(root: Path) -> dict:
     cfg = load_config(root)
     st = load_state(root)
+    brain_names = list(BRAIN_FILES)
+    if (root / "外置大脑" / "修炼体系.md").is_file():
+        brain_names.append("修炼体系")
+    brains = [{"rel": f"外置大脑/{n}.md", "name": n} for n in brain_names]
     body = root / "正文"
     chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
     chs = []
@@ -86,7 +90,7 @@ def _state(root: Path) -> dict:
                     "openai_compat_key_set": openai_compat_key_is_set(root),
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
+        "brain": brains
                  + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
                     if (root / "外置大脑" / "违禁词.md").is_file() else []),
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
