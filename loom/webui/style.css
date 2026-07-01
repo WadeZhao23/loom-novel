@@ -652,6 +652,7 @@ body.focus-mode .focus-exit { display: block; }
   background: var(--bg-sunken); display: flex; flex-direction: column; align-items: center;
   justify-content: center; gap: var(--space-2); color: var(--text-soft); cursor: pointer; text-align: center; }
 .import-drop:hover, .import-drop.dragging { border-color: var(--accent); background: var(--accent-tint); }
+.import-drop[aria-disabled="true"] { cursor: wait; opacity: .65; pointer-events: none; }
 .import-drop .icon { width: 28px; height: 28px; color: var(--accent); }
 .import-drop strong { color: var(--text); font-size: var(--fs-h2); }
 .import-drop span:last-child { font-size: var(--fs-sm); }

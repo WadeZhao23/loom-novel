@@ -19,20 +19,37 @@ let _importActiveChapter = null;
 let _importResultTab = "worldview";
 let _importSourceMode = "include";
 let _importPollTimer = null;
-let _importParsing = false;
+let _importPollContext = null;
+let _importPollToken = 0;
+let _importParsing = null;
+let _importGeneration = 0;
+let _importChaptersDirty = false;
+let _importRangeTaskId = null;
+let _importUploadInProgress = false;
+let _importPreviousFocus = null;
+let _importsRequest = 0;
+
+function importErrorMessage(error) {
+  if (!error) return "";
+  if (typeof error === "object") return String(error.message || error.error || "");
+  return String(error);
+}
 
 async function importRequest(path, options = {}) {
   const response = await fetch(path, options);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `请求失败 (${response.status})`);
+    throw new Error(importErrorMessage(data.error) || `请求失败 (${response.status})`);
   }
   if (response.status === 204) return null;
   return response.json();
 }
 
-async function readNdjson(response, onEvent) {
-  if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+async function readNdjson(response, onEvent, isCurrent = () => true) {
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(importErrorMessage(data.error) || `请求失败 (${response.status})`);
+  }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -41,10 +58,10 @@ async function readNdjson(response, onEvent) {
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
-    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line));
+    for (const line of lines) if (line.trim() && isCurrent()) onEvent(JSON.parse(line));
     if (done) break;
   }
-  if (buffer.trim()) onEvent(JSON.parse(buffer));
+  if (buffer.trim() && isCurrent()) onEvent(JSON.parse(buffer));
 }
 
 // ---------- 图标(iconfont Symbol)----------
@@ -156,10 +173,13 @@ function bind() {
   $("btn-sample").onclick = openSample;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
   $("btn-import").onclick = () => {
+    beginImportGeneration();
     IMPORT_TASK = null;
     IMPORT_CHAPTERS = [];
+    _importChaptersDirty = false;
+    _importRangeTaskId = null;
     $("import-title").textContent = "导入小说";
-    $("import-overlay").classList.remove("hidden");
+    openImportOverlay("import-upload");
     showImportStep("upload");
   };
   $("import-close").onclick = closeImportOverlay;
@@ -173,6 +193,7 @@ function bind() {
   $("import-drop").ondrop = (e) => {
     e.preventDefault();
     $("import-drop").classList.remove("dragging");
+    if (_importUploadInProgress) return;
     const file = e.dataTransfer.files[0];
     if (file) uploadNovel(file);
   };
@@ -180,6 +201,8 @@ function bind() {
     button.onclick = () => showImportStep(button.dataset.step);
   });
   $("import-range-select").onclick = selectImportRange;
+  $("import-range-start").onchange = markImportChaptersDirty;
+  $("import-range-end").onchange = markImportChaptersDirty;
   $("import-save-chapters").onclick = () => saveImportChapters().catch(() => {});
   $("import-start-parse").onclick = runImportParse;
   $("import-retry-parse").onclick = runImportParse;
@@ -339,13 +362,81 @@ const IMPORT_STATUS_LABELS = {
   failed: "失败", completed: "已完成", created: "已创建",
 };
 
-async function loadImports() {
+async function loadImports(generation = null) {
+  const request = ++_importsRequest;
   try {
-    IMPORTS = await importRequest("/api/imports");
+    const imports = await importRequest("/api/imports");
+    if (request !== _importsRequest || (generation !== null && generation !== _importGeneration)) return;
+    IMPORTS = imports;
   } catch (e) {
+    if (request !== _importsRequest || (generation !== null && generation !== _importGeneration)) return;
     IMPORTS = [];
   }
   renderImportHistory();
+}
+
+function beginImportGeneration() {
+  stopImportPolling();
+  _importGeneration += 1;
+  return _importGeneration;
+}
+
+function importContext(taskId = IMPORT_TASK && IMPORT_TASK.id) {
+  return { taskId, generation: _importGeneration };
+}
+
+function importContextCurrent(context) {
+  return Boolean(context && context.generation === _importGeneration
+    && IMPORT_TASK && IMPORT_TASK.id === context.taskId);
+}
+
+function normalizeImportTask(task) {
+  if (!task) return task;
+  return { ...task, error: importErrorMessage(task.error) };
+}
+
+function markImportChaptersDirty() {
+  _importChaptersDirty = true;
+}
+
+function setImportUploadState(uploading) {
+  _importUploadInProgress = uploading;
+  $("import-upload").disabled = uploading;
+  $("import-file").disabled = uploading;
+  $("import-drop").setAttribute("aria-disabled", String(uploading));
+}
+
+function setImportBackgroundInert(inert) {
+  [$("welcome"), $("app")].forEach((element) => { element.inert = inert; });
+}
+
+function openImportOverlay(focusId) {
+  const overlay = $("import-overlay");
+  if (overlay.classList.contains("hidden")) _importPreviousFocus = document.activeElement;
+  setImportBackgroundInert(true);
+  overlay.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    if (overlay.classList.contains("hidden")) return;
+    const target = (focusId && $(focusId)) || $("import-close");
+    if (target && !target.disabled) target.focus();
+  });
+}
+
+function trapImportFocus(event) {
+  const overlay = $("import-overlay");
+  const focusable = [...overlay.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => !element.closest(".hidden"));
+  if (!focusable.length) { event.preventDefault(); return; }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault(); first.focus();
+  } else if (!overlay.contains(document.activeElement)) {
+    event.preventDefault(); (event.shiftKey ? last : first).focus();
+  }
 }
 
 function renderImportHistory() {
@@ -385,6 +476,7 @@ function renderImportHistory() {
 }
 
 async function uploadNovel(file) {
+  if (_importUploadInProgress) return;
   const chosen = file || $("import-file").files[0];
   const error = $("import-upload-error");
   error.textContent = "";
@@ -397,34 +489,44 @@ async function uploadNovel(file) {
     return;
   }
 
-  const button = $("import-upload");
-  button.disabled = true;
+  const generation = _importGeneration;
+  setImportUploadState(true);
   const form = new FormData();
   form.append("file", chosen);
   try {
     const task = await importRequest("/api/imports", { method: "POST", body: form });
-    await loadImports();
+    if (generation !== _importGeneration) return;
+    await loadImports(generation);
+    if (generation !== _importGeneration) return;
     await openImport(task.id);
   } catch (e) {
-    error.textContent = e.message;
+    if (generation === _importGeneration) error.textContent = e.message;
   } finally {
-    button.disabled = false;
+    setImportUploadState(false);
   }
 }
 
 async function openImport(taskOrId) {
   const taskId = typeof taskOrId === "string" ? taskOrId : taskOrId && taskOrId.id;
   if (!taskId) return;
+  const generation = beginImportGeneration();
+  const detailUrl = `/api/imports/${encodeURIComponent(taskId)}`;
+  IMPORT_TASK = null;
+  IMPORT_CHAPTERS = [];
+  _importChaptersDirty = false;
+  _importRangeTaskId = null;
   try {
-    stopImportPolling();
-    const task = await importRequest(`/api/imports/${encodeURIComponent(taskId)}`);
+    const task = normalizeImportTask(await importRequest(detailUrl));
+    if (generation !== _importGeneration) return;
     IMPORT_TASK = task;
     IMPORT_CHAPTERS = (task.chapters || []).map((chapter) => ({ ...chapter }));
+    _importChaptersDirty = false;
     _importActiveChapter = IMPORT_CHAPTERS[0] ? IMPORT_CHAPTERS[0].id : null;
     _importResultTab = "worldview";
     _importSourceMode = "include";
+    $("import-create-project").disabled = false;
     $("import-title").textContent = task.original_filename || "导入小说";
-    $("import-overlay").classList.remove("hidden");
+    openImportOverlay("import-close");
     renderImportChapters();
     renderImportParse();
     renderImportResults();
@@ -433,19 +535,23 @@ async function openImport(taskOrId) {
     else if (["running", "interrupted", "failed"].includes(task.status)) showImportStep("parse");
     else if (["completed", "created"].includes(task.status)) showImportStep("results");
     else showImportStep("upload");
-    if (task.status === "running") startImportPolling();
+    if (task.status === "running") startImportPolling(importContext(taskId));
   } catch (e) {
-    toast(e.message, true);
+    if (generation === _importGeneration) toast(e.message, true);
   }
 }
 
 function closeImportOverlay() {
-  stopImportPolling();
+  beginImportGeneration();
   $("import-overlay").classList.add("hidden");
+  setImportBackgroundInert(false);
+  const previousFocus = _importPreviousFocus;
+  _importPreviousFocus = null;
+  if (previousFocus && previousFocus.isConnected) previousFocus.focus();
 }
 
 function importChaptersLocked() {
-  return _importParsing || Boolean(IMPORT_TASK && IMPORT_TASK.status === "running");
+  return importContextCurrent(_importParsing) || Boolean(IMPORT_TASK && IMPORT_TASK.status === "running");
 }
 
 function showImportStep(step) {
@@ -503,7 +609,11 @@ function renderImportChapters() {
     checkbox.checked = chapter.selected;
     checkbox.disabled = locked;
     checkbox.setAttribute("aria-label", `选择第 ${chapter.order} 章`);
-    checkbox.onchange = () => { chapter.selected = checkbox.checked; updateImportChapterSummary(); };
+    checkbox.onchange = () => {
+      chapter.selected = checkbox.checked;
+      markImportChaptersDirty();
+      updateImportChapterSummary();
+    };
     checkbox.onclick = (event) => event.stopPropagation();
     selectCell.appendChild(checkbox);
 
@@ -516,7 +626,7 @@ function renderImportChapters() {
     title.className = "import-chapter-title";
     title.value = chapter.title;
     title.disabled = locked;
-    title.oninput = () => { chapter.title = title.value; };
+    title.oninput = () => { chapter.title = title.value; markImportChaptersDirty(); };
     title.onclick = (event) => event.stopPropagation();
     titleCell.appendChild(title);
 
@@ -539,7 +649,7 @@ function renderImportChapters() {
       textarea.dataset.importContentId = chapter.id;
       textarea.value = chapter.content;
       textarea.disabled = locked;
-      textarea.oninput = () => { chapter.content = textarea.value; };
+      textarea.oninput = () => { chapter.content = textarea.value; markImportChaptersDirty(); };
 
       const detailActions = document.createElement("div");
       detailActions.className = "import-detail-actions";
@@ -569,9 +679,16 @@ function renderImportChapters() {
   });
 
   const end = $("import-range-end");
-  end.max = String(Math.max(1, IMPORT_CHAPTERS.length));
-  if (Number(end.value) > IMPORT_CHAPTERS.length || end.value === "1") end.value = String(Math.max(1, IMPORT_CHAPTERS.length));
-  $("import-range-start").max = String(Math.max(1, IMPORT_CHAPTERS.length));
+  const maxChapter = Math.max(1, IMPORT_CHAPTERS.length);
+  end.max = String(maxChapter);
+  $("import-range-start").max = String(maxChapter);
+  if (IMPORT_TASK && _importRangeTaskId !== IMPORT_TASK.id) {
+    $("import-range-start").value = "1";
+    end.value = String(maxChapter);
+    _importRangeTaskId = IMPORT_TASK.id;
+  } else if (Number(end.value) > maxChapter) {
+    end.value = String(maxChapter);
+  }
   [$("import-range-start"), end, $("import-range-select"), $("import-save-chapters"), $("import-start-parse"), $("import-delete-chapters")]
     .forEach((control) => { control.disabled = locked; });
   updateImportChapterSummary();
@@ -603,6 +720,7 @@ function splitImportChapter(chapterId = _importActiveChapter) {
   };
   IMPORT_CHAPTERS.splice(index + 1, 0, continuation);
   renumberImportChapters();
+  markImportChaptersDirty();
   _importActiveChapter = continuation.id;
   renderImportChapters();
 }
@@ -615,10 +733,13 @@ function mergeImportChapter(chapterId = _importActiveChapter, direction = "next"
   if (leftIndex < 0 || rightIndex >= IMPORT_CHAPTERS.length) return;
   const left = IMPORT_CHAPTERS[leftIndex];
   const right = IMPORT_CHAPTERS[rightIndex];
-  left.content += right.content;
+  const leftBody = left.content.replace(/[\r\n]+$/, "");
+  const rightBody = right.content.replace(/^[\r\n]+/, "");
+  left.content = leftBody && rightBody ? `${leftBody}\n${rightBody}` : leftBody + rightBody;
   left.selected = left.selected || right.selected;
   IMPORT_CHAPTERS.splice(rightIndex, 1);
   renumberImportChapters();
+  markImportChaptersDirty();
   _importActiveChapter = left.id;
   renderImportChapters();
 }
@@ -630,6 +751,7 @@ function moveImportChapter(chapterId = _importActiveChapter, offset = 0) {
   const [chapter] = IMPORT_CHAPTERS.splice(index, 1);
   IMPORT_CHAPTERS.splice(destination, 0, chapter);
   renumberImportChapters();
+  markImportChaptersDirty();
   _importActiveChapter = chapter.id;
   renderImportChapters();
 }
@@ -643,12 +765,14 @@ function selectImportRange() {
   }
   $("import-chapter-error").textContent = "";
   IMPORT_CHAPTERS.forEach((chapter) => { chapter.selected = chapter.order >= start && chapter.order <= end; });
+  markImportChaptersDirty();
   renumberImportChapters();
   renderImportChapters();
 }
 
 async function saveImportChapters() {
   if (!IMPORT_TASK) return null;
+  const context = importContext();
   const error = $("import-chapter-error");
   error.textContent = "";
   renumberImportChapters();
@@ -660,19 +784,27 @@ async function saveImportChapters() {
     error.textContent = "至少选择一章";
     throw new Error(error.textContent);
   }
+  const chapters = IMPORT_CHAPTERS.map((chapter) => ({ ...chapter }));
+  const chaptersUrl = `/api/imports/${encodeURIComponent(context.taskId)}/chapters`;
+  const detailUrl = `/api/imports/${encodeURIComponent(context.taskId)}`;
   try {
-    await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/chapters`, {
+    await importRequest(chaptersUrl, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chapters: IMPORT_CHAPTERS }),
+      body: JSON.stringify({ chapters }),
     });
-    IMPORT_TASK = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
+    if (!importContextCurrent(context)) return null;
+    const task = normalizeImportTask(await importRequest(detailUrl));
+    if (!importContextCurrent(context)) return null;
+    IMPORT_TASK = task;
     IMPORT_CHAPTERS = IMPORT_TASK.chapters.map((chapter) => ({ ...chapter }));
+    _importChaptersDirty = false;
     renderImportChapters();
-    await loadImports();
+    await loadImports(context.generation);
+    if (!importContextCurrent(context)) return null;
     return IMPORT_TASK;
   } catch (e) {
-    error.textContent = e.message;
+    if (importContextCurrent(context)) error.textContent = e.message;
     throw e;
   }
 }
@@ -701,49 +833,71 @@ function renderImportParse() {
     completed: "解析完成。",
   };
   $("import-parse-note").textContent = labels[IMPORT_TASK.status] || "";
-  $("import-parse-error").textContent = IMPORT_TASK.error || "";
-  $("import-retry-parse").disabled = _importParsing || IMPORT_TASK.status === "running" || ["completed", "created"].includes(IMPORT_TASK.status);
+  $("import-parse-error").textContent = importErrorMessage(IMPORT_TASK.error);
+  $("import-retry-parse").disabled = importContextCurrent(_importParsing) || IMPORT_TASK.status === "running" || ["completed", "created"].includes(IMPORT_TASK.status);
   $("import-retry-parse").textContent = ["failed", "interrupted"].includes(IMPORT_TASK.status) ? "继续解析" : "开始解析";
-  $("import-delete-parse").disabled = _importParsing || IMPORT_TASK.status === "running";
+  $("import-delete-parse").disabled = importContextCurrent(_importParsing) || IMPORT_TASK.status === "running";
 }
 
 async function runImportParse() {
-  if (!IMPORT_TASK || _importParsing || IMPORT_TASK.status === "running") return;
-  _importParsing = true;
+  if (!IMPORT_TASK || importContextCurrent(_importParsing) || IMPORT_TASK.status === "running") return;
+  const context = importContext();
+  const initialStatus = IMPORT_TASK.status;
+  const parseUrl = `/api/imports/${encodeURIComponent(context.taskId)}/parse`;
+  const detailUrl = `/api/imports/${encodeURIComponent(context.taskId)}`;
+  let parseStarted = false;
+  _importParsing = context;
   try {
     $("import-parse-error").textContent = "";
     renderImportChapters();
-    await saveImportChapters();
+    if (initialStatus === "reviewing" || _importChaptersDirty) {
+      const saved = await saveImportChapters();
+      if (!saved || !importContextCurrent(context)) return;
+    }
+    if (!importContextCurrent(context)) return;
+    parseStarted = true;
     IMPORT_TASK.status = "running";
     showImportStep("parse");
     renderImportChapters();
     renderImportParse();
-    startImportPolling();
-    const response = await fetch(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/parse`, { method: "POST" });
-    await readNdjson(response, applyImportEvent);
+    startImportPolling(context);
+    const response = await fetch(parseUrl, { method: "POST" });
+    await readNdjson(
+      response,
+      (event) => applyImportEvent(context, event),
+      () => importContextCurrent(context),
+    );
   } catch (e) {
-    $("import-parse-error").textContent = e.message;
+    if (importContextCurrent(context)) $("import-parse-error").textContent = e.message;
   } finally {
-    try {
-      IMPORT_TASK = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
-      IMPORT_CHAPTERS = IMPORT_TASK.chapters.map((chapter) => ({ ...chapter }));
-    } catch (e) {
-      $("import-parse-error").textContent = e.message;
+    if (parseStarted && importContextCurrent(context)) {
+      try {
+        const task = normalizeImportTask(await importRequest(detailUrl));
+        if (importContextCurrent(context)) {
+          IMPORT_TASK = task;
+          IMPORT_CHAPTERS = task.chapters.map((chapter) => ({ ...chapter }));
+          _importChaptersDirty = false;
+        }
+      } catch (e) {
+        if (importContextCurrent(context)) $("import-parse-error").textContent = e.message;
+      }
     }
-    _importParsing = false;
-    stopImportPolling();
+    if (_importParsing === context) _importParsing = null;
+    if (!importContextCurrent(context)) return;
+    stopImportPolling(context);
     renderImportChapters();
     renderImportParse();
-    await loadImports();
+    await loadImports(context.generation);
+    if (!importContextCurrent(context)) return;
     if (IMPORT_TASK && ["completed", "created"].includes(IMPORT_TASK.status)) {
       renderImportResults();
       showImportStep("results");
-    } else if (IMPORT_TASK && IMPORT_TASK.status === "running") startImportPolling();
+    } else if (IMPORT_TASK && IMPORT_TASK.status === "running") startImportPolling(context);
   }
 }
 
-function applyImportEvent(event) {
-  if (!IMPORT_TASK || !event) return;
+function applyImportEvent(context, event) {
+  if (!importContextCurrent(context) || !event) return;
   if (event.phase) IMPORT_TASK.phase = event.phase;
   if (Number.isFinite(event.completed) || Number.isFinite(event.total)) {
     IMPORT_TASK.progress = {
@@ -797,29 +951,32 @@ function renderImportSourceMode() {
   });
 }
 
-async function saveImportResults() {
+async function saveImportResults(context = importContext(), suppliedResults = null) {
   if (!IMPORT_TASK) return null;
   const error = $("import-result-error");
   error.textContent = "";
-  const results = {};
-  IMPORT_PHASES.forEach((name) => { results[name] = $(`import-result-${name}`).value; });
+  const results = suppliedResults || {};
+  if (!suppliedResults) IMPORT_PHASES.forEach((name) => { results[name] = $(`import-result-${name}`).value; });
+  const resultsUrl = `/api/imports/${encodeURIComponent(context.taskId)}/results`;
   try {
-    await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/results`, {
+    await importRequest(resultsUrl, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(results),
     });
+    if (!importContextCurrent(context)) return null;
     IMPORT_TASK.results = { ...results };
     toast("解析结果已保存");
     return results;
   } catch (e) {
-    error.textContent = e.message;
+    if (importContextCurrent(context)) error.textContent = e.message;
     throw e;
   }
 }
 
 async function createImportedProject() {
   if (!IMPORT_TASK) return;
+  const context = importContext();
   const error = $("import-result-error");
   error.textContent = "";
   const name = $("import-project-name").value.trim();
@@ -829,75 +986,98 @@ async function createImportedProject() {
     return;
   }
   const button = $("import-create-project");
+  const results = {};
+  IMPORT_PHASES.forEach((phase) => { results[phase] = $(`import-result-${phase}`).value; });
+  const createUrl = `/api/imports/${encodeURIComponent(context.taskId)}/create-project`;
+  const payload = {
+    name,
+    parent_dir: parentDir,
+    genre: $("import-genre").value || null,
+    include_source_chapters: _importSourceMode === "include",
+  };
   button.disabled = true;
   try {
-    await saveImportResults();
-    const state = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/create-project`, {
+    const saved = await saveImportResults(context, results);
+    if (!saved || !importContextCurrent(context)) return;
+    const state = await importRequest(createUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        parent_dir: parentDir,
-        genre: $("import-genre").value || null,
-        include_source_chapters: _importSourceMode === "include",
-      }),
+      body: JSON.stringify(payload),
     });
+    if (!importContextCurrent(context)) return;
     IMPORT_TASK.status = "created";
+    await loadImports(context.generation);
+    if (!importContextCurrent(context)) return;
+    button.disabled = false;
     closeImportOverlay();
-    await loadImports();
     enterProject(state);
   } catch (e) {
-    error.textContent = e.message;
+    if (importContextCurrent(context)) error.textContent = e.message;
   } finally {
-    button.disabled = false;
+    if (importContextCurrent(context)) button.disabled = false;
   }
 }
 
 async function deleteImportTask(taskId = IMPORT_TASK && IMPORT_TASK.id) {
   if (!taskId || !window.confirm("确定删除这个导入任务？此操作无法撤销。")) return;
+  const context = importContext(taskId);
+  const deleteUrl = `/api/imports/${encodeURIComponent(taskId)}`;
   try {
-    await importRequest(`/api/imports/${encodeURIComponent(taskId)}`, { method: "DELETE" });
-    if (IMPORT_TASK && IMPORT_TASK.id === taskId) {
+    await importRequest(deleteUrl, { method: "DELETE" });
+    if (context.generation !== _importGeneration) return;
+    await loadImports(context.generation);
+    if (context.generation !== _importGeneration) return;
+    if (importContextCurrent(context)) {
       IMPORT_TASK = null;
       IMPORT_CHAPTERS = [];
       closeImportOverlay();
     }
-    await loadImports();
   } catch (e) {
-    toast(e.message, true);
+    if (context.generation === _importGeneration) toast(e.message, true);
   }
 }
 
-function stopImportPolling() {
-  if (_importPollTimer) clearTimeout(_importPollTimer);
+function stopImportPolling(context) {
+  if (context && _importPollContext !== context) return;
+  if (_importPollTimer) clearTimeout(_importPollTimer.timer);
   _importPollTimer = null;
+  _importPollContext = null;
+  _importPollToken += 1;
 }
 
-function startImportPolling() {
+function startImportPolling(context = importContext()) {
   stopImportPolling();
-  if (!IMPORT_TASK || IMPORT_TASK.status !== "running" || $("import-overlay").classList.contains("hidden")) return;
-  _importPollTimer = setTimeout(async () => {
+  if (!importContextCurrent(context) || IMPORT_TASK.status !== "running" || $("import-overlay").classList.contains("hidden")) return;
+  const detailUrl = `/api/imports/${encodeURIComponent(context.taskId)}`;
+  const pollToken = _importPollToken;
+  _importPollContext = context;
+  const timer = setTimeout(async () => {
+    if (pollToken !== _importPollToken || !_importPollTimer || _importPollTimer.timer !== timer) return;
     _importPollTimer = null;
-    if (!IMPORT_TASK || $("import-overlay").classList.contains("hidden")) return;
+    if (!importContextCurrent(context) || $("import-overlay").classList.contains("hidden")) return;
     try {
-      const task = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
+      const task = normalizeImportTask(await importRequest(detailUrl));
+      if (pollToken !== _importPollToken || _importPollContext !== context || !importContextCurrent(context)) return;
       IMPORT_TASK = task;
       IMPORT_CHAPTERS = task.chapters.map((chapter) => ({ ...chapter }));
       renderImportParse();
-      if (task.status === "running") startImportPolling();
+      if (task.status === "running") startImportPolling(context);
       else {
         stopImportPolling();
-        await loadImports();
+        await loadImports(context.generation);
+        if (!importContextCurrent(context)) return;
         if (["completed", "created"].includes(task.status)) {
           renderImportResults();
           showImportStep("results");
         }
       }
     } catch (e) {
+      if (pollToken !== _importPollToken || _importPollContext !== context || !importContextCurrent(context)) return;
       $("import-parse-error").textContent = e.message;
-      if (IMPORT_TASK && IMPORT_TASK.status === "running") startImportPolling();
+      if (IMPORT_TASK.status === "running") startImportPolling(context);
     }
   }, 2000);
+  _importPollTimer = { timer, context };
 }
 
 function renderProjects() {
@@ -2179,6 +2359,10 @@ function closeTopOverlay() {
   return false;
 }
 function globalKeys(e) {
+  if (e.key === "Tab" && !$("import-overlay").classList.contains("hidden")) {
+    trapImportFocus(e);
+    return;
+  }
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); $("cmdk").classList.contains("hidden") ? openCmdk() : closeCmdk(); return; }
   if (e.key === "Escape") { if (closeTopOverlay()) e.preventDefault(); return; }
