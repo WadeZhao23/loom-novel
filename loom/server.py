@@ -755,7 +755,6 @@ def parse_import(task_id: str) -> StreamingResponse:
             return _import_error(error, 400)
 
         events: queue.Queue = queue.Queue()
-        finished = threading.Event()
 
         def worker() -> None:
             try:
@@ -764,19 +763,14 @@ def parse_import(task_id: str) -> StreamingResponse:
                 pass
             finally:
                 events.put(None)
-                finished.set()
 
         threading.Thread(target=worker, daemon=True).start()
-        while not finished.is_set():
-            current = store.get(task_id)
-            if (
-                current.get("status") != status
-                or current.get("updated_at") != task.get("updated_at")
-            ):
-                break
-            finished.wait(0.001)
+        first_event = events.get()
 
     def stream():
+        if first_event is None:
+            return
+        yield json.dumps(first_event, ensure_ascii=False) + "\n"
         while True:
             event = events.get()
             if event is None:

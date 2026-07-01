@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
@@ -82,7 +83,7 @@ def completed_task(client: TestClient) -> dict:
     task = ready_task(client)
     response = client.post(f"/api/imports/{task['id']}/parse")
     assert response.status_code == 200, response.text
-    assert frames(response)[-1]["type"] == "complete"
+    assert frames(response)[-1]["type"] == "complete", response.text
     return task
 
 
@@ -113,6 +114,41 @@ def test_parse_returns_ndjson_and_persists_results(client: TestClient) -> None:
     assert detail["status"] == "completed"
     assert set(detail["results"]) == set(RESULTS)
     assert detail["result_revision"] == detail["chapter_revision"]
+
+
+def test_parse_start_does_not_reread_task_while_worker_updates(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = ready_task(client)
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_ident: int | None = None
+    original_get = server.ImportJobStore.get
+
+    def controlled_run_parse(store, task_id, backend, *, progress, char_budget=12_000):
+        nonlocal worker_ident
+        worker_ident = threading.get_ident()
+        worker_started.set()
+        release_worker.wait(0.2)
+        progress({"type": "complete", "completed": 1, "total": 1})
+        return RESULTS
+
+    def fail_post_start_endpoint_read(self, task_id: str) -> dict:
+        if worker_started.is_set() and threading.get_ident() != worker_ident:
+            release_worker.set()
+            raise PermissionError("task.json is being atomically replaced")
+        return original_get(self, task_id)
+
+    monkeypatch.setattr(server, "run_parse", controlled_run_parse)
+    monkeypatch.setattr(server.ImportJobStore, "get", fail_post_start_endpoint_read)
+
+    try:
+        response = client.post(f"/api/imports/{task['id']}/parse")
+    finally:
+        release_worker.set()
+
+    assert response.status_code == 200, response.text
+    assert frames(response) == [{"type": "complete", "completed": 1, "total": 1}]
 
 
 def test_upload_enforces_byte_limit(
