@@ -112,14 +112,21 @@ def sample() -> None:
     console.print("[dim]2 章正文 + 进化过的写作指纹 + 外置大脑都在。想续写,填你自己的 DeepSeek key。[/dim]")
 
 
-@app.command(help="从样本提炼写作指纹。")
+@app.command(help="从样本提炼写作指纹(--参考 别人的原文范文:蒸出可作起点的指纹,此后靠你的改稿脱化)。")
 def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
          text: str = typer.Option(None, "--文本", "--text"),
-         inherit: Path = typer.Option(None, "--继承", "--inherit")) -> None:
-    from .fingerprint import seed_from_inherit, seed_from_samples
+         inherit: Path = typer.Option(None, "--继承", "--inherit"),
+         reference: Path = typer.Option(None, "--参考", "--reference")) -> None:
+    from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
 
     try:
         root = find_project_root()
+        if reference is not None:
+            if not reference.exists():
+                _die(f"范文文件不存在:{reference}")
+            seed_from_reference(root, reference.read_text(encoding="utf-8"),
+                                get_backend(load_config(root)), _render)
+            return
         if inherit is not None:
             seed_from_inherit(root, inherit, _render)
             return
@@ -184,7 +191,8 @@ def status() -> None:
     except FileNotFoundError as e:
         _die(str(e))
     st = load_state(root)
-    src = {"default": "中性默认(还没懂你)", "sample": "你的样本", "inherit": "继承自另一本书"}.get(
+    src = {"default": "中性默认(还没懂你)", "sample": "你的样本", "inherit": "继承自另一本书",
+           "reference": "别人的范文(起点,靠你的改稿脱化)"}.get(
         st.get("fingerprint_source", "default"), st.get("fingerprint_source"))
     console.print(f"[bold]写作指纹来源:[/bold] {src}")
     learned = set(st.get("learned", []))

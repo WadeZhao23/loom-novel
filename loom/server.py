@@ -26,7 +26,7 @@ from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
-from .fingerprint import seed_from_inherit, seed_from_samples
+from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
 from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
@@ -84,6 +84,10 @@ def _state(root: Path) -> dict:
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
         "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
+                 + ([{"rel": "外置大脑/立项卡.md", "name": "立项卡"}]
+                    if (root / "外置大脑" / "立项卡.md").is_file() else [])
+                 + ([{"rel": "外置大脑/文风参考.md", "name": "文风参考"}]
+                    if (root / "外置大脑" / "文风参考.md").is_file() else [])
                  + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
                     if (root / "外置大脑" / "违禁词.md").is_file() else []),
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
@@ -317,13 +321,16 @@ class SeedBody(BaseModel):
     root: str
     text: str | None = None
     inherit: str | None = None
+    reference: str | None = None
 
 
 @app.post("/api/seed")
 def seed(b: SeedBody):
     root = Path(b.root)
     try:
-        if b.inherit:
+        if b.reference:
+            seed_from_reference(root, b.reference, get_backend(load_config(root)))
+        elif b.inherit:
             seed_from_inherit(root, Path(b.inherit).expanduser())
         else:
             seed_from_samples(root, b.text or "", get_backend(load_config(root)))

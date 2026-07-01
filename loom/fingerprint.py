@@ -108,6 +108,28 @@ def seed_from_samples(project_root: Path, samples: str, backend: Backend, progre
     return path
 
 
+def seed_from_reference(project_root: Path, reference_text: str, backend: Backend, progress: Progress = _noop) -> Path:
+    """从【别人的原文范文】蒸出一份可作起点的写作指纹(L1 seed-from-others)。
+
+    与 seed_from_samples 同一条蒸馏管线,只是料是你欣赏的作者的原文——种子只定【起点】,
+    此后靠你的改稿脱化成你。铁律不变:learn 的学习信号仍【唯一是你的手改】(阀①),
+    fingerprint_source='reference' 永不被 learn 读取(ADR 0002 不变)。
+    """
+    if not reference_text.strip():
+        raise LoomBackendError("范文是空的。给我一段你欣赏的作者的原文(当起点用)。")
+    progress({"type": "info", "message": "正在从这段范文里蒸出可作起点的写作指纹…"})
+    user = (
+        f"这是我欣赏的作者的原文范文,请蒸出可作为起点的写作指纹:\n\n{reference_text.strip()}\n\n"
+        f"请按下面的结构输出这份【起点】写作指纹:\n\n{_FORMAT_HINT}"
+    )
+    fp = backend.complete(_SEED_SYSTEM, user, max_chars=1800)
+    path = project_root / FINGERPRINT_REL
+    guard_write(path, fp, FINGERPRINT)   # 校验结构(不校验来源):空/残缺不覆盖默认指纹
+    set_fingerprint_source(project_root, "reference")
+    progress({"type": "seed_done", "path": str(path), "source": "reference"})
+    return path
+
+
 def seed_from_inherit(project_root: Path, other_fingerprint: Path, progress: Progress = _noop) -> Path:
     if not other_fingerprint.exists():
         raise LoomBackendError(f"找不到要继承的指纹文件:{other_fingerprint}")

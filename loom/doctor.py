@@ -14,7 +14,8 @@ from pathlib import Path
 from .config import key_is_set, load_config, openai_compat_key_is_set
 
 # 单一真相:server.py 也从这里导入,避免清单各存一份漂移
-BRAIN_FILES = ["世界观", "人物卡", "卡章纲", "写作指纹"]   # 外置大脑四件套
+BRAIN_FILES = ["世界观", "人物卡", "卡章纲", "写作指纹"]   # 外置大脑【四件套强制】
+OPTIONAL_BRAIN = ["立项卡", "文风参考", "违禁词"]           # 【可选】:有无都 ok,不阻断出稿
 AGENT_FILES = ["设定师", "大纲师", "写手", "编辑", "润色师"]  # 5 道工序
 
 
@@ -78,6 +79,9 @@ def run_checks(root: Path) -> list[Check]:
         fix = ("loom seed 重新生成,或从备份恢复" if n == "写作指纹"
                else f"外置大脑是人维护文件,手动补回 外置大脑/{n}.md")
         checks.append(_c(f"外置大脑 · {n}", p.is_file(), f"缺 外置大脑/{n}.md", fix))
+    # f. 可选卡(立项卡/文风参考/违禁词):有无都 ok——纯信息、绝不 ok=False、绝不阻断(同违禁词待遇)
+    for n in OPTIONAL_BRAIN:
+        checks.append(_c(f"外置大脑 · {n}(可选)", True))
     return checks
 
 
