@@ -1,0 +1,23 @@
+{
+  "cases": {
+    "case_01_clean": {
+      "score": 1.0,
+      "passed": true
+    },
+    "case_02_flawed": {
+      "score": 0.607,
+      "passed": false
+    }
+  },
+  "summary": {
+    "cases": 2,
+    "passed": 1,
+    "pass_rate": 0.5,
+    "mean_score": 0.803,
+    "per_grader": {
+      "长度达标": 1.0,
+      "去AI味·确定性": 0.75,
+      "关键要素": 0.75
+    }
+  }
+}
