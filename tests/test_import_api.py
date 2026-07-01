@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -149,6 +150,96 @@ def test_parse_start_does_not_reread_task_while_worker_updates(
 
     assert response.status_code == 200, response.text
     assert frames(response) == [{"type": "complete", "completed": 1, "total": 1}]
+
+
+def test_oversized_chapter_failure_before_first_event_returns_json_error(
+    client: TestClient,
+) -> None:
+    response = upload_bytes(
+        client, f"第1章 太长\n{'x' * 12_001}".encode("utf-8")
+    )
+    assert response.status_code == 201, response.text
+    task = response.json()
+    detail = client.get(f"/api/imports/{task['id']}").json()
+    saved = client.put(
+        f"/api/imports/{task['id']}/chapters",
+        json={"chapters": detail["chapters"]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    response = client.post(f"/api/imports/{task['id']}/parse")
+
+    assert response.status_code == 400, response.text
+    assert "exceeds char_budget" in response.json()["error"]
+    assert client.get(f"/api/imports/{task['id']}").json()["status"] == "ready"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (server.ImportJobConflict("already claimed"), 409),
+        (RuntimeError("worker setup exploded"), 500),
+    ],
+)
+def test_pre_event_worker_exception_maps_to_json(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_status: int,
+) -> None:
+    task = ready_task(client)
+
+    def fail_before_progress(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(server, "run_parse", fail_before_progress)
+
+    response = client.post(f"/api/imports/{task['id']}/parse")
+
+    assert response.status_code == expected_status, response.text
+    assert response.json() == {"error": str(error)}
+
+
+def test_concurrent_parse_start_allows_one_worker_and_returns_one_conflict(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = ready_task(client)
+    backend_entered = threading.Event()
+    release_backend = threading.Event()
+    starts: list[int] = []
+    starts_lock = threading.Lock()
+    real_run_parse = server.run_parse
+
+    def blocking_backend(system: str, user: str) -> str:
+        backend_entered.set()
+        assert release_backend.wait(5)
+        return "parsed result"
+
+    backend = FakeBackend(blocking_backend)
+
+    def counted_run_parse(*args, **kwargs):
+        with starts_lock:
+            starts.append(threading.get_ident())
+        return real_run_parse(*args, **kwargs)
+
+    monkeypatch.setattr(server, "get_backend", lambda config: backend)
+    monkeypatch.setattr(server, "run_parse", counted_run_parse)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(client.post, f"/api/imports/{task['id']}/parse")
+        assert backend_entered.wait(5)
+        second = pool.submit(client.post, f"/api/imports/{task['id']}/parse")
+        try:
+            conflict = second.result(timeout=5)
+        finally:
+            release_backend.set()
+        parsed = first.result(timeout=5)
+
+    assert parsed.status_code == 200, parsed.text
+    assert frames(parsed)[-1]["type"] == "complete"
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["task"]["status"] == "running"
+    assert len(starts) == 1
 
 
 def test_upload_enforces_byte_limit(

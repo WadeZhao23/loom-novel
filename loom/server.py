@@ -674,12 +674,13 @@ async def create_import(file: UploadFile = File(...)) -> dict:
     finally:
         await file.close()
 
+    payload = bytes(raw)
     try:
-        text, encoding = decode_txt(bytes(raw))
+        text, encoding = decode_txt(payload)
         split = split_chapters(text)
         task = _import_store().create(
             filename,
-            bytes(raw),
+            payload,
             text,
             encoding,
             split.chapters,
@@ -755,21 +756,34 @@ def parse_import(task_id: str) -> StreamingResponse:
             return _import_error(error, 400)
 
         events: queue.Queue = queue.Queue()
+        worker_error: Exception | None = None
 
         def worker() -> None:
+            nonlocal worker_error
             try:
                 run_parse(store, task_id, backend, progress=events.put)
-            except Exception:
-                pass
+            except Exception as error:
+                worker_error = error
             finally:
                 events.put(None)
 
         threading.Thread(target=worker, daemon=True).start()
         first_event = events.get()
+        if first_event is None:
+            if isinstance(worker_error, ImportJobConflict):
+                return _import_error(worker_error, 409)
+            if isinstance(
+                worker_error,
+                (ImportJobError, LoomBackendError, ValueError, FileNotFoundError),
+            ):
+                return _import_error(worker_error, 400)
+            if worker_error is not None:
+                return _import_error(worker_error, 500)
+            return _import_error(
+                RuntimeError("Import parse ended before emitting progress"), 500
+            )
 
     def stream():
-        if first_event is None:
-            return
         yield json.dumps(first_event, ensure_ascii=False) + "\n"
         while True:
             event = events.get()
