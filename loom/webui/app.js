@@ -12,6 +12,40 @@ let _rewriteText = "";         // 当前重写候选
 let _dirty = false;            // 编辑器是否有未保存改动
 let _saveTimer = null;         // 自动保存 debounce
 let _seedMode = "sample";      // seed 来源:sample | inherit
+let IMPORTS = [];
+let IMPORT_TASK = null;
+let IMPORT_CHAPTERS = [];
+let _importActiveChapter = null;
+let _importResultTab = "worldview";
+let _importSourceMode = "include";
+let _importPollTimer = null;
+let _importParsing = false;
+
+async function importRequest(path, options = {}) {
+  const response = await fetch(path, options);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `请求失败 (${response.status})`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+async function readNdjson(response, onEvent) {
+  if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line));
+    if (done) break;
+  }
+  if (buffer.trim()) onEvent(JSON.parse(buffer));
+}
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -36,6 +70,7 @@ const IC = {
   history: "icon-history",        // 本章版本历史
   plus: "icon-plus",              // 插入空章
   trash: "icon-trash",            // 删除章节
+  import: "icon-doc",             // 导入小说
 };
 function icon(name, cls) {
   const id = IC[name] || name;
@@ -95,6 +130,7 @@ window.addEventListener("DOMContentLoaded", () => {
   initTheme();
   bind();
   loadGenres();
+  loadImports();
   loadProjects().finally(() => {
     const saved = localStorage.getItem("loom_root");
     if (saved) openProject(saved, true);
@@ -104,11 +140,13 @@ window.addEventListener("DOMContentLoaded", () => {
 async function loadGenres() {
   try {
     const d = await jreq("GET", "/api/genres");
-    const sel = $("new-genre");
+    const selects = [$("new-genre"), $("import-genre")].filter(Boolean);
     (d.genres || []).forEach((g) => {
-      const o = document.createElement("option");
-      o.value = g; o.textContent = g;
-      sel.appendChild(o);
+      selects.forEach((sel) => {
+        const o = document.createElement("option");
+        o.value = g; o.textContent = g;
+        sel.appendChild(o);
+      });
     });
   } catch (e) { /* 题材是可选增益,拉不到就只留"不选题材" */ }
 }
@@ -117,6 +155,44 @@ function bind() {
   $("btn-create").onclick = createProject;
   $("btn-sample").onclick = openSample;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
+  $("btn-import").onclick = () => {
+    IMPORT_TASK = null;
+    IMPORT_CHAPTERS = [];
+    $("import-title").textContent = "导入小说";
+    $("import-overlay").classList.remove("hidden");
+    showImportStep("upload");
+  };
+  $("import-close").onclick = closeImportOverlay;
+  $("import-upload").onclick = uploadNovel;
+  $("import-file").onchange = () => {
+    const file = $("import-file").files[0];
+    if (file) $("import-drop").querySelector("strong").textContent = file.name;
+  };
+  $("import-drop").ondragover = (e) => { e.preventDefault(); $("import-drop").classList.add("dragging"); };
+  $("import-drop").ondragleave = () => $("import-drop").classList.remove("dragging");
+  $("import-drop").ondrop = (e) => {
+    e.preventDefault();
+    $("import-drop").classList.remove("dragging");
+    const file = e.dataTransfer.files[0];
+    if (file) uploadNovel(file);
+  };
+  $("import-steps").querySelectorAll("button").forEach((button) => {
+    button.onclick = () => showImportStep(button.dataset.step);
+  });
+  $("import-range-select").onclick = selectImportRange;
+  $("import-save-chapters").onclick = () => saveImportChapters().catch(() => {});
+  $("import-start-parse").onclick = runImportParse;
+  $("import-retry-parse").onclick = runImportParse;
+  $("import-save-results").onclick = () => saveImportResults().catch(() => {});
+  $("import-create-project").onclick = createImportedProject;
+  [$("import-delete-chapters"), $("import-delete-parse"), $("import-delete-results")]
+    .forEach((button) => { button.onclick = () => deleteImportTask(); });
+  $("import-result-tabs").querySelectorAll("button").forEach((button) => {
+    button.onclick = () => { _importResultTab = button.dataset.result; renderImportResultTab(); };
+  });
+  $("import-source-mode").querySelectorAll("button").forEach((button) => {
+    button.onclick = () => { _importSourceMode = button.dataset.sourceMode; renderImportSourceMode(); };
+  });
   const refreshProjects = $("btn-refresh-projects");
   if (refreshProjects) refreshProjects.onclick = loadProjects;
   const newParent = $("new-parent");
@@ -254,6 +330,567 @@ async function loadProjects() {
     PROJECTS = null;
     renderProjects();
   }
+}
+
+// ---------- 小说导入 ----------
+const IMPORT_PHASES = ["worldview", "system", "characters", "outlines"];
+const IMPORT_STATUS_LABELS = {
+  reviewing: "待检查", ready: "待解析", running: "解析中", interrupted: "已中断",
+  failed: "失败", completed: "已完成", created: "已创建",
+};
+
+async function loadImports() {
+  try {
+    IMPORTS = await importRequest("/api/imports");
+  } catch (e) {
+    IMPORTS = [];
+  }
+  renderImportHistory();
+}
+
+function renderImportHistory() {
+  const wrap = $("import-history-wrap");
+  const list = $("import-history");
+  if (!wrap || !list) return;
+  list.replaceChildren();
+  wrap.classList.toggle("hidden", IMPORTS.length === 0);
+
+  IMPORTS.forEach((task) => {
+    const row = document.createElement("div");
+    row.className = "import-history-row";
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "import-history-open";
+    const name = document.createElement("strong");
+    name.textContent = task.original_filename || "未命名 TXT";
+    const meta = document.createElement("span");
+    const chapterCount = Number(task.chapter_count) || 0;
+    meta.textContent = `${chapterCount} 章 · ${IMPORT_STATUS_LABELS[task.status] || task.status || "未知"}`;
+    open.append(name, meta);
+    open.onclick = () => openImport(task.id);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost icon-btn";
+    remove.title = "删除导入任务";
+    remove.setAttribute("aria-label", "删除导入任务");
+    remove.textContent = "×";
+    remove.disabled = task.status === "running";
+    remove.onclick = () => deleteImportTask(task.id);
+
+    row.append(open, remove);
+    list.appendChild(row);
+  });
+}
+
+async function uploadNovel(file) {
+  const chosen = file || $("import-file").files[0];
+  const error = $("import-upload-error");
+  error.textContent = "";
+  if (!chosen) {
+    error.textContent = "请选择一个 TXT 文件";
+    return;
+  }
+  if (!chosen.name.toLowerCase().endsWith(".txt")) {
+    error.textContent = "只能导入 .txt 文件";
+    return;
+  }
+
+  const button = $("import-upload");
+  button.disabled = true;
+  const form = new FormData();
+  form.append("file", chosen);
+  try {
+    const task = await importRequest("/api/imports", { method: "POST", body: form });
+    await loadImports();
+    await openImport(task.id);
+  } catch (e) {
+    error.textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function openImport(taskOrId) {
+  const taskId = typeof taskOrId === "string" ? taskOrId : taskOrId && taskOrId.id;
+  if (!taskId) return;
+  try {
+    stopImportPolling();
+    const task = await importRequest(`/api/imports/${encodeURIComponent(taskId)}`);
+    IMPORT_TASK = task;
+    IMPORT_CHAPTERS = (task.chapters || []).map((chapter) => ({ ...chapter }));
+    _importActiveChapter = IMPORT_CHAPTERS[0] ? IMPORT_CHAPTERS[0].id : null;
+    _importResultTab = "worldview";
+    _importSourceMode = "include";
+    $("import-title").textContent = task.original_filename || "导入小说";
+    $("import-overlay").classList.remove("hidden");
+    renderImportChapters();
+    renderImportParse();
+    renderImportResults();
+
+    if (["reviewing", "ready"].includes(task.status)) showImportStep("chapters");
+    else if (["running", "interrupted", "failed"].includes(task.status)) showImportStep("parse");
+    else if (["completed", "created"].includes(task.status)) showImportStep("results");
+    else showImportStep("upload");
+    if (task.status === "running") startImportPolling();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function closeImportOverlay() {
+  stopImportPolling();
+  $("import-overlay").classList.add("hidden");
+}
+
+function showImportStep(step) {
+  if (step === "chapters" && !IMPORT_CHAPTERS.length) return;
+  if (step === "parse" && !IMPORT_TASK) return;
+  if (step === "results" && (!IMPORT_TASK || !["completed", "created"].includes(IMPORT_TASK.status))) return;
+  ["upload", "chapters", "parse", "results"].forEach((name) => {
+    $(`import-step-${name}`).classList.toggle("hidden", name !== step);
+  });
+  $("import-steps").querySelectorAll("button").forEach((button) => {
+    const active = button.dataset.step === step;
+    button.classList.toggle("on", active);
+    button.setAttribute("aria-current", active ? "step" : "false");
+    if (button.dataset.step === "chapters") button.disabled = !IMPORT_CHAPTERS.length || _importParsing;
+    if (button.dataset.step === "parse") button.disabled = !IMPORT_TASK;
+    if (button.dataset.step === "results") button.disabled = !IMPORT_TASK || !["completed", "created"].includes(IMPORT_TASK.status);
+  });
+  if (step === "chapters") renderImportChapters();
+  if (step === "parse") renderImportParse();
+  if (step === "results") renderImportResultTab();
+}
+
+function renumberImportChapters() {
+  IMPORT_CHAPTERS.forEach((chapter, index) => { chapter.order = index + 1; });
+}
+
+function importIconButton(label, symbol, handler, disabled) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ghost icon-btn";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.textContent = symbol;
+  button.disabled = Boolean(disabled);
+  button.onclick = (event) => { event.stopPropagation(); handler(); };
+  return button;
+}
+
+function renderImportChapters() {
+  const body = $("import-chapter-body");
+  if (!body) return;
+  body.replaceChildren();
+  renumberImportChapters();
+  const locked = _importParsing || (IMPORT_TASK && IMPORT_TASK.status === "running");
+
+  IMPORT_CHAPTERS.forEach((chapter, index) => {
+    const row = document.createElement("tr");
+    row.className = chapter.id === _importActiveChapter ? "active" : "";
+    row.onclick = () => { _importActiveChapter = chapter.id; renderImportChapters(); };
+
+    const selectCell = document.createElement("td");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = chapter.selected;
+    checkbox.disabled = locked;
+    checkbox.setAttribute("aria-label", `选择第 ${chapter.order} 章`);
+    checkbox.onchange = () => { chapter.selected = checkbox.checked; updateImportChapterSummary(); };
+    checkbox.onclick = (event) => event.stopPropagation();
+    selectCell.appendChild(checkbox);
+
+    const orderCell = document.createElement("td");
+    orderCell.textContent = String(chapter.order);
+
+    const titleCell = document.createElement("td");
+    const title = document.createElement("input");
+    title.type = "text";
+    title.className = "import-chapter-title";
+    title.value = chapter.title;
+    title.disabled = locked;
+    title.oninput = () => { chapter.title = title.value; };
+    title.onclick = (event) => event.stopPropagation();
+    titleCell.appendChild(title);
+
+    const actions = document.createElement("td");
+    actions.className = "import-chapter-actions";
+    actions.append(
+      importIconButton("上移", "↑", () => moveImportChapter(chapter.id, -1), locked || index === 0),
+      importIconButton("下移", "↓", () => moveImportChapter(chapter.id, 1), locked || index === IMPORT_CHAPTERS.length - 1),
+    );
+    row.append(selectCell, orderCell, titleCell, actions);
+    body.appendChild(row);
+
+    if (chapter.id === _importActiveChapter) {
+      const detailRow = document.createElement("tr");
+      detailRow.className = "import-chapter-detail";
+      const detailCell = document.createElement("td");
+      detailCell.colSpan = 4;
+      const textarea = document.createElement("textarea");
+      textarea.className = "import-chapter-content";
+      textarea.dataset.importContentId = chapter.id;
+      textarea.value = chapter.content;
+      textarea.disabled = locked;
+      textarea.oninput = () => { chapter.content = textarea.value; };
+
+      const detailActions = document.createElement("div");
+      detailActions.className = "import-detail-actions";
+      const split = document.createElement("button");
+      split.type = "button";
+      split.className = "ghost";
+      split.textContent = "从光标处拆分";
+      split.disabled = locked;
+      split.onclick = () => splitImportChapter(chapter.id);
+      const mergePrevious = document.createElement("button");
+      mergePrevious.type = "button";
+      mergePrevious.className = "ghost";
+      mergePrevious.textContent = "并入前章";
+      mergePrevious.disabled = locked || index === 0;
+      mergePrevious.onclick = () => mergeImportChapter(chapter.id, "previous");
+      const mergeNext = document.createElement("button");
+      mergeNext.type = "button";
+      mergeNext.className = "ghost";
+      mergeNext.textContent = "合并后章";
+      mergeNext.disabled = locked || index === IMPORT_CHAPTERS.length - 1;
+      mergeNext.onclick = () => mergeImportChapter(chapter.id, "next");
+      detailActions.append(split, mergePrevious, mergeNext);
+      detailCell.append(textarea, detailActions);
+      detailRow.appendChild(detailCell);
+      body.appendChild(detailRow);
+    }
+  });
+
+  const end = $("import-range-end");
+  end.max = String(Math.max(1, IMPORT_CHAPTERS.length));
+  if (Number(end.value) > IMPORT_CHAPTERS.length || end.value === "1") end.value = String(Math.max(1, IMPORT_CHAPTERS.length));
+  $("import-range-start").max = String(Math.max(1, IMPORT_CHAPTERS.length));
+  [$("import-range-start"), end, $("import-range-select"), $("import-save-chapters"), $("import-start-parse")]
+    .forEach((control) => { control.disabled = locked; });
+  updateImportChapterSummary();
+}
+
+function updateImportChapterSummary() {
+  const selected = IMPORT_CHAPTERS.filter((chapter) => chapter.selected).length;
+  $("import-chapter-summary").textContent = `已选 ${selected} / ${IMPORT_CHAPTERS.length} 章`;
+}
+
+function splitImportChapter(chapterId = _importActiveChapter) {
+  const index = IMPORT_CHAPTERS.findIndex((chapter) => chapter.id === chapterId);
+  if (index < 0) return;
+  const textarea = [...document.querySelectorAll("[data-import-content-id]")]
+    .find((element) => element.dataset.importContentId === chapterId);
+  const offset = textarea ? textarea.selectionStart : 0;
+  const chapter = IMPORT_CHAPTERS[index];
+  if (offset <= 0 || offset >= chapter.content.length) {
+    $("import-chapter-error").textContent = "请把光标放在章节正文中间再拆分";
+    return;
+  }
+  $("import-chapter-error").textContent = "";
+  chapter.content = chapter.content.slice(0, offset);
+  const continuation = {
+    ...chapter,
+    id: typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+    title: `${chapter.title.trim()}（续）`,
+    content: textarea.value.slice(offset),
+  };
+  IMPORT_CHAPTERS.splice(index + 1, 0, continuation);
+  renumberImportChapters();
+  _importActiveChapter = continuation.id;
+  renderImportChapters();
+}
+
+function mergeImportChapter(chapterId = _importActiveChapter, direction = "next") {
+  const index = IMPORT_CHAPTERS.findIndex((chapter) => chapter.id === chapterId);
+  if (index < 0) return;
+  const leftIndex = direction === "previous" ? index - 1 : index;
+  const rightIndex = direction === "previous" ? index : index + 1;
+  if (leftIndex < 0 || rightIndex >= IMPORT_CHAPTERS.length) return;
+  const left = IMPORT_CHAPTERS[leftIndex];
+  const right = IMPORT_CHAPTERS[rightIndex];
+  left.content += right.content;
+  left.selected = left.selected || right.selected;
+  IMPORT_CHAPTERS.splice(rightIndex, 1);
+  renumberImportChapters();
+  _importActiveChapter = left.id;
+  renderImportChapters();
+}
+
+function moveImportChapter(chapterId = _importActiveChapter, offset = 0) {
+  const index = IMPORT_CHAPTERS.findIndex((chapter) => chapter.id === chapterId);
+  const destination = index + offset;
+  if (index < 0 || destination < 0 || destination >= IMPORT_CHAPTERS.length) return;
+  const [chapter] = IMPORT_CHAPTERS.splice(index, 1);
+  IMPORT_CHAPTERS.splice(destination, 0, chapter);
+  renumberImportChapters();
+  _importActiveChapter = chapter.id;
+  renderImportChapters();
+}
+
+function selectImportRange() {
+  const start = Number($("import-range-start").value);
+  const end = Number($("import-range-end").value);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > IMPORT_CHAPTERS.length) {
+    $("import-chapter-error").textContent = "请选择有效的章节范围";
+    return;
+  }
+  $("import-chapter-error").textContent = "";
+  IMPORT_CHAPTERS.forEach((chapter) => { chapter.selected = chapter.order >= start && chapter.order <= end; });
+  renumberImportChapters();
+  renderImportChapters();
+}
+
+async function saveImportChapters() {
+  if (!IMPORT_TASK) return null;
+  const error = $("import-chapter-error");
+  error.textContent = "";
+  renumberImportChapters();
+  if (IMPORT_CHAPTERS.some((chapter) => !chapter.title.trim())) {
+    error.textContent = "每章都需要标题";
+    throw new Error(error.textContent);
+  }
+  if (!IMPORT_CHAPTERS.some((chapter) => chapter.selected)) {
+    error.textContent = "至少选择一章";
+    throw new Error(error.textContent);
+  }
+  try {
+    await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/chapters`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapters: IMPORT_CHAPTERS }),
+    });
+    IMPORT_TASK = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
+    IMPORT_CHAPTERS = IMPORT_TASK.chapters.map((chapter) => ({ ...chapter }));
+    renderImportChapters();
+    await loadImports();
+    return IMPORT_TASK;
+  } catch (e) {
+    error.textContent = e.message;
+    throw e;
+  }
+}
+
+function renderImportParse() {
+  if (!IMPORT_TASK) return;
+  const currentIndex = IMPORT_PHASES.indexOf(IMPORT_TASK.phase);
+  IMPORT_PHASES.forEach((phase, index) => {
+    const row = $("import-step-parse").querySelector(`[data-phase="${phase}"]`);
+    const status = row.querySelector(".import-phase-status");
+    row.classList.remove("running", "done", "failed");
+    if (["completed", "created"].includes(IMPORT_TASK.status) || (currentIndex >= 0 && index < currentIndex)) {
+      row.classList.add("done"); status.textContent = "完成";
+    } else if (index === currentIndex && ["failed", "interrupted"].includes(IMPORT_TASK.status)) {
+      row.classList.add("failed"); status.textContent = IMPORT_TASK.status === "failed" ? "失败" : "中断";
+    } else if (index === currentIndex && IMPORT_TASK.status === "running") {
+      row.classList.add("running"); status.textContent = "进行中";
+    } else status.textContent = "等待";
+  });
+  const progress = IMPORT_TASK.progress || {};
+  $("import-progress").max = Math.max(1, Number(progress.total) || 1);
+  $("import-progress").value = Math.min(Number(progress.completed) || 0, $("import-progress").max);
+  const labels = {
+    ready: "章节已保存，可以开始解析。", running: "解析在后台进行，关闭窗口后仍可从导入记录恢复进度。",
+    interrupted: "上次解析被中断，可以从已保存的阶段继续。", failed: "解析失败，可以重试并复用已完成阶段。",
+    completed: "解析完成。",
+  };
+  $("import-parse-note").textContent = labels[IMPORT_TASK.status] || "";
+  $("import-parse-error").textContent = IMPORT_TASK.error || "";
+  $("import-retry-parse").disabled = _importParsing || IMPORT_TASK.status === "running" || ["completed", "created"].includes(IMPORT_TASK.status);
+  $("import-retry-parse").textContent = ["failed", "interrupted"].includes(IMPORT_TASK.status) ? "继续解析" : "开始解析";
+  $("import-delete-parse").disabled = _importParsing || IMPORT_TASK.status === "running";
+}
+
+async function runImportParse() {
+  if (!IMPORT_TASK || _importParsing || IMPORT_TASK.status === "running") return;
+  _importParsing = true;
+  $("import-parse-error").textContent = "";
+  try {
+    await saveImportChapters();
+    IMPORT_TASK.status = "running";
+    showImportStep("parse");
+    renderImportChapters();
+    renderImportParse();
+    const response = await fetch(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/parse`, { method: "POST" });
+    await readNdjson(response, applyImportEvent);
+  } catch (e) {
+    $("import-parse-error").textContent = e.message;
+  } finally {
+    try {
+      IMPORT_TASK = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
+      IMPORT_CHAPTERS = IMPORT_TASK.chapters.map((chapter) => ({ ...chapter }));
+    } catch (e) {
+      $("import-parse-error").textContent = e.message;
+    }
+    _importParsing = false;
+    stopImportPolling();
+    renderImportChapters();
+    renderImportParse();
+    await loadImports();
+    if (IMPORT_TASK && ["completed", "created"].includes(IMPORT_TASK.status)) {
+      renderImportResults();
+      showImportStep("results");
+    } else if (IMPORT_TASK && IMPORT_TASK.status === "running") startImportPolling();
+  }
+}
+
+function applyImportEvent(event) {
+  if (!IMPORT_TASK || !event) return;
+  if (event.phase) IMPORT_TASK.phase = event.phase;
+  if (Number.isFinite(event.completed) || Number.isFinite(event.total)) {
+    IMPORT_TASK.progress = {
+      completed: Number.isFinite(event.completed) ? event.completed : (IMPORT_TASK.progress || {}).completed || 0,
+      total: Number.isFinite(event.total) ? event.total : (IMPORT_TASK.progress || {}).total || 0,
+    };
+  }
+  if (event.type === "complete") {
+    IMPORT_TASK.status = "completed";
+  } else if (event.type === "error") {
+    IMPORT_TASK.status = "failed";
+    IMPORT_TASK.error = event.message || "解析失败";
+  }
+  renderImportParse();
+  if (event.type === "phase_done") {
+    const row = $("import-step-parse").querySelector(`[data-phase="${event.phase}"]`);
+    if (row) {
+      row.classList.remove("running", "failed");
+      row.classList.add("done");
+      row.querySelector(".import-phase-status").textContent = "完成";
+    }
+  }
+}
+
+function renderImportResults() {
+  if (!IMPORT_TASK) return;
+  const results = IMPORT_TASK.results || {};
+  IMPORT_PHASES.forEach((name) => { $(`import-result-${name}`).value = results[name] || ""; });
+  const nameInput = $("import-project-name");
+  if (nameInput.dataset.taskId !== IMPORT_TASK.id) {
+    nameInput.value = (IMPORT_TASK.original_filename || "").replace(/\.txt$/i, "");
+    nameInput.dataset.taskId = IMPORT_TASK.id;
+    $("import-parent-dir").value = (PROJECTS && PROJECTS.default_dir) || $("new-parent").value || "~/Desktop";
+  }
+  renderImportResultTab();
+  renderImportSourceMode();
+}
+
+function renderImportResultTab() {
+  $("import-result-tabs").querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.result === _importResultTab);
+  });
+  document.querySelectorAll("[data-result-pane]").forEach((textarea) => {
+    textarea.classList.toggle("hidden", textarea.dataset.resultPane !== _importResultTab);
+  });
+}
+
+function renderImportSourceMode() {
+  $("import-source-mode").querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.sourceMode === _importSourceMode);
+  });
+}
+
+async function saveImportResults() {
+  if (!IMPORT_TASK) return null;
+  const error = $("import-result-error");
+  error.textContent = "";
+  const results = {};
+  IMPORT_PHASES.forEach((name) => { results[name] = $(`import-result-${name}`).value; });
+  try {
+    await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/results`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(results),
+    });
+    IMPORT_TASK.results = { ...results };
+    toast("解析结果已保存");
+    return results;
+  } catch (e) {
+    error.textContent = e.message;
+    throw e;
+  }
+}
+
+async function createImportedProject() {
+  if (!IMPORT_TASK) return;
+  const error = $("import-result-error");
+  error.textContent = "";
+  const name = $("import-project-name").value.trim();
+  const parentDir = $("import-parent-dir").value.trim();
+  if (!name || !parentDir) {
+    error.textContent = "请填写项目名称和父目录";
+    return;
+  }
+  const button = $("import-create-project");
+  button.disabled = true;
+  try {
+    await saveImportResults();
+    const state = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/create-project`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        parent_dir: parentDir,
+        genre: $("import-genre").value || null,
+        include_source_chapters: _importSourceMode === "include",
+      }),
+    });
+    IMPORT_TASK.status = "created";
+    closeImportOverlay();
+    await loadImports();
+    enterProject(state);
+  } catch (e) {
+    error.textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteImportTask(taskId = IMPORT_TASK && IMPORT_TASK.id) {
+  if (!taskId || !window.confirm("确定删除这个导入任务？此操作无法撤销。")) return;
+  try {
+    await importRequest(`/api/imports/${encodeURIComponent(taskId)}`, { method: "DELETE" });
+    if (IMPORT_TASK && IMPORT_TASK.id === taskId) {
+      IMPORT_TASK = null;
+      IMPORT_CHAPTERS = [];
+      closeImportOverlay();
+    }
+    await loadImports();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function stopImportPolling() {
+  if (_importPollTimer) clearTimeout(_importPollTimer);
+  _importPollTimer = null;
+}
+
+function startImportPolling() {
+  stopImportPolling();
+  if (!IMPORT_TASK || IMPORT_TASK.status !== "running" || $("import-overlay").classList.contains("hidden")) return;
+  _importPollTimer = setTimeout(async () => {
+    _importPollTimer = null;
+    if (!IMPORT_TASK || $("import-overlay").classList.contains("hidden")) return;
+    try {
+      const task = await importRequest(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}`);
+      IMPORT_TASK = task;
+      IMPORT_CHAPTERS = task.chapters.map((chapter) => ({ ...chapter }));
+      renderImportParse();
+      if (task.status === "running") startImportPolling();
+      else {
+        stopImportPolling();
+        await loadImports();
+        if (["completed", "created"].includes(task.status)) {
+          renderImportResults();
+          showImportStep("results");
+        }
+      }
+    } catch (e) {
+      $("import-parse-error").textContent = e.message;
+      if (IMPORT_TASK && IMPORT_TASK.status === "running") startImportPolling();
+    }
+  }, 2000);
 }
 
 function renderProjects() {
@@ -1521,6 +2158,7 @@ function anyOverlayOpen() {
 function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
+  if (!$("import-overlay").classList.contains("hidden")) { closeImportOverlay(); return true; }
   const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
