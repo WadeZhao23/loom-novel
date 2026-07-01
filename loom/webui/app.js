@@ -444,10 +444,15 @@ function closeImportOverlay() {
   $("import-overlay").classList.add("hidden");
 }
 
+function importChaptersLocked() {
+  return _importParsing || Boolean(IMPORT_TASK && IMPORT_TASK.status === "running");
+}
+
 function showImportStep(step) {
   if (step === "chapters" && !IMPORT_CHAPTERS.length) return;
   if (step === "parse" && !IMPORT_TASK) return;
   if (step === "results" && (!IMPORT_TASK || !["completed", "created"].includes(IMPORT_TASK.status))) return;
+  const chaptersLocked = importChaptersLocked();
   ["upload", "chapters", "parse", "results"].forEach((name) => {
     $(`import-step-${name}`).classList.toggle("hidden", name !== step);
   });
@@ -455,7 +460,7 @@ function showImportStep(step) {
     const active = button.dataset.step === step;
     button.classList.toggle("on", active);
     button.setAttribute("aria-current", active ? "step" : "false");
-    if (button.dataset.step === "chapters") button.disabled = !IMPORT_CHAPTERS.length || _importParsing;
+    if (button.dataset.step === "chapters") button.disabled = !IMPORT_CHAPTERS.length || chaptersLocked;
     if (button.dataset.step === "parse") button.disabled = !IMPORT_TASK;
     if (button.dataset.step === "results") button.disabled = !IMPORT_TASK || !["completed", "created"].includes(IMPORT_TASK.status);
   });
@@ -485,7 +490,7 @@ function renderImportChapters() {
   if (!body) return;
   body.replaceChildren();
   renumberImportChapters();
-  const locked = _importParsing || (IMPORT_TASK && IMPORT_TASK.status === "running");
+  const locked = importChaptersLocked();
 
   IMPORT_CHAPTERS.forEach((chapter, index) => {
     const row = document.createElement("tr");
@@ -567,7 +572,7 @@ function renderImportChapters() {
   end.max = String(Math.max(1, IMPORT_CHAPTERS.length));
   if (Number(end.value) > IMPORT_CHAPTERS.length || end.value === "1") end.value = String(Math.max(1, IMPORT_CHAPTERS.length));
   $("import-range-start").max = String(Math.max(1, IMPORT_CHAPTERS.length));
-  [$("import-range-start"), end, $("import-range-select"), $("import-save-chapters"), $("import-start-parse")]
+  [$("import-range-start"), end, $("import-range-select"), $("import-save-chapters"), $("import-start-parse"), $("import-delete-chapters")]
     .forEach((control) => { control.disabled = locked; });
   updateImportChapterSummary();
 }
@@ -705,13 +710,15 @@ function renderImportParse() {
 async function runImportParse() {
   if (!IMPORT_TASK || _importParsing || IMPORT_TASK.status === "running") return;
   _importParsing = true;
-  $("import-parse-error").textContent = "";
   try {
+    $("import-parse-error").textContent = "";
+    renderImportChapters();
     await saveImportChapters();
     IMPORT_TASK.status = "running";
     showImportStep("parse");
     renderImportChapters();
     renderImportParse();
+    startImportPolling();
     const response = await fetch(`/api/imports/${encodeURIComponent(IMPORT_TASK.id)}/parse`, { method: "POST" });
     await readNdjson(response, applyImportEvent);
   } catch (e) {

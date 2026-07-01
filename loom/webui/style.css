@@ -791,7 +791,7 @@ body.focus-mode .focus-exit { display: block; }
     border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 var(--space-2); }
   .import-result-tabs button { padding-inline: 4px; text-align: center; font-size: var(--fs-xs); }
   .import-result-panes { padding: var(--space-3) 0 0; }
-  .import-results textarea { min-height: 280px; }
+  .import-results textarea { min-height: 320px; }
   .import-project-fields { grid-template-columns: 1fr; }
   .import-source-field { align-items: flex-start; flex-direction: column; }
   .import-footer-actions { display: grid; grid-template-columns: 1fr 1fr; }
