@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -222,7 +223,8 @@ def test_chapter_count_wraps_deep_recursion_as_import_error(
     store: ImportJobStore,
 ) -> None:
     task = create_job(store)
-    nested_value = "[" * 2000 + "0" + "]" * 2000
+    depth = sys.getrecursionlimit() + 100
+    nested_value = "[" * depth + "0" + "]" * depth
     (store._task_root(task["id"]) / "chapters.json").write_text(
         f'[{{"nested": {nested_value}}}]', encoding="utf-8"
     )

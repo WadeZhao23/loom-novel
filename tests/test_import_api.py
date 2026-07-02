@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -69,7 +70,9 @@ def upload(client: TestClient) -> dict:
     return response.json()
 
 
-def deeply_nested_chapters_json(depth: int = 2000) -> str:
+def deeply_nested_chapters_json(depth: int | None = None) -> str:
+    if depth is None:
+        depth = sys.getrecursionlimit() + 100
     nested_value = "[" * depth + "0" + "]" * depth
     return f'[{{"nested": {nested_value}}}]'
 
