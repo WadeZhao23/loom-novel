@@ -295,7 +295,7 @@ function bind() {
   document.addEventListener("keydown", globalKeys);
 
   // 防丢稿:关窗/切走前保住未保存手改
-  window.addEventListener("beforeunload", (e) => { if (_dirty) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", (e) => { if (_dirty || _importChaptersDirty) { e.preventDefault(); e.returnValue = ""; } });
   window.addEventListener("blur", () => { if (_dirty) autosave(); });
 }
 

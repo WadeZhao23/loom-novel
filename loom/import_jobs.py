@@ -60,56 +60,212 @@ def _read_json(path: Path) -> object:
 
 
 def _count_json_array_objects(path: Path) -> int:
+    def malformed() -> ImportJobError:
+        return ImportJobError("chapters.json is malformed")
+
+    def incomplete() -> ImportJobError:
+        return ImportJobError("chapters.json is incomplete")
+
     try:
         with path.open("r", encoding="utf-8") as handle:
-            started = False
-            closed = False
-            in_string = False
-            escaping = False
-            depth = 0
-            count = 0
-            while chunk := handle.read(8192):
-                for char in chunk:
-                    if closed:
-                        if not char.isspace():
-                            raise ImportJobError("chapters.json has trailing data")
-                        continue
-                    if not started:
-                        if char.isspace():
-                            continue
-                        if char != "[":
-                            raise ImportJobError("chapters.json must contain a list")
-                        started = True
-                        depth = 1
-                        continue
-                    if in_string:
-                        if escaping:
-                            escaping = False
-                        elif char == "\\":
-                            escaping = True
-                        elif char == '"':
-                            in_string = False
-                        continue
+            chars = (
+                char
+                for chunk in iter(lambda: handle.read(8192), "")
+                for char in chunk
+            )
+            pushed_back: list[str] = []
+
+            def next_char() -> str | None:
+                if pushed_back:
+                    return pushed_back.pop()
+                return next(chars, None)
+
+            def unread(char: str | None) -> None:
+                if char is not None:
+                    pushed_back.append(char)
+
+            def consume_string() -> None:
+                while True:
+                    char = next_char()
+                    if char is None:
+                        raise incomplete()
+                    if ord(char) < 0x20:
+                        raise malformed()
                     if char == '"':
-                        in_string = True
-                    elif char == "{":
-                        if depth == 1:
-                            count += 1
-                        depth += 1
-                    elif char == "[":
-                        depth += 1
-                    elif char in "}]":
-                        depth -= 1
-                        if depth < 0:
-                            raise ImportJobError("chapters.json is malformed")
-                        if depth == 0:
-                            if char != "]":
-                                raise ImportJobError("chapters.json must contain a list")
-                            closed = True
-                    elif depth == 1 and not char.isspace() and char != ",":
-                        raise ImportJobError("chapters.json chapters must be objects")
-            if not started or in_string or depth != 0 or not closed:
-                raise ImportJobError("chapters.json is incomplete")
+                        return
+                    if char != "\\":
+                        continue
+                    escaped = next_char()
+                    if escaped is None:
+                        raise incomplete()
+                    if escaped in '"\\/bfnrt':
+                        continue
+                    if escaped != "u":
+                        raise malformed()
+                    for _ in range(4):
+                        digit = next_char()
+                        if digit is None:
+                            raise incomplete()
+                        if digit not in "0123456789abcdefABCDEF":
+                            raise malformed()
+
+            def consume_literal(expected: str) -> None:
+                for wanted in expected[1:]:
+                    if next_char() != wanted:
+                        raise malformed()
+                trailing = next_char()
+                if trailing is None:
+                    return
+                if trailing.isspace() or trailing in "{}[]:,":
+                    unread(trailing)
+                    return
+                raise malformed()
+
+            def read_digit() -> str:
+                digit = next_char()
+                if digit is None:
+                    raise incomplete()
+                if not digit.isdigit():
+                    raise malformed()
+                return digit
+
+            def consume_number(first: str) -> None:
+                char = first
+                if char == "-":
+                    char = read_digit()
+                if char == "0":
+                    char = next_char()
+                    if char is not None and char.isdigit():
+                        raise malformed()
+                else:
+                    while True:
+                        char = next_char()
+                        if char is None or not char.isdigit():
+                            break
+                if char == ".":
+                    read_digit()
+                    while True:
+                        char = next_char()
+                        if char is None or not char.isdigit():
+                            break
+                if char in ("e", "E"):
+                    char = next_char()
+                    if char in ("+", "-"):
+                        char = read_digit()
+                    elif char is None or not char.isdigit():
+                        raise incomplete() if char is None else malformed()
+                    while True:
+                        char = next_char()
+                        if char is None or not char.isdigit():
+                            break
+                if char is None:
+                    return
+                if char.isspace() or char in "{}[]:,":
+                    unread(char)
+                    return
+                raise malformed()
+
+            def next_token() -> tuple[str, str | None] | None:
+                while True:
+                    char = next_char()
+                    if char is None:
+                        return None
+                    if not char.isspace():
+                        break
+                if char in "{}[]:,":
+                    return ("punct", char)
+                if char == '"':
+                    consume_string()
+                    return ("string", None)
+                if char == "-" or char.isdigit():
+                    consume_number(char)
+                    return ("value", None)
+                if char == "t":
+                    consume_literal("true")
+                    return ("value", None)
+                if char == "f":
+                    consume_literal("false")
+                    return ("value", None)
+                if char == "n":
+                    consume_literal("null")
+                    return ("value", None)
+                raise malformed()
+
+            def parse_value_from_token(token: tuple[str, str | None]) -> None:
+                kind, value = token
+                if kind == "string" or kind == "value":
+                    return
+                if kind != "punct":
+                    raise malformed()
+                if value == "{":
+                    parse_object()
+                    return
+                if value == "[":
+                    parse_array(top_level=False)
+                    return
+                raise malformed()
+
+            def parse_object() -> None:
+                token = next_token()
+                if token is None:
+                    raise incomplete()
+                if token == ("punct", "}"):
+                    return
+                while True:
+                    if token[0] != "string":
+                        raise malformed()
+                    if next_token() != ("punct", ":"):
+                        raise malformed()
+                    value = next_token()
+                    if value is None:
+                        raise incomplete()
+                    parse_value_from_token(value)
+                    token = next_token()
+                    if token is None:
+                        raise incomplete()
+                    if token == ("punct", "}"):
+                        return
+                    if token != ("punct", ","):
+                        raise malformed()
+                    token = next_token()
+                    if token is None:
+                        raise incomplete()
+                    if token == ("punct", "}"):
+                        raise malformed()
+
+            def parse_array(*, top_level: bool) -> int:
+                count = 0
+                token = next_token()
+                if token is None:
+                    raise incomplete()
+                if token == ("punct", "]"):
+                    return count
+                while True:
+                    if top_level:
+                        if token != ("punct", "{"):
+                            raise ImportJobError("chapters.json chapters must be objects")
+                        parse_object()
+                        count += 1
+                    else:
+                        parse_value_from_token(token)
+                    token = next_token()
+                    if token is None:
+                        raise incomplete()
+                    if token == ("punct", "]"):
+                        return count
+                    if token != ("punct", ","):
+                        raise malformed()
+                    token = next_token()
+                    if token is None:
+                        raise incomplete()
+                    if token == ("punct", "]"):
+                        raise malformed()
+
+            if next_token() != ("punct", "["):
+                raise ImportJobError("chapters.json must contain a list")
+            count = parse_array(top_level=True)
+            if next_token() is not None:
+                raise ImportJobError("chapters.json has trailing data")
             return count
     except FileNotFoundError as exc:
         raise ImportJobNotFound(f"Import job data is missing: {path.name}") from exc

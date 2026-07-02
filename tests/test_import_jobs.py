@@ -7,7 +7,7 @@ from threading import Event
 
 import pytest
 
-from loom.import_jobs import ImportJobConflict, ImportJobNotFound, ImportJobStore
+from loom.import_jobs import ImportJobConflict, ImportJobError, ImportJobNotFound, ImportJobStore
 
 
 @pytest.fixture
@@ -170,6 +170,27 @@ def test_chapter_count_does_not_deserialize_chapter_bodies(
     )
 
     assert store.chapter_count(task["id"]) == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[{}{}]",
+        "[{},,{}]",
+        "[{foo}]",
+        "[[{}]]",
+    ],
+)
+def test_chapter_count_rejects_malformed_chapter_arrays(
+    store: ImportJobStore, payload: str
+) -> None:
+    task = create_job(store)
+    (store._task_root(task["id"]) / "chapters.json").write_text(
+        payload, encoding="utf-8"
+    )
+
+    with pytest.raises(ImportJobError):
+        store.chapter_count(task["id"])
 
 
 def test_missing_task_raises_domain_error(store: ImportJobStore) -> None:
