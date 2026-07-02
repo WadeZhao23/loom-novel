@@ -193,6 +193,44 @@ def test_chapter_count_rejects_malformed_chapter_arrays(
         store.chapter_count(task["id"])
 
 
+@pytest.mark.parametrize("whitespace", ["\u00a0", "\u2028"])
+def test_chapter_count_rejects_non_json_unicode_whitespace(
+    store: ImportJobStore, whitespace: str
+) -> None:
+    task = create_job(store)
+    (store._task_root(task["id"]) / "chapters.json").write_text(
+        f"[{whitespace}{{}}]", encoding="utf-8"
+    )
+
+    with pytest.raises(ImportJobError):
+        store.chapter_count(task["id"])
+
+
+def test_chapter_count_rejects_unicode_digit_number_tokens(
+    store: ImportJobStore,
+) -> None:
+    task = create_job(store)
+    (store._task_root(task["id"]) / "chapters.json").write_text(
+        '[{"count": \u0661}]', encoding="utf-8"
+    )
+
+    with pytest.raises(ImportJobError):
+        store.chapter_count(task["id"])
+
+
+def test_chapter_count_wraps_deep_recursion_as_import_error(
+    store: ImportJobStore,
+) -> None:
+    task = create_job(store)
+    nested_value = "[" * 2000 + "0" + "]" * 2000
+    (store._task_root(task["id"]) / "chapters.json").write_text(
+        f'[{{"nested": {nested_value}}}]', encoding="utf-8"
+    )
+
+    with pytest.raises(ImportJobError, match="deeply nested"):
+        store.chapter_count(task["id"])
+
+
 def test_missing_task_raises_domain_error(store: ImportJobStore) -> None:
     with pytest.raises(ImportJobNotFound):
         store.get("00000000-0000-0000-0000-000000000000")

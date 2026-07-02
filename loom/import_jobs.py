@@ -24,6 +24,8 @@ class ImportJobConflict(ImportJobError):
 
 
 _RESULT_NAMES = ("worldview", "system", "characters", "outlines")
+JSON_WHITESPACE = {" ", "\t", "\r", "\n"}
+JSON_DIGITS = set("0123456789")
 _LOCK_REGISTRY: dict[tuple[str, str], threading.RLock] = {}
 _LOCK_REGISTRY_GUARD = threading.Lock()
 
@@ -57,6 +59,14 @@ def _read_json(path: Path) -> object:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ImportJobNotFound(f"Import job data is missing: {path.name}") from exc
+
+
+def _is_json_whitespace(char: str) -> bool:
+    return char in JSON_WHITESPACE
+
+
+def _is_json_digit(char: str) -> bool:
+    return char in JSON_DIGITS
 
 
 def _count_json_array_objects(path: Path) -> int:
@@ -116,7 +126,7 @@ def _count_json_array_objects(path: Path) -> int:
                 trailing = next_char()
                 if trailing is None:
                     return
-                if trailing.isspace() or trailing in "{}[]:,":
+                if _is_json_whitespace(trailing) or trailing in "{}[]:,":
                     unread(trailing)
                     return
                 raise malformed()
@@ -125,7 +135,7 @@ def _count_json_array_objects(path: Path) -> int:
                 digit = next_char()
                 if digit is None:
                     raise incomplete()
-                if not digit.isdigit():
+                if not _is_json_digit(digit):
                     raise malformed()
                 return digit
 
@@ -135,32 +145,32 @@ def _count_json_array_objects(path: Path) -> int:
                     char = read_digit()
                 if char == "0":
                     char = next_char()
-                    if char is not None and char.isdigit():
+                    if char is not None and _is_json_digit(char):
                         raise malformed()
                 else:
                     while True:
                         char = next_char()
-                        if char is None or not char.isdigit():
+                        if char is None or not _is_json_digit(char):
                             break
                 if char == ".":
                     read_digit()
                     while True:
                         char = next_char()
-                        if char is None or not char.isdigit():
+                        if char is None or not _is_json_digit(char):
                             break
                 if char in ("e", "E"):
                     char = next_char()
                     if char in ("+", "-"):
                         char = read_digit()
-                    elif char is None or not char.isdigit():
+                    elif char is None or not _is_json_digit(char):
                         raise incomplete() if char is None else malformed()
                     while True:
                         char = next_char()
-                        if char is None or not char.isdigit():
+                        if char is None or not _is_json_digit(char):
                             break
                 if char is None:
                     return
-                if char.isspace() or char in "{}[]:,":
+                if _is_json_whitespace(char) or char in "{}[]:,":
                     unread(char)
                     return
                 raise malformed()
@@ -170,14 +180,14 @@ def _count_json_array_objects(path: Path) -> int:
                     char = next_char()
                     if char is None:
                         return None
-                    if not char.isspace():
+                    if not _is_json_whitespace(char):
                         break
                 if char in "{}[]:,":
                     return ("punct", char)
                 if char == '"':
                     consume_string()
                     return ("string", None)
-                if char == "-" or char.isdigit():
+                if char == "-" or _is_json_digit(char):
                     consume_number(char)
                     return ("value", None)
                 if char == "t":
@@ -269,6 +279,8 @@ def _count_json_array_objects(path: Path) -> int:
             return count
     except FileNotFoundError as exc:
         raise ImportJobNotFound(f"Import job data is missing: {path.name}") from exc
+    except RecursionError as exc:
+        raise ImportJobError("chapters.json is too deeply nested") from exc
 
 
 class ImportJobStore:

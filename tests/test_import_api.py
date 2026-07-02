@@ -69,6 +69,11 @@ def upload(client: TestClient) -> dict:
     return response.json()
 
 
+def deeply_nested_chapters_json(depth: int = 2000) -> str:
+    nested_value = "[" * depth + "0" + "]" * depth
+    return f'[{{"nested": {nested_value}}}]'
+
+
 def ready_task(client: TestClient) -> dict:
     task = upload(client)
     detail = client.get(f"/api/imports/{task['id']}").json()
@@ -123,6 +128,24 @@ def test_list_imports_marks_task_with_damaged_chapters_and_keeps_other_jobs(
     assert listed[damaged["id"]]["chapter_count"] is None
     assert listed[damaged["id"]]["damaged"] is True
     assert "chapters" in listed[damaged["id"]]["error"]
+
+
+def test_list_imports_marks_deeply_nested_chapters_damaged_without_500(
+    client: TestClient,
+) -> None:
+    task = upload(client)
+    store = server._import_store()
+    (store.root / task["id"] / "chapters.json").write_text(
+        deeply_nested_chapters_json(), encoding="utf-8"
+    )
+
+    response = client.get("/api/imports")
+
+    assert response.status_code == 200, response.text
+    listed = {row["id"]: row for row in response.json()}
+    assert listed[task["id"]]["chapter_count"] is None
+    assert listed[task["id"]]["damaged"] is True
+    assert "deeply nested" in listed[task["id"]]["error"]
 
 
 def test_parse_returns_ndjson_and_persists_results(client: TestClient) -> None:
