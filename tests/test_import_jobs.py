@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -154,6 +155,23 @@ def test_list_returns_newest_updated_first(store: ImportJobStore) -> None:
     assert [task["id"] for task in store.list()] == [first["id"], second["id"]]
 
 
+def test_chapter_count_does_not_deserialize_chapter_bodies(
+    store: ImportJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    task = create_job(store)
+
+    def fail_if_chapters_json_is_deserialized(path: Path) -> object:
+        if path.name == "chapters.json":
+            raise AssertionError("chapter_count should not load chapter bodies")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(
+        "loom.import_jobs._read_json", fail_if_chapters_json_is_deserialized
+    )
+
+    assert store.chapter_count(task["id"]) == 2
+
+
 def test_missing_task_raises_domain_error(store: ImportJobStore) -> None:
     with pytest.raises(ImportJobNotFound):
         store.get("00000000-0000-0000-0000-000000000000")
@@ -203,10 +221,35 @@ def test_results_require_exact_keys_and_allowed_status(store: ImportJobStore) ->
             {"id": "c2", "order": 3, "title": "Second", "content": "y", "selected": True},
         ],
         [{"id": "c1", "order": 1, "title": " ", "content": "x", "selected": True}],
+        [{"id": "c1", "order": 1, "title": "First", "selected": True}],
+        [{"id": "c1", "order": 1, "title": "First", "content": None, "selected": True}],
         sample_chapters(selected=False),
     ],
-    ids=["empty", "duplicate-id", "duplicate-order", "noncontiguous", "blank-title", "none-selected"],
+    ids=[
+        "empty",
+        "duplicate-id",
+        "duplicate-order",
+        "noncontiguous",
+        "blank-title",
+        "missing-content",
+        "non-string-content",
+        "none-selected",
+    ],
 )
 def test_create_validates_chapters(store: ImportJobStore, chapters: list[dict]) -> None:
     with pytest.raises(ValueError):
         store.create("book.txt", b"x", "x", "utf-8", chapters, "high")
+
+
+def test_get_chapters_rejects_persisted_chapter_without_text_content(
+    store: ImportJobStore,
+) -> None:
+    task = create_job(store)
+    chapters = sample_chapters()
+    del chapters[0]["content"]
+    (store.root / task["id"] / "chapters.json").write_text(
+        json.dumps(chapters), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="content"):
+        store.get_chapters(task["id"])

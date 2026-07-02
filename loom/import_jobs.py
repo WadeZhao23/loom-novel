@@ -59,6 +59,62 @@ def _read_json(path: Path) -> object:
         raise ImportJobNotFound(f"Import job data is missing: {path.name}") from exc
 
 
+def _count_json_array_objects(path: Path) -> int:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            started = False
+            closed = False
+            in_string = False
+            escaping = False
+            depth = 0
+            count = 0
+            while chunk := handle.read(8192):
+                for char in chunk:
+                    if closed:
+                        if not char.isspace():
+                            raise ImportJobError("chapters.json has trailing data")
+                        continue
+                    if not started:
+                        if char.isspace():
+                            continue
+                        if char != "[":
+                            raise ImportJobError("chapters.json must contain a list")
+                        started = True
+                        depth = 1
+                        continue
+                    if in_string:
+                        if escaping:
+                            escaping = False
+                        elif char == "\\":
+                            escaping = True
+                        elif char == '"':
+                            in_string = False
+                        continue
+                    if char == '"':
+                        in_string = True
+                    elif char == "{":
+                        if depth == 1:
+                            count += 1
+                        depth += 1
+                    elif char == "[":
+                        depth += 1
+                    elif char in "}]":
+                        depth -= 1
+                        if depth < 0:
+                            raise ImportJobError("chapters.json is malformed")
+                        if depth == 0:
+                            if char != "]":
+                                raise ImportJobError("chapters.json must contain a list")
+                            closed = True
+                    elif depth == 1 and not char.isspace() and char != ",":
+                        raise ImportJobError("chapters.json chapters must be objects")
+            if not started or in_string or depth != 0 or not closed:
+                raise ImportJobError("chapters.json is incomplete")
+            return count
+    except FileNotFoundError as exc:
+        raise ImportJobNotFound(f"Import job data is missing: {path.name}") from exc
+
+
 class ImportJobStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or Path.home() / ".loom" / "imports").expanduser().resolve()
@@ -149,9 +205,11 @@ class ImportJobStore:
     def get_chapters(self, task_id: str) -> list[dict]:
         task_root = self._existing_task_root(task_id)
         value = _read_json(task_root / "chapters.json")
-        if not isinstance(value, list):
-            raise ImportJobError("chapters.json must contain a list")
-        return value
+        return self._validate_chapters(value)
+
+    def chapter_count(self, task_id: str) -> int:
+        task_root = self._existing_task_root(task_id)
+        return _count_json_array_objects(task_root / "chapters.json")
 
     def update(self, task_id: str, **changes: object) -> dict:
         with self.lock(task_id):
@@ -270,6 +328,8 @@ class ImportJobStore:
             raise ImportJobError("Chapter order must be unique and contiguous from 1")
         if any(not isinstance(chapter.get("title"), str) or not chapter["title"].strip() for chapter in checked):
             raise ImportJobError("Every chapter needs a nonempty title")
+        if any(not isinstance(chapter.get("content"), str) for chapter in checked):
+            raise ImportJobError("Every chapter needs text content")
         if any(not isinstance(chapter.get("selected"), bool) for chapter in checked):
             raise ImportJobError("Every chapter needs a selected flag")
         if not any(chapter["selected"] for chapter in checked):

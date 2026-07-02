@@ -104,6 +104,27 @@ def test_upload_list_get_and_delete(client: TestClient) -> None:
     assert client.get(f"/api/imports/{task['id']}").status_code == 404
 
 
+def test_list_imports_marks_task_with_damaged_chapters_and_keeps_other_jobs(
+    client: TestClient,
+) -> None:
+    good = upload(client)
+    damaged = upload(client)
+    store = server._import_store()
+    (store.root / damaged["id"] / "chapters.json").write_text(
+        "not valid json", encoding="utf-8"
+    )
+
+    response = client.get("/api/imports")
+
+    assert response.status_code == 200, response.text
+    listed = {task["id"]: task for task in response.json()}
+    assert listed[good["id"]]["chapter_count"] == 1
+    assert listed[good["id"]].get("damaged") is not True
+    assert listed[damaged["id"]]["chapter_count"] is None
+    assert listed[damaged["id"]]["damaged"] is True
+    assert "chapters" in listed[damaged["id"]]["error"]
+
+
 def test_parse_returns_ndjson_and_persists_results(client: TestClient) -> None:
     task = ready_task(client)
 
@@ -465,6 +486,24 @@ def test_create_project_rejects_existing_destination(
 
     assert response.status_code == 409, response.text
     assert "error" in response.json()
+
+
+@pytest.mark.parametrize("name", ["bad:name", "CON", "Trailing.", "Trailing "])
+def test_create_project_rejects_windows_invalid_names_before_creating_paths(
+    client: TestClient, tmp_path: Path, name: str
+) -> None:
+    task = completed_task(client)
+    before = set(tmp_path.iterdir())
+
+    response = client.post(
+        f"/api/imports/{task['id']}/create-project",
+        json={"name": name, "parent_dir": str(tmp_path)},
+    )
+
+    assert response.status_code == 400, response.text
+    assert "error" in response.json()
+    assert set(tmp_path.iterdir()) == before
+    assert server._import_store().get(task["id"])["status"] == "completed"
 
 
 def test_create_project_returns_state_and_registers_project(

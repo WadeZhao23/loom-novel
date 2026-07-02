@@ -17,6 +17,16 @@ _BRAIN_RESULTS = {
 }
 _UNSAFE_FILENAME = re.compile(r'[\x00-\x1f<>:"/\\|?*]')
 _MAX_CHAPTER_FILENAME_BYTES = 120
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 def safe_chapter_filename(order: int, title: str) -> str:
@@ -35,9 +45,14 @@ def safe_chapter_filename(order: int, title: str) -> str:
 
 def _validate_project_name(name: str) -> None:
     candidate = Path(name)
+    reserved_candidate = name.split(".", 1)[0].upper()
     if (
         not name.strip()
+        or name != name.strip()
         or name in {".", ".."}
+        or name.endswith((".", " "))
+        or _UNSAFE_FILENAME.search(name)
+        or reserved_candidate in _WINDOWS_RESERVED_NAMES
         or "/" in name
         or "\\" in name
         or candidate.is_absolute()

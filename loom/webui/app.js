@@ -174,6 +174,7 @@ function bind() {
   $("btn-sample").onclick = openSample;
   $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
   $("btn-import").onclick = () => {
+    if (!confirmDiscardImportChapterEdits()) return;
     beginImportGeneration();
     IMPORT_TASK = null;
     IMPORT_CHAPTERS = [];
@@ -400,6 +401,11 @@ function markImportChaptersDirty() {
   _importChaptersDirty = true;
 }
 
+function confirmDiscardImportChapterEdits() {
+  if (!_importChaptersDirty) return true;
+  return window.confirm("章节改动尚未保存，离开会丢失。确定继续？");
+}
+
 function setImportUploadState(uploading) {
   _importUploadInProgress = uploading;
   $("import-upload").disabled = uploading;
@@ -512,6 +518,7 @@ async function uploadNovel(file) {
 async function openImport(taskOrId) {
   const taskId = typeof taskOrId === "string" ? taskOrId : taskOrId && taskOrId.id;
   if (!taskId) return;
+  if (taskId !== (IMPORT_TASK && IMPORT_TASK.id) && !confirmDiscardImportChapterEdits()) return;
   const generation = beginImportGeneration();
   const detailUrl = `/api/imports/${encodeURIComponent(taskId)}`;
   IMPORT_TASK = null;
@@ -545,6 +552,7 @@ async function openImport(taskOrId) {
 }
 
 function closeImportOverlay() {
+  if (!confirmDiscardImportChapterEdits()) return false;
   beginImportGeneration();
   $("import-overlay").classList.add("hidden");
   setImportBackgroundInert(false);
@@ -555,6 +563,7 @@ function closeImportOverlay() {
     const fallback = $("btn-import");
     if (fallback && !fallback.disabled) fallback.focus();
   }
+  return true;
 }
 
 function importChaptersLocked() {
@@ -565,6 +574,10 @@ function showImportStep(step) {
   if (step === "chapters" && !IMPORT_CHAPTERS.length) return;
   if (step === "parse" && !IMPORT_TASK) return;
   if (step === "results" && (!IMPORT_TASK || !["completed", "created"].includes(IMPORT_TASK.status))) return;
+  const currentStep = [...$("import-steps").querySelectorAll("button")]
+    .find((button) => button.classList.contains("on"));
+  if (step !== "chapters" && currentStep && currentStep.dataset.step === "chapters"
+    && !confirmDiscardImportChapterEdits()) return;
   const chaptersLocked = importChaptersLocked();
   ["upload", "chapters", "parse", "results"].forEach((name) => {
     $(`import-step-${name}`).classList.toggle("hidden", name !== step);
@@ -2366,7 +2379,7 @@ function anyOverlayOpen() {
 function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
-  if (!$("import-overlay").classList.contains("hidden")) { closeImportOverlay(); return true; }
+  if (!$("import-overlay").classList.contains("hidden")) return closeImportOverlay();
   const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {

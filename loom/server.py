@@ -694,10 +694,20 @@ async def create_import(file: UploadFile = File(...)) -> dict:
 @app.get("/api/imports")
 def list_imports() -> list[dict]:
     store = _import_store()
-    return [
-        {**task, "chapter_count": len(store.get_chapters(task["id"]))}
-        for task in store.list()
-    ]
+    imports = []
+    for task in store.list():
+        try:
+            imports.append({**task, "chapter_count": store.chapter_count(task["id"])})
+        except (ImportJobError, OSError, ValueError, UnicodeError) as error:
+            imports.append(
+                {
+                    **task,
+                    "chapter_count": None,
+                    "damaged": True,
+                    "error": f"chapters.json is damaged: {error}",
+                }
+            )
+    return imports
 
 
 @app.get("/api/imports/{task_id}")
