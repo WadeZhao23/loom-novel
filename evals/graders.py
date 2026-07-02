@@ -92,8 +92,6 @@ def grade_keywords(text: str, must_include: list[str] | None,
 # 只活在 evals 里给开发者做回归比对,绝不进产品 UI/用户路径——ADR-0002「不量化不上报」
 # 约束的是产品给用户打分,这里评的是引擎版本。
 
-_SENT_END = re.compile(r"(?<=[。!?!?…\n])")   # 句切与 loom.fingerprint._segment 同口径
-
 _PUNCTS = "。,、!?…:;“”——,!?:;"               # 标点频率向量的固定维度
 _LEN_BINS = (4, 8, 12, 18, 26, 40)              # 句长分桶边界(字),末桶 40+
 
@@ -107,7 +105,14 @@ _FUNC_WORDS = (
 
 
 def _sentences(text: str) -> list[str]:
-    return [s.strip() for s in _SENT_END.split(_H1.sub("", text, count=1)) if s.strip()]
+    """句切:直接复用 loom.fingerprint._segment(引号感知版),与 learn 的对齐口径一致;
+    loom 不可用时退化到裸句末切分(grader 只观测,不因缺 loom 崩掉整跑)。"""
+    body = _H1.sub("", text, count=1)
+    try:
+        from loom.fingerprint import _segment
+        return _segment(body)
+    except Exception:
+        return [s.strip() for s in re.split(r"(?<=[。!?!?…\n])", body) if s.strip()]
 
 
 def _len_dist(sents: list[str]) -> list[float]:
