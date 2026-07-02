@@ -188,6 +188,56 @@ def test_pipeline_resumes_completed_chunks_after_later_call_fails(
     assert len(resumed.calls) == 9
 
 
+def test_pipeline_resumes_completed_merge_units_after_later_merge_fails(
+    store: ImportJobStore,
+) -> None:
+    rows = [
+        {
+            "id": f"c{index}",
+            "order": index,
+            "title": f"Chapter {index}",
+            "content": str(index) * 6,
+            "selected": True,
+        }
+        for index in range(1, 5)
+    ]
+    task_id = create_ready_job(store, rows)
+    merge_calls = 0
+
+    def fail_second_worldview_merge(system: str, user: str) -> str:
+        nonlocal merge_calls
+        if "phase=worldview merge" in system:
+            merge_calls += 1
+            if merge_calls == 2:
+                raise RuntimeError("second merge failed")
+            return "merged:first-pair"
+        return f"{system.splitlines()[0]}:{user.splitlines()[0]}"
+
+    with pytest.raises(RuntimeError, match="second merge failed"):
+        run_parse(
+            store,
+            task_id,
+            FakeBackend(fail_second_worldview_merge),
+            char_budget=19,
+        )
+
+    def resume_without_repeating_first_merge(system: str, user: str) -> str:
+        if (
+            "phase=worldview merge" in system
+            and "Chapter 1" in user
+            and "Chapter 2" in user
+        ):
+            raise AssertionError("repeated successful merge")
+        return phase_responder(system, user)
+
+    run_parse(
+        store,
+        task_id,
+        FakeBackend(resume_without_repeating_first_merge),
+        char_budget=19,
+    )
+
+
 @pytest.mark.parametrize("stale_kind", ["hash", "revision", "selected_ids", "chunk_text"])
 def test_stale_checkpoint_is_rejected_and_recomputed(
     store: ImportJobStore, stale_kind: str
@@ -237,10 +287,14 @@ def test_checkpoints_have_exact_schema(store: ImportJobStore) -> None:
 
     for phase in PHASES:
         checkpoint = json.loads(store.checkpoint_path(task_id, phase).read_text(encoding="utf-8"))
-        assert set(checkpoint) == {"phase", "revision", "chunks", "merged"}
+        assert set(checkpoint) == {"phase", "revision", "chunks", "merged", "merges"}
         assert checkpoint["phase"] == phase
         assert checkpoint["revision"] == store.get(task_id)["chapter_revision"]
         assert all(set(chunk) == {"index", "input_hash", "output"} for chunk in checkpoint["chunks"])
+        assert all(
+            set(merge) == {"round", "index", "input_hash", "output"}
+            for merge in checkpoint["merges"]
+        )
         assert checkpoint["merged"] == store.get_results(task_id)[phase]
 
 

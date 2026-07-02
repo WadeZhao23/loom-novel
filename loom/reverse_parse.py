@@ -349,37 +349,86 @@ def _run_extraction_phase(
                 run_id,
                 [records[key] for key in sorted(records)],
                 "",
+                [],
             )
         outputs.append(output)
         advance(phase)
 
     old_merged = checkpoint.get("merged") if checkpoint_valid else None
+    old_merges = checkpoint.get("merges", []) if checkpoint_valid and all_reused else []
     merge_units = max(0, len(outputs) - 1)
     if all_reused and isinstance(old_merged, str) and old_merged:
         merged = old_merged
         for _ in range(merge_units):
             advance(phase)
     else:
-        merged = _merge_outputs(backend, phase, outputs, char_budget, advance)
+        final_records = [records[index] for index in range(len(chunks))]
+        merged, old_merges = _merge_outputs(
+            store,
+            task_id,
+            backend,
+            phase,
+            outputs,
+            revision,
+            run_id,
+            selected_ids,
+            hashes,
+            char_budget,
+            advance,
+            final_records,
+            old_merges,
+        )
 
     final_records = [records[index] for index in range(len(chunks))]
     _commit_checkpoint(
-        store, task_id, phase, revision, run_id, final_records, merged
+        store, task_id, phase, revision, run_id, final_records, merged, old_merges
     )
     return merged
 
 
 def _merge_outputs(
+    store: ImportJobStore,
+    task_id: str,
     backend: Backend,
     phase: str,
     outputs: list[str],
+    revision: int,
+    run_id: str,
+    selected_ids: list[str],
+    chunk_hashes: list[str],
     char_budget: int,
     advance: Callable[[str], None],
-) -> str:
+    chunk_records: list[dict],
+    merge_records: object,
+) -> tuple[str, list[dict]]:
     if len(outputs) == 1:
-        return outputs[0]
+        return outputs[0], []
+
+    reusable: dict[tuple[int, int], dict] = {}
+    if isinstance(merge_records, list):
+        for item in merge_records:
+            if not isinstance(item, dict) or set(item) != {
+                "round",
+                "index",
+                "input_hash",
+                "output",
+            }:
+                continue
+            item_round = item.get("round")
+            item_index = item.get("index")
+            if (
+                isinstance(item_round, int)
+                and item_round >= 0
+                and isinstance(item_index, int)
+                and item_index >= 0
+                and isinstance(item.get("input_hash"), str)
+                and isinstance(item.get("output"), str)
+            ):
+                reusable[(item_round, item_index)] = item
 
     current = list(outputs)
+    round_number = 0
+    durable: dict[tuple[int, int], dict] = {}
     while len(current) > 1:
         next_round: list[str] = []
         for index in range(0, len(current), 2):
@@ -387,17 +436,55 @@ def _merge_outputs(
             if len(batch) == 1:
                 next_round.append(batch[0])
                 continue
+            pair_index = index // 2
+            user = "\n\n---\n\n".join(batch)
+            input_hash = _merge_input_hash(
+                phase,
+                revision,
+                selected_ids,
+                chunk_hashes,
+                round_number,
+                pair_index,
+                user,
+            )
+            reusable_record = reusable.get((round_number, pair_index))
+            if (
+                reusable_record is not None
+                and reusable_record.get("input_hash") == input_hash
+            ):
+                merged = reusable_record["output"]
+                durable[(round_number, pair_index)] = reusable_record
+                next_round.append(merged)
+                advance(phase)
+                continue
             merged = backend.complete(
                 f"phase={phase} merge\n"
                 "合并下面两份提取结果，去重并保留所有明确约束。"
                 "仅输出结构清晰的 Markdown 正文，不要 JSON，不要解释任务。",
-                "\n\n---\n\n".join(batch),
+                user,
                 max_chars=char_budget,
+            )
+            durable[(round_number, pair_index)] = {
+                "round": round_number,
+                "index": pair_index,
+                "input_hash": input_hash,
+                "output": merged,
+            }
+            _commit_checkpoint(
+                store,
+                task_id,
+                phase,
+                revision,
+                run_id,
+                chunk_records,
+                "",
+                [durable[key] for key in sorted(durable)],
             )
             next_round.append(merged)
             advance(phase)
         current = next_round
-    return current[0]
+        round_number += 1
+    return current[0], [durable[key] for key in sorted(durable)]
 
 
 def _run_outlines_phase(
@@ -462,6 +549,7 @@ def _run_outlines_phase(
                 run_id,
                 [records[key] for key in sorted(records)],
                 "",
+                [],
             )
         outputs.append(output)
         advance(phase)
@@ -471,7 +559,7 @@ def _run_outlines_phase(
     )
     final_records = [records[index] for index in range(len(chapters))]
     _commit_checkpoint(
-        store, task_id, phase, revision, run_id, final_records, merged
+        store, task_id, phase, revision, run_id, final_records, merged, []
     )
     return merged
 
@@ -498,6 +586,31 @@ def _input_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _merge_input_hash(
+    phase: str,
+    revision: int,
+    selected_ids: list[str],
+    chunk_hashes: list[str],
+    round_number: int,
+    index: int,
+    merge_text: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "phase": phase,
+            "revision": revision,
+            "selected_chapter_ids": selected_ids,
+            "chunk_hashes": chunk_hashes,
+            "round": round_number,
+            "index": index,
+            "merge_text": merge_text,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _read_checkpoint(
     store: ImportJobStore, task_id: str, phase: str
 ) -> dict | None:
@@ -506,7 +619,14 @@ def _read_checkpoint(
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
         return None
-    if not isinstance(value, dict) or set(value) != {"phase", "revision", "chunks", "merged"}:
+    if not isinstance(value, dict):
+        return None
+    if set(value) == {"phase", "revision", "chunks", "merged"}:
+        value["merges"] = []
+        return value
+    if set(value) != {"phase", "revision", "chunks", "merged", "merges"}:
+        return None
+    if not isinstance(value.get("merges"), list):
         return None
     return value
 
@@ -519,12 +639,14 @@ def _commit_checkpoint(
     run_id: str,
     chunks: list[dict],
     merged: str,
+    merges: list[dict],
 ) -> None:
     checkpoint = {
         "phase": phase,
         "revision": revision,
         "chunks": chunks,
         "merged": merged,
+        "merges": merges,
     }
     payload = json.dumps(checkpoint, ensure_ascii=False, indent=2).encode("utf-8")
     path = store.checkpoint_path(task_id, phase)
