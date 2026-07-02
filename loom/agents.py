@@ -206,6 +206,125 @@ def _prev_chapter(project_root: Path, chapter_n: int) -> str:
     return strip_title(p.read_text(encoding="utf-8")).strip() if p.exists() else ""
 
 
+# 二级标题行(`## 标题`,容忍前导空格与「##标题」无空格;### 不算):切世界观小节用。
+_H2_RE = re.compile(r"^\s{0,3}##\s*(?!#)(.+?)\s*$")
+_H3_RE = re.compile(r"^\s{0,3}###\s*(?!#)(.+?)\s*$")
+# 三级及更深标题行(### ~ ######):剔反转子块时要知道层级,才能"剔到同级/更浅标题为止"。
+_H3PLUS_RE = re.compile(r"^\s{0,3}(#{3,6})\s*(.+?)\s*$")
+
+# 世界观里【必须逐字照搬】的硬设定小节——按标题(H2,H2 没命中再看其内 H3)含这些词命中,
+# 整段原文透传给大纲师/写手。只圈"规则 + 专名"(境界阶梯/金手指代价/地名势力):这些一旦被
+# 复述就漂(F~SSS 凭空多出"一阶0级"、"一中"写成"二中")。故意不圈「一句话定位」(情绪基调、本就该意译)。
+_HARDFACT_KW = ("力量", "体系", "境界", "等级", "修为", "实力", "修炼", "金手指",
+                "地理", "势力", "阵营", "地图", "区域")
+
+# 反转/真相/底牌类小节:即便标题撞上硬设定关键词(如「## 势力背后的真相」),也绝不逐字喂写手
+# ——逐字喂等于提前抖包袱,踩本功能唯一的硬红线。deny 压过 allow,且连嵌进 ### 的反转一并剥掉。
+_SPOILER_KW = ("冰山", "真相", "反转", "伏笔", "底牌", "终局", "结局", "隐藏", "暗线", "秘密")
+
+# 人物卡里「类型 · 名字」的名字分隔符:专名册只认带它的标题,免得把「## 主角」占位标题、
+# learn 追加的「## AI 补充…」段名当人名喂写手。
+_NAME_SEP = ("·", "・", "•")
+
+
+def _md_sections(md: str, head_re: re.Pattern) -> list[tuple[str, str]]:
+    """按 head_re 命中的标题行切成 [(标题文本, 含标题行的整段)];前言忽略,更深层标题归属其上段。"""
+    sections: list[tuple[str, str]] = []
+    head: str | None = None
+    buf: list[str] = []
+    for ln in md.splitlines():
+        m = head_re.match(ln)
+        if m:
+            if head is not None:
+                sections.append((head, "\n".join(buf).rstrip()))
+            head, buf = m.group(1), [ln.rstrip()]
+        elif head is not None:
+            buf.append(ln.rstrip())
+    if head is not None:
+        sections.append((head, "\n".join(buf).rstrip()))
+    return sections
+
+
+def _md_h2_sections(md: str) -> list[tuple[str, str]]:
+    """把 markdown 按二级标题切;H1 与前言忽略,### 归属其上层 H2。"""
+    return _md_sections(md, _H2_RE)
+
+
+def _drop_spoiler_subsections(section: str) -> str:
+    """从一段里剔掉标题命中 _SPOILER_KW 的子块(### 及更深都算,连同其子孙),
+    直到出现同级或更浅的标题为止——只认 ### 会被写进 #### 的反转绕过。"""
+    out: list[str] = []
+    skip = 0  # >0 = 正在剔除,值为命中反转的标题层级
+    for ln in section.splitlines():
+        m = _H3PLUS_RE.match(ln)
+        if m:
+            level = len(m.group(1))
+            if skip and level <= skip:
+                skip = 0
+            if not skip and any(s in m.group(2) for s in _SPOILER_KW):
+                skip = level
+        if not skip:
+            out.append(ln)
+    return "\n".join(out).rstrip()
+
+
+def _name_roster(card_path: Path) -> str:
+    """从人物卡抓「## 类型 · 名字」式专名册——只认带名字分隔符的标题,顺手滤掉 learn 追加的
+    「## AI 补充…」段与「## 主角」这类没填名的占位标题:宁可空,也绝不把段名当人名喂写手。"""
+    if not card_path.is_file():
+        return ""
+    names = [head for head, _ in _md_h2_sections(card_path.read_text(encoding="utf-8"))
+             if any(s in head for s in _NAME_SEP) and "补充" not in head]
+    return "\n".join(f"- {n}" for n in names)
+
+
+def _pick_hardfacts(md: str) -> list[str]:
+    """世界观里命中 _HARDFACT_KW 的小节。H2 优先;H2 没命中再看其内的 H3(用户把硬设定写在
+    三级标题下);整份没用 ## 时按 H3 顶层切。deny(_SPOILER_KW)一律压过 allow。"""
+    def hard(h: str) -> bool: return any(kw in h for kw in _HARDFACT_KW)
+    def spoiler(h: str) -> bool: return any(s in h for s in _SPOILER_KW)
+    picked: list[str] = []
+    h2s = _md_h2_sections(md)
+    for head, body in h2s:
+        if spoiler(head):
+            continue
+        if hard(head):
+            picked.append(_drop_spoiler_subsections(body))
+        else:
+            picked += [_drop_spoiler_subsections(b) for h, b in _md_sections(body, _H3_RE)
+                       if hard(h) and not spoiler(h)]
+    if not h2s:  # 整份世界观没写 ##、只用了 ###
+        picked = [_drop_spoiler_subsections(b) for h, b in _md_sections(md, _H3_RE)
+                  if hard(h) and not spoiler(h)]
+    return [p for p in picked if p.strip()]
+
+
+def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
+    """确定性切出【硬设定】原文,绕开设定师的有损复述,逐字透传给大纲师/写手:
+    世界观里命中 _HARDFACT_KW 的小节(境界阶梯/金手指代价/地名势力)+ 人物卡专名册。
+
+    红线:纯字符串切片,不调 LLM、不打分、不建实体库;空/缺失一律返回空串(附加增强,绝不阻断出稿)。
+    反转段(_SPOILER_KW)deny 压过 allow,绝不逐字喂写手。
+    世界观有内容却一节都没命中 → 发 warn 提示检查标题写法(只提示,照旧不阻断)。
+    注:learn 自动追加到「## AI 补充」段的新层级/新势力【不】进逐字块(那段标题不含硬设定关键词,
+    且自动追加块不该被当真相喂写手);要让它们逐字护身,把它们手并进 ## 力量体系 / ## 地理 等正式段。
+    """
+    blocks: list[str] = []
+    wv = project_root / "外置大脑" / "世界观.md"
+    if wv.is_file():
+        picked = _pick_hardfacts(wv.read_text(encoding="utf-8"))
+        if picked:
+            blocks.append("\n\n".join(picked))
+        else:
+            progress({"type": "warn", "message":
+                      "世界观里没识别到硬设定小节(如「## 力量体系」「## 地理 / 势力」),"
+                      "等级/专名这次没有逐字保护——请检查标题写法"})
+    roster = _name_roster(project_root / "外置大脑" / "人物卡.md")
+    if roster:
+        blocks.append("【人物专名册(照此写,别改名/别另造名)】\n" + roster)
+    return "\n\n".join(b for b in blocks if b.strip())
+
+
 # 标题生成(附赠动作:用户选了「自动起标题」。失败/空一律静默回退无标题,绝不阻断出稿)
 _TITLE_SYSTEM = (
     "你是网文编辑,给这一章起一个【章节标题】。要求:6-16 字,贴合内容、有点钩子、不剧透章末反转;"
@@ -245,10 +364,13 @@ def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent
 
 
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
-                       prev: str, workspace: list[tuple[str, str]]) -> str:
+                       prev: str, workspace: list[tuple[str, str]], hardfacts: str = "") -> str:
     parts = [f"# 你要写的是第 {chapter_n} 章。"]
     if knowledge:
         parts.append("## 你要遵循的设定/方法论\n" + knowledge)
+    if hardfacts and role in ("大纲师", "写手"):
+        parts.append("## 硬设定(逐字照搬,等级/境界名、专名、金手指代价一字不改、不许新增体系)\n"
+                     + hardfacts)
     if prev and role in ("大纲师", "写手"):
         parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
     if workspace:
@@ -280,7 +402,13 @@ def run_pipeline(
 
     progress({"type": "pipeline_start", "chapter": chapter_n, "roles": PIPELINE})
     prev = _prev_chapter(project_root, chapter_n)
+    hardfacts = _hardfacts_for(project_root, progress)  # 硬设定逐字块,进大纲师/写手 prompt
 
+    # 注:hardfacts 故意不进续跑签名。它只取自 世界观.md / 人物卡.md,而这两份都在设定师
+    # (永远是 PIPELINE[0])的 reads 里——改硬设定必先让设定师签名失配、从下标 0 全量重跑,
+    # 大纲师/写手自然吃到新硬设定。再折进签名只会白白冲掉在跑章节的 ledger、触发无谓重计费。
+    # 唯一缺口:纯代码改了 _HARDFACT_KW/切片逻辑而世界观文件没动时,半截章续跑会沿用旧切法的
+    # 写手稿——属升级期一次性、自愈(--force/--no-resume 或动一下世界观即重算),不值得为它毁 ledger。
     def _sig(knowledge: str, ws: list[tuple[str, str]]) -> str:
         return ledger.sha(knowledge + "\x1f" + "\n".join(t for _, t in ws) + "\x1f" + prev)
 
@@ -308,7 +436,7 @@ def run_pipeline(
             progress({"type": "agent_chunk", "role": role, "delta": output})
             progress({"type": "info", "message": f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"})
         else:
-            user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace)
+            user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts)
             # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
                         else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
@@ -436,12 +564,13 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     设定师此刻会读到最新的世界观/人物卡/卡章纲,所以改了上游再「重新生成细纲」就能吃到。
     """
     prev = _prev_chapter(project_root, chapter_n)
+    hardfacts = _hardfacts_for(project_root, progress)
     workspace: list[tuple[str, str]] = []
     outline = ""
     for role in ("设定师", "大纲师"):
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress({"type": "agent_start", "role": role})
-        user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace)
+        user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=_SHORT.get(role, config.chapter_chars),
             on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),

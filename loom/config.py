@@ -177,7 +177,10 @@ def load_config(project_root: Path) -> Config:
 
 def _set_env_var(project_root: Path, name: str, value: str) -> None:
     """把 name=value 写进项目根的 .env,只替换 name 那一行——多个 key(DeepSeek / 自定义供应商)各占一行,互不覆盖。"""
-    _replace_env_var(project_root / ".env", name, value)
+    env = project_root / ".env"
+    _replace_env_var(env, name, value)
+    if os.name == "posix":
+        env.chmod(0o600)  # .env 存 API key:只留属主读写(Windows 无此权限位,跳过)
 
 
 def _env_var_set(project_root: Path, name: str) -> bool:

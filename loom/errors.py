@@ -55,6 +55,18 @@ author_errors: dict[str, AuthorError] = {
         impact="这一步没产出,你的稿子没受影响。",
         next_action="检查网络后重试;若反复失败,顶栏切到 Claude 后端,或看下面的细节反馈。",
     ),
+    "deepseek_timeout": AuthorError(
+        title="DeepSeek 这次请求超时了",
+        reason="等了太久没等到 DeepSeek 的响应(网络慢、平台高峰,或这一步要写的字太多)。",
+        impact="这一步没产出,你的稿子和指纹没受影响。",
+        next_action="稍后重试;若反复超时,把章节字数调小一点,或检查网络/代理后再写。",
+    ),
+    "model_timeout": AuthorError(
+        title="这次请求模型超时了",
+        reason="等了太久没等到这家供应商的响应(网络慢、服务高峰,或这一步要写的字太多)。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="稍后重试;若反复超时,把章节字数调小一点,或检查 base_url 与网络后再写。",
+    ),
     "claude_not_found": AuthorError(
         title="找不到 claude 命令",
         reason="loom.toml 里 provider 设成了 claude,但系统 PATH 里没有 `claude`。",

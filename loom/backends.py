@@ -128,6 +128,8 @@ def _deepseek_error(e: Exception) -> LoomBackendError:
         code = "deepseek_insufficient_balance"
     elif status == 429 or "rate limit" in low or "too many requests" in low:
         code = "deepseek_rate_limited"
+    elif isinstance(e, TimeoutError) or "timed out" in low or "timeout" in low:
+        code = "deepseek_timeout"
     else:
         return LoomBackendError(render("deepseek_call_failed", detail=msg), code="deepseek_call_failed")
     return LoomBackendError(render(code), code=code)
@@ -142,6 +144,8 @@ def _openai_compat_error(e: Exception) -> LoomBackendError:
     low = msg.lower()
     if status == 401 or "authentication" in low or "invalid api key" in low:
         return LoomBackendError(render("openai_compat_key_missing", detail=msg), code="openai_compat_key_missing")
+    if isinstance(e, TimeoutError) or "timed out" in low or "timeout" in low:
+        return LoomBackendError(render("model_timeout"), code="model_timeout")
     return LoomBackendError(render("model_call_failed", detail=msg), code="model_call_failed")
 
 
@@ -189,10 +193,15 @@ class OpenAICompatBackend:
             raise LoomBackendError(render(code), code=code)
         # 延迟 import,免得没装 openai 时连 --help 都跑不起来
         try:
+            import httpx  # openai 的传输层依赖,随它一起装
             from openai import OpenAI
         except ModuleNotFoundError as e:
             raise LoomBackendError(render("openai_not_installed"), code="openai_not_installed") from e
-        self._client = OpenAI(api_key=api_key, base_url=base_url)
+        # 显式超时(SDK 默认 600s,挂了要等 10 分钟才有反馈):连接 10s / 其余 120s;
+        # 流式的 read 按 chunk 间隔计,思考型模型思考期可能久无正文,放宽到 300s。
+        self._client = OpenAI(api_key=api_key, base_url=base_url,
+                              timeout=httpx.Timeout(120.0, connect=10.0))
+        self._stream_timeout = httpx.Timeout(120.0, connect=10.0, read=300.0)
 
     def _empty(self) -> LoomBackendError:
         return LoomBackendError(render(self._empty_code, detail=f"model={self.model}"), code=self._empty_code)
@@ -205,7 +214,7 @@ class OpenAICompatBackend:
             if on_chunk is not None:  # 流式:边写边回调
                 stream = self._client.chat.completions.create(
                     model=self.model, messages=messages, max_tokens=max_tokens,
-                    temperature=0.9, stream=True,
+                    temperature=0.9, stream=True, timeout=self._stream_timeout,
                 )
                 parts, buf = [], ""
                 for ev in stream:

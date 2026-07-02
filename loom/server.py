@@ -29,7 +29,7 @@ from .config import (Config, key_is_set, key_status, load_config, openai_compat_
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
-from .fingerprint import seed_from_inherit, seed_from_samples
+from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
 from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
 from .import_jobs import (ImportJobConflict, ImportJobError, ImportJobNotFound,
                           ImportJobStore)
@@ -85,6 +85,25 @@ async def _block_cross_site_writes(request, call_next):
             return JSONResponse({"error": "跨站写请求被拒"}, status_code=403)
     return await call_next(request)
 
+# ---- 写锁:write/learn/seed 这类「跑模型再落盘」端点的进程内互斥 ----
+# 双击/并发请求会同写一章(或同写指纹)。per-project 非阻塞锁,拿不到直接 409;
+# 单用户本地应用,故意不做跨进程锁。
+_write_locks: dict[str, threading.Lock] = {}
+_write_locks_guard = threading.Lock()
+
+
+def _try_lock(root: Path) -> threading.Lock | None:
+    """非阻塞拿这本书的写锁;拿不到返回 None(调用方直接回「正在写作中」)。"""
+    with _write_locks_guard:
+        lock = _write_locks.setdefault(str(Path(root).resolve()), threading.Lock())
+    return lock if lock.acquire(blocking=False) else None
+
+
+def _busy() -> JSONResponse:
+    return JSONResponse({"error": "本书正在写作中,等这一次跑完再操作。", "code": "project_busy"},
+                        status_code=409)
+
+
 # ---- 编辑器允许读写的文件(外置大脑可改、skills/agents 只读展示) ----
 # 外置大脑四件套 / 5 个 agent 的清单单一真相在 doctor.py(BRAIN_FILES/AGENT_FILES)。
 _SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md", "金手指.md"]
@@ -98,8 +117,9 @@ def _state(root: Path) -> dict:
     cfg = load_config(root)
     st = load_state(root)
     brain_names = list(BRAIN_FILES)
-    if (root / "外置大脑" / "修炼体系.md").is_file():
-        brain_names.append("修炼体系")
+    for optional_brain in ("修炼体系", "立项卡", "文风参考"):
+        if (root / "外置大脑" / f"{optional_brain}.md").is_file():
+            brain_names.append(optional_brain)
     brains = [{"rel": f"外置大脑/{n}.md", "name": n} for n in brain_names]
     body = root / "正文"
     chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
@@ -413,18 +433,26 @@ class SeedBody(BaseModel):
     root: str
     text: str | None = None
     inherit: str | None = None
+    reference: str | None = None
 
 
 @app.post("/api/seed")
 def seed(b: SeedBody):
     root = Path(b.root)
+    lock = _try_lock(root)
+    if lock is None:
+        return _busy()
     try:
-        if b.inherit:
+        if b.reference:
+            seed_from_reference(root, b.reference, get_backend(load_config(root)))
+        elif b.inherit:
             seed_from_inherit(root, Path(b.inherit).expanduser())
         else:
             seed_from_samples(root, b.text or "", get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    finally:
+        lock.release()
     return _state(root)
 
 
@@ -436,15 +464,20 @@ class ChapterBody(BaseModel):
 @app.post("/api/learn")
 def learn(b: ChapterBody):
     root = Path(b.root)
+    lock = _try_lock(root)
+    if lock is None:
+        return _busy()
     fp_file = root / "外置大脑" / "写作指纹.md"
-    # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
-    old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
     events: list[dict] = []
     try:
+        # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
+        old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
         cfg = load_config(root)
         fp_learn(root, b.chapter, get_backend(cfg), events.append, appraisal_backend=cheap_backend(cfg))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    finally:
+        lock.release()
     new_fp = fp_file.read_text(encoding="utf-8")
     from .enrich import extract_supplement
     world_p = root / "外置大脑" / "世界观.md"
@@ -471,10 +504,15 @@ def brain_draft(b: DraftBody):
     """从书名+题材+一句话设定,AI 起草 世界观/人物卡/卡章纲 初稿(只覆盖空白/模板,不动你写的)。"""
     from .draft import draft_brain
     root = Path(b.root)
+    lock = _try_lock(root)
+    if lock is None:
+        return _busy()
     try:
         res = draft_brain(root, b.idea, get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    finally:
+        lock.release()
     return {"ok": True, "written": list(res["written"].keys()),
             "skipped": res["skipped"], "state": _state(root)}
 
@@ -484,11 +522,16 @@ def outline_regen(b: ChapterBody):
     """重新生成第 N 章细纲(设定师→大纲师),覆盖 正文/.细纲/第N章.md 并返回。不碰正文。"""
     from .agents import regen_outline
     root = Path(b.root)
-    cfg = load_config(root)
+    lock = _try_lock(root)
+    if lock is None:
+        return _busy()
     try:
+        cfg = load_config(root)
         text = regen_outline(root, b.chapter, get_backend(cfg), cfg)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    finally:
+        lock.release()
     return {"ok": True, "outline": text}
 
 
@@ -563,6 +606,10 @@ def write(b: WriteBody):
         return JSONResponse(
             {"error": f"第 {b.chapter} 章已写完。要重写请勾选覆盖。", "code": "chapter_exists"}, status_code=409)
 
+    lock = _try_lock(root)
+    if lock is None:
+        return _busy()
+
     q: queue.Queue = queue.Queue()
 
     def worker():
@@ -577,6 +624,7 @@ def write(b: WriteBody):
         except Exception as e:  # 兜底,别让流挂死
             q.put({"type": "error", "message": f"意外错误:{e}"})
         finally:
+            lock.release()   # 锁跟着 worker 走(响应流着,写还没完),在哨兵 None 之前放
             q.put(None)
 
     threading.Thread(target=worker, daemon=True).start()

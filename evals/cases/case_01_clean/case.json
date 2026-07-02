@@ -1,0 +1,15 @@
+{
+  "id": "case_01_clean",
+  "title": "废矿·逆息觉醒(干净基准)",
+  "chapter_chars": 600,
+  "fixture": "chapter.md",
+  "setting": "世界观:灵气复苏第三年,主角觉醒「逆息」体质,只能在濒死时爆发,每用一次折损寿元。地名:主角少年时在「一中」读书(不是二中)。力量体系只有 F~SSS,没有「一阶0级」。人物:师姐(宗门同门,立场未明)。卡章纲:本章承上一章「追兵火把已到矿口」,章末钩=师姐登场。",
+  "fingerprint": "## anchor 例句\n> 他没说话。\n> 那笑没到眼睛里。",
+  "fingerprint_anchors": ["他没说话。", "那笑没到眼睛里。"],
+  "expect": {
+    "must_include": ["逆息", "师姐"],
+    "must_not_include": ["二中", "一阶0级"],
+    "max_aitell_hits": 0,
+    "len_tolerance": 0.6
+  }
+}
