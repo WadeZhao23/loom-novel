@@ -74,17 +74,41 @@ def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Pro
 
 
 def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
-                         remaining: list, progress: Progress) -> None:
-    """gate 跑满轮数仍未解决的硬伤 → 追加进审稿留痕(不阻断,只留痕给作者看)。"""
+                         remaining: list, progress: Progress, *, header: str | None = None) -> None:
+    """gate 跑满轮数仍未解决的硬伤 → 追加进审稿留痕(不阻断,只留痕给作者看)。
+
+    header 给了就用它当小标题(伏笔悬空提醒复用此函数,但措辞不同、与"跑满复审轮数"无关)。
+    """
     path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"\n## {label}未解决项(跑满复审轮数仍残留,未阻断,供你定夺)"]
+    lines = [header or f"\n## {label}未解决项(跑满复审轮数仍残留,未阻断,供你定夺)"]
     for i in remaining:
         ev = f" | 证据:「{i.evidence}」" if getattr(i, "evidence", "") else ""
         lines.append(f"- {i.kind}:{i.desc}{ev}")
     with path.open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+
+
+def _flag_stale_foreshadow(project_root: Path, chapter_n: int, config: Config, progress: Progress) -> None:
+    """编辑棒后顺手扫一遍卡章纲:埋了很久仍无推进/回收的伏笔 → 进审稿留痕提醒。
+
+    纯本地、不发 LLM、不打分、不回炉、不阻断(它读卡章纲、质检回炉改的是正文,放回炉只会空转)。
+    任何异常都吞掉——附赠类提醒绝不拖累出稿(同 _scan_sensitive)。卡章纲没 recap 伏笔行时自然为空。
+    """
+    if getattr(config, "foreshadow_distance", 0) <= 0:
+        return
+    try:
+        from .hooks import stale
+        issues = stale(project_root, chapter_n, config.foreshadow_distance)
+    except Exception:
+        return
+    if not issues:
+        return
+    _save_gate_remaining(
+        project_root, chapter_n, "伏笔悬空", issues, progress,
+        header="\n## 伏笔悬空提醒(非阻断,供你定夺;若本章正回收可忽略)",
+    )
 
 
 def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
@@ -243,11 +267,14 @@ def run_pipeline(
     *,
     slow: float = 0.0,
     resume: bool = True,
+    critic_backend: Backend | None = None,
 ) -> tuple[Path, str]:
     """跑一章。返回 (终稿路径, 终稿文本)。进度通过 progress 回调发出。
 
     resume=True 时跳过 ledger 里"已完成且上游未变"的工序(断点续跑,省 DeepSeek 计费);
     上游(reads 文件 / 已累积产物 / 上一章正文)任一变化,从该工序起重算。
+
+    critic_backend 给了就让质检/去AI味的**复审员**走它(通常是便宜模型);写作/回炉仍用 backend。
     """
     from . import ledger
 
@@ -303,10 +330,16 @@ def run_pipeline(
                 backend, label=label, owner_role=role, critic_system=critic, revise_system=revise,
                 draft=output, knowledge=gk, produces=agent.produces,
                 rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
+                critic_backend=critic_backend,
+                detector=_deslop_detector(project_root, chapter_n) if role == "润色师" else None,
             )
             output = gres.text
             if gres.remaining:
                 _save_gate_remaining(project_root, chapter_n, label, gres.remaining, progress)
+
+        # 伏笔悬空提醒:编辑棒后扫卡章纲,埋了很久仍没还的伏笔进留痕(纯提示,独立于上面的 gate、绝不回炉)
+        if role == "编辑":
+            _flag_stale_foreshadow(project_root, chapter_n, config, progress)
 
         # 每棒非空闸:任一棒返回空/拒答都不该静默落盘、再被下游与 learn 二次污染——直接报错刹住,
         # 已完成的工序已进 ledger,修好(换模型)后续跑只重算这一棒,不浪费前面的字数计费。
@@ -342,6 +375,36 @@ def run_pipeline(
         "text": final,
     })
     return path, final
+
+
+def _deslop_detector(project_root: Path, chapter_n: int):
+    """给「去AI味」关卡的确定性预筛:句内 AI 翻转句(aitell) + 跨章重复/腔调(fatigue)。
+
+    两者互补:aitell 抓**句内**「不是A而是B」,fatigue 抓**跨章**章首章末雷同/整句复用。命中前都先
+    比对写作指纹 anchor 豁免作者签名句;每轮在当前稿上重扫(回炉擦净自然归零)。任何异常都吞掉、
+    返回空——附赠类检测绝不拖累出稿(同 _scan_sensitive)。
+    """
+    try:
+        from .aitell import load_anchors
+        anchors = load_anchors(project_root)
+    except Exception:
+        anchors = []
+
+    def _run(text: str):
+        out: list = []
+        try:
+            from .aitell import detect
+            out += detect(text, anchors)
+        except Exception:
+            pass
+        try:
+            from .fatigue import scan
+            out += scan(project_root, chapter_n, text, anchors)
+        except Exception:
+            pass
+        return out
+
+    return _run
 
 
 def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Progress) -> None:

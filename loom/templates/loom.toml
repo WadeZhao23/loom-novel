@@ -2,7 +2,9 @@
 
 [backend]
 provider = "deepseek"     # deepseek | claude | codex | openai_compat
-model    = "deepseek-v4-flash"   # DeepSeek V4(旧名 deepseek-chat/reasoner 2026-07-24 停用)
+model    = "deepseek-v4-pro"     # DeepSeek V4 默认 pro(更强);更快更省可填 deepseek-v4-flash
+# 可选省钱:复审/写后摘要这类「评估、管 what」的调用走便宜模型,写作/学指纹仍用上面的主模型。留空=全用主模型。
+# cheap_model = "deepseek-v4-flash"
 # openai_compat(接智谱GLM/Moonshot/Qwen/硅基流动等)时再填这家的接口地址,例:
 # base_url = "https://open.bigmodel.cn/api/paas/v4"
 
@@ -13,3 +15,5 @@ title = "__TITLE__"
 [gate]
 # 质检/去AI味 复审轮数:1=只挑硬伤写进 .审稿留痕/(默认,不自动改稿);≥2 才回炉重写;0=关闭
 "轮数" = 1
+# 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写新章时进 .审稿留痕/ 提醒(纯提示,不回炉、不阻断);0=关
+"伏笔提醒章距" = 8

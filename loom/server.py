@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents import run_pipeline
-from .backends import (LoomBackendError, get_backend, list_models, probe as probe_backend,
+from .backends import (LoomBackendError, cheap_backend, get_backend, list_models, probe as probe_backend,
                        provider_catalog, validate_model)
 from . import chapter_plan
 from . import chapters as chap
@@ -441,7 +441,8 @@ def learn(b: ChapterBody):
     old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
     events: list[dict] = []
     try:
-        fp_learn(root, b.chapter, get_backend(load_config(root)), events.append)
+        cfg = load_config(root)
+        fp_learn(root, b.chapter, get_backend(cfg), events.append, appraisal_backend=cheap_backend(cfg))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     new_fp = fp_file.read_text(encoding="utf-8")
@@ -569,7 +570,8 @@ def write(b: WriteBody):
             cfg = load_config(root)
             backend = get_backend(cfg)
             # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序
-            run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25, resume=not b.force)
+            run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25, resume=not b.force,
+                         critic_backend=cheap_backend(cfg))
         except (LoomBackendError, ValueError, FileNotFoundError) as e:
             q.put({"type": "error", "message": str(e)})
         except Exception as e:  # 兜底,别让流挂死

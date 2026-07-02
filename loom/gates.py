@@ -69,6 +69,19 @@ def _parse_verdict(raw: str) -> list[Issue]:
     return issues
 
 
+def _merge_issues(primary: list[Issue], secondary: list[Issue]) -> list[Issue]:
+    """合并两路硬伤(确定性检测器在前、LLM 复审在后),按(类别,证据/问题)去重。"""
+    seen: set[tuple[str, str]] = set()
+    out: list[Issue] = []
+    for i in list(primary) + list(secondary):
+        key = (i.kind, i.evidence or i.desc)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(i)
+    return out
+
+
 def run_gate(
     backend: Backend,
     *,
@@ -82,8 +95,17 @@ def run_gate(
     rounds: int,
     max_chars: int,
     progress: Progress = _noop,
+    detector: Callable[[str], list[Issue]] | None = None,  # 确定性预筛(本地、不打分、出证据)
+    critic_backend: Backend | None = None,  # 复审员走的后端(通常便宜模型);回炉仍用 backend
 ) -> GateResult:
-    """评审→回炉,最多 rounds 轮。rounds<=0 视为关闭,原样返回。"""
+    """评审→回炉,最多 rounds 轮。rounds<=0 视为关闭,原样返回。
+
+    detector(若给):每轮在当前稿上跑一遍**本地确定性检测**(如 AI腔对比句式),与 LLM 复审的硬伤
+    合流——既驱动回炉(rounds≥2),又在末轮一起进残留留痕(rounds=1 默认只诊断)。回炉后下一轮在
+    新稿上重扫,擦干净了自然归零。检测器只读不写、不打分,守 ADR-0006「不阻断」。
+
+    critic_backend(若给):复审(纯诊断)走它——通常是便宜模型;回炉(写作)仍走 backend。
+    """
     if rounds <= 0:
         return GateResult(draft, 0, True, [])
 
@@ -95,8 +117,10 @@ def run_gate(
             f"## 设定与标准\n{knowledge}\n\n## 待复审的本章稿\n{text}\n\n"
             "## 你的任务\n按上面的标准,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。"
         )
-        verdict = backend.complete(critic_system, critic_user, max_chars=600)
+        verdict = (critic_backend or backend).complete(critic_system, critic_user, max_chars=600)
         issues = _parse_verdict(verdict)
+        if detector is not None:
+            issues = _merge_issues(detector(text), issues)
 
         if not issues:
             progress({"type": "gate_pass", "label": label, "role": owner_role, "round": r})
@@ -138,9 +162,10 @@ CRITIC_质检 = (
     "你是**独立质检员**,只诊断、不改写。依据给你的《评估自检》标准 + 这本书的设定"
     "(人物卡/世界观/卡章纲/上一章),只挑这几类**硬伤**:\n"
     "① 人物 OOC(违背性格/立场/已知信息) ② 设定漂移(违反世界观/金手指/已埋伏笔)"
-    " ③ 断钩子(没接住上一章章末的钩子) ④ 整章没有任何爽点/收获。\n"
+    " ③ 断钩子(没接住上一章章末的钩子) ④ 整章没有任何爽点/收获"
+    " ⑤ 信息边界:角色表现得知道他当时不在场、或本章之前还没发生的事(未来信息泄漏/视角穿帮)。\n"
     "**不挑**:错别字、标点、文风、AI 腔(都不归你)。**宁缺毋滥**,没把握的不算硬伤。\n\n"
-    "输出(严格):无硬伤只回一行「通过」;有则每条一行 `- 类别 | 一句话问题 | 证据:\"原文短引\"`,最多 5 条。"
+    "输出(严格):无硬伤只回一行「通过」;有则每条一行 `- 类别 | 一句话问题 | 证据:\"原文短引\"`,最多 6 条。"
     "不要输出正文、不要解释。"
 )
 

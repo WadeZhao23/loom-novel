@@ -106,9 +106,9 @@ author_errors: dict[str, AuthorError] = {
     ),
     "deepseek_empty_response": AuthorError(
         title="DeepSeek 返回了空内容",
-        reason="多半是模型名填错——比如把「v4-flash」当成 DeepSeek 模型,但它的正式名是「deepseek-v4-flash」;DeepSeek 不认识的名字会回一个 200 空响应,而不是报错。",
+        reason="DeepSeek V4(v4-flash/v4-pro)是【思考型】模型:它先思考、再写正文,思考也占 token 预算。这一步的预算多半被思考占满了,正文就空着回来——(少数情况才是模型名填错,正式名是 deepseek-v4-flash / deepseek-v4-pro)。",
         impact="这一步没产出,你的指纹和已写章节都【原样保住了】。",
-        next_action="顶栏模型选「deepseek-v4-flash」或「deepseek-v4-pro」(旧名 deepseek-chat/reasoner 2026-07-24 停用);想用别家模型,把供应商切到「OpenAI 兼容(自定义)」再填它的 base_url。",
+        next_action="把「章节字数」调大一点(给思考留余量)再试,通常就好;仍不行就确认顶栏模型名是 deepseek-v4-flash 或 deepseek-v4-pro。想用别家模型,把供应商切到「OpenAI 兼容(自定义)」再填它的 base_url。",
     ),
     "model_empty_response": AuthorError(
         title="这个模型返回了空内容",

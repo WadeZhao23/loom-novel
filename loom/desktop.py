@@ -78,7 +78,10 @@ def _set_dock_icon() -> None:
 
 
 def run() -> None:
-    """原生窗口。"""
+    """原生窗口;窗口起不来(pythonnet/.NET/WebView2 缺失)就自动退回浏览器,不再硬崩。"""
+    import os
+    import sys
+
     _set_macos_app_name("Loom")  # 菜单栏首项显示 Loom 而非 Python(须在建菜单前)
     port = _free_port()
     # log_config=None:别让 uvicorn 跑 dictConfig 去配彩色 formatter(内嵌服务器用不上,
@@ -89,15 +92,32 @@ def run() -> None:
     threading.Thread(target=server.run, daemon=True).start()
     _wait_up(port)
 
-    import webview
+    # Windows 上强制用系统自带的 .NET Framework(netfx),绕开多数机器没装的 CoreCLR(.NET 5+)。
+    # pywebview 的 WinForms 后端靠 pythonnet 托管 .NET,`import clr` 正是杂牌/精简版 Windows
+    # 上崩 "Failed to resolve Python.Runtime.Loader.Initialize" 的高发区。
+    if sys.platform == "win32":
+        os.environ.setdefault("PYTHONNET_RUNTIME", "netfx")
 
-    webview.create_window(
-        "Loom · 织布机",
-        f"http://127.0.0.1:{port}",
-        width=1180, height=780, min_size=(920, 600),
-    )
-    _set_dock_icon()
-    webview.start()
+    try:
+        import webview
+
+        webview.create_window(
+            "Loom · 织布机",
+            f"http://127.0.0.1:{port}",
+            width=1180, height=780, min_size=(920, 600),
+        )
+        _set_dock_icon()
+        webview.start()
+    except Exception:
+        # pythonnet/.NET/WebView2 任何问题都不该让整个 App 崩(用户群里精简版 Windows 很多)。
+        # 服务线程已经在跑,直接开浏览器指向同一端口,并 hold 住进程别退出,等同 serve() 兜底。
+        import traceback
+        import webbrowser
+
+        traceback.print_exc()  # 会被 loom_app 的 excepthook 落到 loom-crash.log
+        webbrowser.open(f"http://127.0.0.1:{port}")
+        while True:
+            time.sleep(1)
 
 
 def serve() -> None:
