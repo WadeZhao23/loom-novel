@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,8 @@ def _set_env_var(project_root: Path, name: str, value: str) -> None:
                  if not l.strip().startswith(f"{name}=") and l.strip() != name]
     lines.append(f"{name}={value}")
     atomic_write_text(env, "\n".join(lines) + "\n")
+    if os.name == "posix":
+        env.chmod(0o600)  # .env 存 API key:只留属主读写(Windows 无此权限位,跳过)
 
 
 def _env_var_set(project_root: Path, name: str) -> bool:

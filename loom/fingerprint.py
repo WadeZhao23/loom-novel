@@ -145,12 +145,14 @@ def seed_from_inherit(project_root: Path, other_fingerprint: Path, progress: Pro
     return path
 
 
-_SENT_END = re.compile(r"(?<=[。!?!?…\n])")
+# 一句 = 正文 + 句末标点串(连续的!?/……不拆开)+ 紧跟的收尾引号(并入本句),或裸换行结尾;
+# 引号不并入会把『他说:"好的。"然后离开。』切成两个残句,对白密集章的 learn 信号被打碎。
+_SENT_RE = re.compile(r'[^。!?!?…\n]*(?:[。!?!?…]+[」』”’"\']*|\n)|[^。!?!?…\n]+')
 
 
 def _segment(text: str) -> list[str]:
-    """中文按句切:句末标点/换行后切,保留标点,丢空白片段。"""
-    return [s.strip() for s in _SENT_END.split(text) if s.strip()]
+    """中文按句切:句末标点(含紧跟的收尾引号)/换行后切,保留标点,丢空白片段。"""
+    return [s.strip() for s in _SENT_RE.findall(text) if s.strip()]
 
 
 def _aligned_signal(snapshot: str, edited: str) -> str:

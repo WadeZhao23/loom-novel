@@ -86,13 +86,28 @@ def load_words(root: Path | str) -> dict[str, str]:
     return words
 
 
+def _contexts(text: str, w: str, limit: int = 3) -> list[str]:
+    """命中词前后各截 ~10 字的上下文片段(最多 limit 条),给人眼快速判真伪。"""
+    out: list[str] = []
+    i = text.find(w)
+    while i >= 0 and len(out) < limit:
+        out.append(text[max(0, i - 10): i + len(w) + 10].replace("\n", " "))
+        i = text.find(w, i + len(w))
+    return out
+
+
 def scan(text: str, root: Path | str) -> list[dict]:
-    """返回命中列表:[{word, category, count}],按命中次数降序。"""
+    """返回命中列表:[{word, category, count, contexts}],按命中次数降序。
+
+    纯子串匹配、只提示不阻断(不引入分词库):单字词一律不报——「颤抖」踩「抖」这类
+    子串误伤太多,词长 ≥2 才算数(load_words 已滤,这里兜底);contexts 带前后文片段。"""
     text = text or ""
     hits = []
     for w, cat in load_words(root).items():
+        if len(w) < 2:
+            continue
         c = text.count(w)
         if c:
-            hits.append({"word": w, "category": cat, "count": c})
+            hits.append({"word": w, "category": cat, "count": c, "contexts": _contexts(text, w)})
     hits.sort(key=lambda h: (-h["count"], h["category"], h["word"]))
     return hits
