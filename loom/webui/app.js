@@ -26,6 +26,7 @@ let _importGeneration = 0;
 let _importChaptersDirty = false;
 let _importRangeTaskId = null;
 let _importUploadInProgress = false;
+let _importUploadToken = 0;
 let _importPreviousFocus = null;
 let _importsRequest = 0;
 
@@ -201,8 +202,6 @@ function bind() {
     button.onclick = () => showImportStep(button.dataset.step);
   });
   $("import-range-select").onclick = selectImportRange;
-  $("import-range-start").onchange = markImportChaptersDirty;
-  $("import-range-end").onchange = markImportChaptersDirty;
   $("import-save-chapters").onclick = () => saveImportChapters().catch(() => {});
   $("import-start-parse").onclick = runImportParse;
   $("import-retry-parse").onclick = runImportParse;
@@ -377,6 +376,8 @@ async function loadImports(generation = null) {
 
 function beginImportGeneration() {
   stopImportPolling();
+  _importUploadToken += 1;
+  setImportUploadState(false);
   _importGeneration += 1;
   return _importGeneration;
 }
@@ -490,6 +491,7 @@ async function uploadNovel(file) {
   }
 
   const generation = _importGeneration;
+  const uploadToken = ++_importUploadToken;
   setImportUploadState(true);
   const form = new FormData();
   form.append("file", chosen);
@@ -498,11 +500,12 @@ async function uploadNovel(file) {
     if (generation !== _importGeneration) return;
     await loadImports(generation);
     if (generation !== _importGeneration) return;
+    if (uploadToken === _importUploadToken) setImportUploadState(false);
     await openImport(task.id);
   } catch (e) {
     if (generation === _importGeneration) error.textContent = e.message;
   } finally {
-    setImportUploadState(false);
+    if (generation === _importGeneration && uploadToken === _importUploadToken) setImportUploadState(false);
   }
 }
 
@@ -548,6 +551,10 @@ function closeImportOverlay() {
   const previousFocus = _importPreviousFocus;
   _importPreviousFocus = null;
   if (previousFocus && previousFocus.isConnected) previousFocus.focus();
+  else {
+    const fallback = $("btn-import");
+    if (fallback && !fallback.disabled) fallback.focus();
+  }
 }
 
 function importChaptersLocked() {
@@ -764,8 +771,15 @@ function selectImportRange() {
     return;
   }
   $("import-chapter-error").textContent = "";
-  IMPORT_CHAPTERS.forEach((chapter) => { chapter.selected = chapter.order >= start && chapter.order <= end; });
-  markImportChaptersDirty();
+  let changed = false;
+  IMPORT_CHAPTERS.forEach((chapter) => {
+    const selected = chapter.order >= start && chapter.order <= end;
+    if (chapter.selected !== selected) {
+      chapter.selected = selected;
+      changed = true;
+    }
+  });
+  if (changed) markImportChaptersDirty();
   renumberImportChapters();
   renderImportChapters();
 }
@@ -794,11 +808,11 @@ async function saveImportChapters() {
       body: JSON.stringify({ chapters }),
     });
     if (!importContextCurrent(context)) return null;
+    _importChaptersDirty = false;
     const task = normalizeImportTask(await importRequest(detailUrl));
     if (!importContextCurrent(context)) return null;
     IMPORT_TASK = task;
     IMPORT_CHAPTERS = IMPORT_TASK.chapters.map((chapter) => ({ ...chapter }));
-    _importChaptersDirty = false;
     renderImportChapters();
     await loadImports(context.generation);
     if (!importContextCurrent(context)) return null;
@@ -846,6 +860,8 @@ async function runImportParse() {
   const parseUrl = `/api/imports/${encodeURIComponent(context.taskId)}/parse`;
   const detailUrl = `/api/imports/${encodeURIComponent(context.taskId)}`;
   let parseStarted = false;
+  let operationError = "";
+  let refreshError = "";
   _importParsing = context;
   try {
     $("import-parse-error").textContent = "";
@@ -868,7 +884,8 @@ async function runImportParse() {
       () => importContextCurrent(context),
     );
   } catch (e) {
-    if (importContextCurrent(context)) $("import-parse-error").textContent = e.message;
+    operationError = e.message;
+    if (importContextCurrent(context)) $("import-parse-error").textContent = operationError;
   } finally {
     if (parseStarted && importContextCurrent(context)) {
       try {
@@ -879,7 +896,8 @@ async function runImportParse() {
           _importChaptersDirty = false;
         }
       } catch (e) {
-        if (importContextCurrent(context)) $("import-parse-error").textContent = e.message;
+        refreshError = e.message;
+        if (importContextCurrent(context)) $("import-parse-error").textContent = refreshError;
       }
     }
     if (_importParsing === context) _importParsing = null;
@@ -887,6 +905,9 @@ async function runImportParse() {
     stopImportPolling(context);
     renderImportChapters();
     renderImportParse();
+    if (IMPORT_TASK && !importErrorMessage(IMPORT_TASK.error)) {
+      $("import-parse-error").textContent = operationError || refreshError;
+    }
     await loadImports(context.generation);
     if (!importContextCurrent(context)) return;
     if (IMPORT_TASK && ["completed", "created"].includes(IMPORT_TASK.status)) {
