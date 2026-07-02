@@ -72,7 +72,9 @@ def detect(text: str, anchors: list[str] | None = None, *, cross_sentence: bool 
     seen: set[str] = set()
     for block in _blocks(text):
         for _line, _col, raw in _scan_block(block, cross_sentence):
-            if any(raw in a or a in raw for a in anchors):
+            # 豁免只认「检测句落在 anchor 里」(raw in a)一个方向:反向 a in raw 太宽,
+            # 一条短 anchor 会放跑所有包含它的 AI 腔整句。
+            if any(raw in a for a in anchors):
                 continue  # 作者逐字签名句,豁免(像你≠AI腔)
             ev = _compact(raw)
             if ev in seen:

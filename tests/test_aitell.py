@@ -79,6 +79,20 @@ def test_anchor_does_not_overreach():
     assert len(hits) == 1
 
 
+def test_short_anchor_inside_detection_no_longer_exempts():
+    # 收紧:检测句只是【包含】一条短 anchor(a in raw 方向)不再整句豁免——
+    # 否则一条短签名词能放跑所有带它的 AI 翻转句
+    anchors = ["退让"]
+    hits = detect("这不是退让,而是策略。", anchors)
+    assert len(hits) == 1
+
+
+def test_anchor_containing_detection_still_exempts():
+    # 保留方向:检测出的片段落在某条 anchor 全句里(raw in a)→ 作者签名句,豁免
+    anchors = ["他要的不是钱是命。"]
+    assert detect("他要的不是钱是命。", anchors) == []
+
+
 # ── 解析:从写作指纹.md 取 anchor 例句 ──────────────────────────────────────
 
 def test_load_anchors_reads_signature_section(project: Path):

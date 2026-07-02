@@ -155,6 +155,87 @@ def test_hardfacts_no_crash_on_directory_paths(project):
     assert _hardfacts_for(project) == ""
 
 
+# ── 反转剔除按层级:#### 也剔,剔到同级/更浅标题为止 ─────────────────
+
+def test_hardfacts_strips_h4_spoiler_and_resumes_at_sibling(project):
+    # 反转写进 ####:只认 ### 的旧逻辑会整段漏给写手
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n## 力量体系\n- 阶梯:凡→化神。\n"
+        "### 子阶说明\n- 每阶九重。\n"
+        "#### 隐藏真相\n- 灵气枯竭是有人在抽。\n"
+        "### 修炼资源\n- 灵石分三等。\n",
+        encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    hf = _hardfacts_for(project)
+    assert "凡→化神" in hf and "每阶九重" in hf and "灵石分三等" in hf   # 反转后的同级子节还在
+    assert "灵气枯竭是有人在抽" not in hf and "隐藏真相" not in hf
+
+
+def test_hardfacts_spoiler_h3_drops_its_deeper_children(project):
+    # 命中反转的 ### 连同其 #### 子孙一起剔,到下一个同级 ### 恢复
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n## 力量体系\n- 阶梯:凡→化神。\n"
+        "### 冰山真相\n- 表层线索。\n"
+        "#### 更深一层\n- 真凶是天枢阁。\n"
+        "### 子阶说明\n- 每阶九重。\n",
+        encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    hf = _hardfacts_for(project)
+    assert "凡→化神" in hf and "每阶九重" in hf
+    assert "表层线索" not in hf and "真凶是天枢阁" not in hf
+
+
+# ── H3 小节参与匹配 + 命不中提示 ─────────────────────────────────────
+
+def test_hardfacts_picks_h3_under_unmatched_h2(project):
+    # 硬设定写在没命中关键词的 H2 下面的 ### 小节里 → 只捞命中的那个 ###
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n## 基础设定\n开场杂记。\n\n"
+        "### 力量体系\n- 阶梯:凡→化神。\n\n"
+        "### 起名备忘\n- 别用生僻字。\n",
+        encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    hf = _hardfacts_for(project)
+    assert "凡→化神" in hf
+    assert "开场杂记" not in hf and "别用生僻字" not in hf
+
+
+def test_hardfacts_picks_h3_when_doc_has_no_h2(project):
+    # 整份世界观只用 ### 分节也能命中;反转 ### 照旧 deny
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n### 力量体系\n- 阶梯:凡→化神。\n\n### 冰山真相\n- 有人在抽灵气。\n",
+        encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    hf = _hardfacts_for(project)
+    assert "凡→化神" in hf
+    assert "有人在抽灵气" not in hf
+
+
+def test_hardfacts_matches_tixi_without_other_keywords(project):
+    # 「## 修仙体系」不含旧关键词(力量/境界…)也该命中——按「体系」认
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n## 修仙体系\n- 阶梯:凡→化神。\n", encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    assert "凡→化神" in _hardfacts_for(project)
+
+
+def test_hardfacts_warns_when_nothing_recognized(project):
+    # 世界观有内容但没有一节像硬设定 → 发 warn 提示检查标题写法(照旧不阻断、返回空)
+    (project / "外置大脑" / "世界观.md").write_text(
+        "# 世界观\n\n## 修仙杂谈\n- 随便写写。\n", encoding="utf-8")
+    (project / "外置大脑" / "人物卡.md").write_text("# 人物卡\n", encoding="utf-8")
+    events: list[dict] = []
+    assert _hardfacts_for(project, events.append) == ""
+    assert any(e["type"] == "warn" and "硬设定" in e["message"] for e in events)
+
+
+def test_hardfacts_missing_file_stays_silent(tmp_path: Path):
+    # 世界观整个缺失是另一回事(doctor 管),不发 warn
+    events: list[dict] = []
+    assert _hardfacts_for(tmp_path, events.append) == ""
+    assert events == []
+
+
 # ── 端到端:写手 prompt 真的拿到硬设定,设定师不重复注入 ──────────────
 
 def _capture():
