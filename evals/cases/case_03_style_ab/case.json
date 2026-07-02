@@ -1,0 +1,12 @@
+{
+  "id": "case_03_style_ab",
+  "title": "指纹生效性 A/B(中性 vs 学过)",
+  "type": "style_ab",
+  "author_ref": "author_ref.md",
+  "fixture_neutral": "chapter_neutral.md",
+  "fixture_learned": "chapter_learned.md",
+  "expect": {
+    "min_style_gap": 0.05
+  },
+  "note": "同一章、同一场景纲,唯一变量=写作指纹:chapter_neutral.md 是「中性默认指纹」口径下的典型 AI 默认腔产出;chapter_learned.md 是「学过作者手改若干轮的指纹」口径下的产出(均为固定 fixture)。断言:学过版到 author_ref.md(作者真稿样本,刻意选不同场景)的风格距离显著更近——「指纹在生效/越写越像你」的最小可证伪回归实验。距离只给开发者回归用,绝不进产品 UI/用户路径。"
+}
