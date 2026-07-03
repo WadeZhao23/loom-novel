@@ -219,7 +219,12 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         f"## 作者对第 {chapter_n} 章的手改(已按句对齐)\n{signal}\n\n"
         f"请按两步走(先判定改写/改情节,再只学改写)输出更新后的【完整新指纹】。"
     )
-    new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=1800)
+    # 输出预算随指纹体量增长(S6):拆掉 1800 字隐形天花板——指纹只增不删,撞顶时
+    # 每次 learn 都在逼模型压缩,最先被挤掉的就是 anchor 例句。逼近封顶时提醒合并同义项。
+    from .budget import learn_budget, near_learn_ceiling
+    if near_learn_ceiling(len(old_fp)):
+        progress(events.warn("写作指纹已逼近预算封顶(4096 字):建议手工合并重复/同义的规则,给新嗓音腾位置"))
+    new_fp = backend.complete(_LEARN_SYSTEM, user, max_chars=learn_budget(len(old_fp)))
     # 硬闸(直接修用户实报的数据丢失):空/过短/丢光小节结构 → 保留旧指纹、绝不覆盖,抛友好错误。
     reasons = validate_output(new_fp, FINGERPRINT)
     if reasons:

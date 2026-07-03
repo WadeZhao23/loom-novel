@@ -404,8 +404,24 @@ def _outline_path(project_root: Path, chapter_n: int) -> Path:
 
 
 def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
+    """原始 knowledge(不折叠)——续跑签名 v1 垫片与既有调用点用它,保持字节稳定。"""
     a, items = _knowledge_items(project_root, chapter_n, role)
     return a, "\n\n".join(f"【{rel}】\n{text.strip()}" for rel, text in items)
+
+
+def _knowledge_prompt(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
+    """进 prompt 的 knowledge:远章 AI 追加块按预算折叠(budget.py,确定性)。
+    签名仍吃原始文件(_knowledge_items)——折叠是 (文件,章号) 的纯函数,不影响续跑语义。"""
+    from . import budget
+    a, items = _knowledge_items(project_root, chapter_n, role)
+    blocks = []
+    for rel, text in items:
+        if rel == paths.CARD_REL:
+            text = budget.fold_recaps(text, chapter_n)
+        elif rel in (paths.WORLD_REL, paths.CHARS_REL):
+            text = budget.fold_supplements(text, chapter_n)
+        blocks.append(f"【{rel}】\n{text.strip()}")
+    return a, "\n\n".join(blocks)
 
 
 def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, list[tuple[str, str]]]:
@@ -440,7 +456,9 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
     if prev and wants_prev:
         parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
     if workspace:
-        ctx = "\n\n".join(f"### {label}\n{text}" for label, text in workspace)
+        from . import budget
+        ws = budget.drop_superseded(workspace)   # 被改稿取代的旧全文稿不下传;锚点/细纲逐字保留
+        ctx = "\n\n".join(f"### {label}\n{text}" for label, text in ws)
         parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
     parts.append(f"## 你的任务\n产出【{agent.produces}】。{_length_hint(role, target_chars)}"
                  "只输出这一项,不要解释你在做什么。")
@@ -495,7 +513,7 @@ def run_pipeline(
 
     for spec in STEPS[start_idx:]:
         role = spec.role
-        agent, knowledge = _knowledge_for(project_root, chapter_n, role)
+        agent, knowledge = _knowledge_prompt(project_root, chapter_n, role)
         progress(events.agent_start(role))
         up_sha = _sig(role, workspace)  # 记录入此工序时的上游签名 v2(供下次续跑比对)
 
@@ -657,7 +675,7 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     outline = ""
     for spec in STEPS[:2]:   # 设定师→大纲师:与主线同一张工序表,不再手抄角色元组
         role = spec.role
-        agent, knowledge = _knowledge_for(project_root, chapter_n, role)
+        agent, knowledge = _knowledge_prompt(project_root, chapter_n, role)
         progress(events.agent_start(role))
         max_chars = spec.short_budget or config.chapter_chars  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
