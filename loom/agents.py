@@ -558,31 +558,52 @@ def run_pipeline(
     return path, final
 
 
-def _deslop_detector(project_root: Path, chapter_n: int):
-    """给「去AI味」关卡的确定性预筛:句内 AI 翻转句(aitell) + 跨章重复/腔调(fatigue)。
+def _aitell_factory(project_root: Path, chapter_n: int, anchors: list[str]):
+    """句内 AI 翻转句检测(「不是A而是B」类)。"""
+    def _run(text: str) -> list:
+        from .aitell import detect
+        return detect(text, anchors)
+    return _run
 
-    两者互补:aitell 抓**句内**「不是A而是B」,fatigue 抓**跨章**章首章末雷同/整句复用。命中前都先
-    比对写作指纹 anchor 豁免作者签名句;每轮在当前稿上重扫(回炉擦净自然归零)。任何异常都吞掉、
-    返回空——附赠类检测绝不拖累出稿(同 _scan_sensitive)。
+
+def _fatigue_factory(project_root: Path, chapter_n: int, anchors: list[str]):
+    """跨章重复/腔调检测(章首章末雷同、整句复用)。"""
+    def _run(text: str) -> list:
+        from .fatigue import scan
+        return scan(project_root, chapter_n, text, anchors)
+    return _run
+
+
+# 确定性预筛注册表:每项是 (root, chapter_n, anchors) -> (text -> list[Issue]) 的工厂。
+# 新接检测器(如三库整合调研里相中的)只在这里加一行——单项异常各自吞掉,绝不拖累出稿。
+DETECTORS = (_aitell_factory, _fatigue_factory)
+
+
+def _deslop_detector(project_root: Path, chapter_n: int):
+    """给「去AI味」关卡的确定性预筛:跑 DETECTORS 注册表全部检测器、汇总硬伤清单。
+
+    命中前都先比对写作指纹 anchor 豁免作者签名句;每轮在当前稿上重扫(回炉擦净自然归零)。
+    任何异常都吞掉、返回空——附赠类检测绝不拖累出稿(同 _scan_sensitive)。
     """
     try:
         from .aitell import load_anchors
         anchors = load_anchors(project_root)
     except Exception:
         anchors = []
+    runners = []
+    for factory in DETECTORS:
+        try:
+            runners.append(factory(project_root, chapter_n, anchors))
+        except Exception:
+            pass
 
     def _run(text: str):
         out: list = []
-        try:
-            from .aitell import detect
-            out += detect(text, anchors)
-        except Exception:
-            pass
-        try:
-            from .fatigue import scan
-            out += scan(project_root, chapter_n, text, anchors)
-        except Exception:
-            pass
+        for r in runners:
+            try:
+                out += r(text)
+            except Exception:
+                pass
         return out
 
     return _run
@@ -632,6 +653,11 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
             agent.system_prompt, user_prompt, max_chars=max_chars,
             on_chunk=lambda d, r=role: progress(events.agent_chunk(r, d)),
         )
+        # 每棒非空闸(与主线同口径):设定师空产物不再静默喂大纲师、空转白花一次调用
+        reasons = validate_output(out, STEP)
+        if reasons:
+            raise LoomBackendError(render("model_output_invalid", detail=f"{role}:" + "；".join(reasons)),
+                                   code="model_output_invalid")
         workspace.append((agent.produces, out))
         progress(events.agent_done(role, agent.produces))
         outline = out
