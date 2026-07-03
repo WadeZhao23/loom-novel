@@ -1,0 +1,36 @@
+name: CI
+
+# 安全网(重构前置):每次 push / PR 双平台跑全量测试 + 离线 eval 回归门禁。
+# eval 门禁只含确定性 grader —— 不联网、零 key、零成本;
+# 与已提交的 evals/baseline.json 比对,有回归 → 退出码 1 → 红灯挡合入。
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"   # Windows runner 默认 cp1252,不设这个,中文/制表符输出直接 UnicodeEncodeError
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false          # 一个平台红了另一个照跑,一次看全两边结果
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: 全量测试
+        run: python -m pytest tests/ -q
+      - name: eval 回归门禁(确定性 grader,零 key)
+        run: python -m evals.run_eval --gate
