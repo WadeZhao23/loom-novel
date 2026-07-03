@@ -66,21 +66,5 @@ def chapter_drifted(root: Path, n: int) -> bool:
     return sha(body_key(out.read_text(encoding="utf-8"))) != led["snapshot_sha"]
 
 
-def resume_point(root: Path, n: int,
-                 upstream_of: Callable[[str, list], str]) -> tuple[int, list]:
-    """返回 (起始工序下标, 预填 workspace)。
-
-    顺序找第一个 ledger 缺失、或上游签名已变的工序作续跑起点;其前的产物预填进 workspace。
-    upstream_of(role, workspace_so_far) -> 该工序入场时的上游签名 sha。
-    """
-    from .agents import PIPELINE, load_agent
-
-    led = load_ledger(root, n)
-    steps = led.get("steps", {})
-    workspace: list[tuple[str, str]] = []
-    for i, role in enumerate(PIPELINE):
-        entry = steps.get(role)
-        if not entry or entry.get("upstream_sha") != upstream_of(role, workspace):
-            return i, workspace            # 此工序起重跑,其前产物已预填
-        workspace.append((load_agent(root, role).produces, entry["output"]))
-    return len(PIPELINE), workspace        # 全部完成且上游未变
+# 续跑【策略】(找起点/签名比对/老账本升级)已归位 loom/resume.py(S5);
+# 本模块只留纯存取——load/save/record/drifted,坏 JSON 当无账本,刻意极简。

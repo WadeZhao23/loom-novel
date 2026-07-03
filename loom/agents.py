@@ -222,20 +222,26 @@ def load_agent(project_root: Path, role: str) -> Agent:
     )
 
 
-def _read_files(project_root: Path, rels: list[str], progress: Progress) -> str:
-    blocks = []
+def _read_file_items(project_root: Path, rels: list[str], progress: Progress) -> list[tuple[str, str]]:
+    """reads 清单 → [(展示名, 原文)]。knowledge 拼装与续跑签名共用这一份,保证同源。"""
+    items: list[tuple[str, str]] = []
     for rel in rels:
         p = project_root / rel
         if p.is_dir():
             # 目录型 reads(如 skills/题材):读其中所有 .md(跳过 README,排序保证签名稳定)
             for f in sorted(p.glob("*.md")):
                 if f.stem != "README":
-                    blocks.append(f"【{rel}/{f.name}】\n{f.read_text(encoding='utf-8').strip()}")
+                    items.append((f"{rel}/{f.name}", f.read_text(encoding="utf-8")))
         elif p.exists():
-            blocks.append(f"【{rel}】\n{p.read_text(encoding='utf-8').strip()}")
+            items.append((rel, p.read_text(encoding="utf-8")))
         else:
             progress(events.warn(f"跳过缺失文件 {rel}"))
-    return "\n\n".join(blocks)
+    return items
+
+
+def _read_files(project_root: Path, rels: list[str], progress: Progress) -> str:
+    return "\n\n".join(f"【{rel}】\n{text.strip()}"
+                       for rel, text in _read_file_items(project_root, rels, progress))
 
 
 def _prev_chapter(project_root: Path, chapter_n: int) -> str:
@@ -398,9 +404,14 @@ def _outline_path(project_root: Path, chapter_n: int) -> Path:
 
 
 def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
+    a, items = _knowledge_items(project_root, chapter_n, role)
+    return a, "\n\n".join(f"【{rel}】\n{text.strip()}" for rel, text in items)
+
+
+def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, list[tuple[str, str]]]:
     a = load_agent(project_root, role)
     rels = list(a.reads) + (a.reads_first_chapter if chapter_n == 1 else [])
-    return a, _read_files(project_root, rels, _noop)
+    return a, _read_file_items(project_root, rels, _noop)
 
 
 def _length_hint(role: str, target_chars: int) -> str:
@@ -454,7 +465,7 @@ def run_pipeline(
 
     critic_backend 给了就让质检/去AI味的**复审员**走它(通常是便宜模型);写作/回炉仍用 backend。
     """
-    from . import ledger
+    from . import ledger, resume as resume_mod
 
     progress(events.pipeline_start(chapter_n, PIPELINE))
     prev = _prev_chapter(project_root, chapter_n)
@@ -465,15 +476,18 @@ def run_pipeline(
     # 大纲师/写手自然吃到新硬设定。再折进签名只会白白冲掉在跑章节的 ledger、触发无谓重计费。
     # 唯一缺口:纯代码改了 _HARDFACT_KW/切片逻辑而世界观文件没动时,半截章续跑会沿用旧切法的
     # 写手稿——属升级期一次性、自愈(--force/--no-resume 或动一下世界观即重算),不值得为它毁 ledger。
-    def _sig(knowledge: str, ws: list[tuple[str, str]]) -> str:
-        return ledger.sha(knowledge + "\x1f" + "\n".join(t for _, t in ws) + "\x1f" + prev)
+    _cfg_bits = {"chapter_chars": config.chapter_chars, "gate_rounds": config.gate_rounds}
 
-    def _upstream_of(role: str, ws: list[tuple[str, str]]) -> str:
+    def _sig(role: str, ws: list[tuple[str, str]]) -> str:
+        a, items = _knowledge_items(project_root, chapter_n, role)
+        return resume_mod.sig_v2(a.system_prompt, items, ws, prev, _cfg_bits)
+
+    def _upstream_v1(role: str, ws: list[tuple[str, str]]) -> str:
         _, knowledge = _knowledge_for(project_root, chapter_n, role)
-        return _sig(knowledge, ws)
+        return resume_mod.sig_v1(knowledge, ws, prev)
 
     if resume:
-        start_idx, workspace = ledger.resume_point(project_root, chapter_n, _upstream_of)
+        start_idx, workspace = resume_mod.resume_point(project_root, chapter_n, _sig, _upstream_v1)
         for role in PIPELINE[:start_idx]:
             progress(events.agent_skip(role, "已完成且上游未变"))
     else:
@@ -483,7 +497,7 @@ def run_pipeline(
         role = spec.role
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress(events.agent_start(role))
-        up_sha = _sig(knowledge, workspace)  # 记录入此工序时的上游签名(供下次续跑比对)
+        up_sha = _sig(role, workspace)  # 记录入此工序时的上游签名 v2(供下次续跑比对)
 
         max_chars = spec.short_budget or config.chapter_chars
         outline_path = _outline_path(project_root, chapter_n) if spec.outline_wysiwyg else None
