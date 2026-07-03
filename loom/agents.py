@@ -90,6 +90,22 @@ def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
 
 
+def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, progress: Progress) -> None:
+    """终稿超长留痕:正文字数(去标题去空白,与 evals grade_length 同口径)超目标 1.5 倍 → 提醒可能注水。
+
+    字数是软指令(_length_hint),模型偶尔越线交给作者定夺——纯提示、绝不阻断出稿(ADR-0006)。
+    """
+    n = len(re.sub(r"\s+", "", strip_title(body)))
+    if target <= 0 or n <= int(target * 1.5):
+        return
+    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(f"\n## 篇幅提醒(非阻断,供你定夺)\n"
+                f"- 本章 {n} 字,超出目标 {target} 字较多,可能注水——建议手删或重写\n")
+    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+
+
 def _flag_stale_foreshadow(project_root: Path, chapter_n: int, config: Config, progress: Progress) -> None:
     """编辑棒后顺手扫一遍卡章纲:埋了很久仍无推进/回收的伏笔 → 进审稿留痕提醒。
 
@@ -363,8 +379,22 @@ def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent
     return a, _read_files(project_root, rels, _noop)
 
 
+def _length_hint(role: str, target_chars: int) -> str:
+    """任务行里的字数软指令(按角色措辞)。篇幅只靠说,绝不靠调小 max_tokens 截断——
+    那会拦腰斩章 + 复发思考型空响应(见 backends._budget_tokens,2.0.1 踩过)。"""
+    if not target_chars:
+        return ""
+    if role == "写手":
+        return (f"正文约 {target_chars} 字(±20%):写到目标篇幅就收章、结尾留钩,"
+                "不为凑字数加铺垫注水。")
+    if role in ("编辑", "润色师"):
+        return f"保持原稿篇幅(约 {target_chars} 字),只改不扩写。"
+    return f"≤{target_chars} 字。"  # 设定师/大纲师(_SHORT 的 350/450)
+
+
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
-                       prev: str, workspace: list[tuple[str, str]], hardfacts: str = "") -> str:
+                       prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
+                       target_chars: int = 0) -> str:
     parts = [f"# 你要写的是第 {chapter_n} 章。"]
     if knowledge:
         parts.append("## 你要遵循的设定/方法论\n" + knowledge)
@@ -376,7 +406,8 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
     if workspace:
         ctx = "\n\n".join(f"### {label}\n{text}" for label, text in workspace)
         parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
-    parts.append(f"## 你的任务\n产出【{agent.produces}】。只输出这一项,不要解释你在做什么。")
+    parts.append(f"## 你的任务\n产出【{agent.produces}】。{_length_hint(role, target_chars)}"
+                 "只输出这一项,不要解释你在做什么。")
     return "\n\n".join(parts)
 
 
@@ -436,7 +467,8 @@ def run_pipeline(
             progress({"type": "agent_chunk", "role": role, "delta": output})
             progress({"type": "info", "message": f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"})
         else:
-            user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts)
+            user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
+                                             target_chars=max_chars)
             # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
                         else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
@@ -493,6 +525,7 @@ def run_pipeline(
     path = _save_chapter(project_root, chapter_n, final)
     ledger.record_snapshot(project_root, chapter_n, final)  # 与 正文/.原稿 同口径(都含 H1),不会误判 drifted
     _scan_sensitive(project_root, chapter_n, final_body, progress)  # 违禁词扫正文体即可(标题不必扫)
+    _flag_overlong(project_root, chapter_n, final_body, config.chapter_chars, progress)  # 超长只留痕,不拦稿
     progress({
         "type": "chapter_done",
         "chapter": chapter_n,
@@ -570,9 +603,11 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     for role in ("设定师", "大纲师"):
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress({"type": "agent_start", "role": role})
-        user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts)
+        max_chars = _SHORT.get(role, config.chapter_chars)  # 与主线 run_pipeline 同口径
+        user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
+                                         target_chars=max_chars)
         out = backend.complete(
-            agent.system_prompt, user_prompt, max_chars=_SHORT.get(role, config.chapter_chars),
+            agent.system_prompt, user_prompt, max_chars=max_chars,
             on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),
         )
         workspace.append((agent.produces, out))

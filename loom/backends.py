@@ -157,12 +157,15 @@ class Backend(Protocol):
 
 
 def _budget_tokens(provider: str, max_chars: int | None) -> int:
-    """max_tokens 预算。中文 ~1.6 token/字 + 余量。
+    """max_tokens 预算——只防截断,【不是】篇幅刹车(篇幅靠 prompt 字数指令,见 agents._length_hint)。
 
+    换算:DeepSeek 中文实测约 0.6 token/字(旧注释的 ~1.6 是按老式 tokenizer 高估的近 3 倍);
+    base = max_chars*2.2 是按旧换算定的,如今相当于 ~3.5 倍余量——故意不缩,截断永远比宽裕更贵。
     DeepSeek V4(v4-flash/v4-pro)是【思考型】:reasoning 也吃 max_tokens,小预算步骤(标题/复审)
     易被思考占满 → content 空(deepseek_empty_response 的真因)。给思考留足余量(+4096)+ 底线(6144)、
-    封顶 8192(DeepSeek 接受的上限)。其它 OpenAI 兼容供应商维持原样——它们各家模型输出上限不同,
-    贸然抬高 max_tokens 可能被拒。"""
+    封顶 8192(DeepSeek 接受的上限)。8192 token ≈ 1.3 万字空间,所以「章节超长」绝不能靠调小这里治
+    ——会拦腰截断 + 复发思考型空响应(2.0.1 的老坑)。其它 OpenAI 兼容供应商维持原样——它们各家
+    模型输出上限不同,贸然抬高 max_tokens 可能被拒。"""
     if not max_chars:
         return 8192 if provider == "deepseek" else 2048
     base = int(max_chars * 2.2)
