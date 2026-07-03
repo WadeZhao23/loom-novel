@@ -12,6 +12,7 @@ dependencies = [
     "openai>=1.30",
     "python-dotenv>=1.0",
     "fastapi>=0.110",
+    "python-multipart>=0.0.9",
     "uvicorn>=0.29",
     "pywebview>=5.0",
 ]

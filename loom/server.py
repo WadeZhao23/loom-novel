@@ -8,9 +8,10 @@ from __future__ import annotations
 import json
 import queue
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -18,23 +19,54 @@ from pydantic import BaseModel
 from .agents import run_pipeline
 from .backends import (LoomBackendError, cheap_backend, get_backend, list_models, probe as probe_backend,
                        provider_catalog, validate_model)
+from . import chapter_plan
 from . import chapters as chap
+from . import projects as project_registry
 from .chaptertext import parse_title, strip_title
 from . import ledger
-from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
-                     save_config, set_env_key, set_openai_compat_key)
+from .config import (Config, key_is_set, key_status, load_config, openai_compat_key_is_set,
+                     save_config, set_env_key, set_global_env_key, set_openai_compat_key)
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
 from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
+from .import_jobs import (ImportJobConflict, ImportJobError, ImportJobNotFound,
+                          ImportJobStore)
+from .import_project import materialize_import
+from .reverse_parse import decode_txt, run_parse, split_chapters, validate_chapters
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
 from .state import load_state
 
 WEBUI_DIR = Path(__file__).parent / "webui"
+MAX_IMPORT_BYTES = 50 * 1024 * 1024
 
-app = FastAPI(title="Loom")
+_import_recovery_done = False
+_import_recovery_lock = threading.Lock()
+_import_parse_start_lock = threading.Lock()
+
+
+def _import_store() -> ImportJobStore:
+    return ImportJobStore()
+
+
+def _recover_imports() -> None:
+    global _import_recovery_done
+    with _import_recovery_lock:
+        if _import_recovery_done:
+            return
+        _import_store().recover_interrupted()
+        _import_recovery_done = True
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _recover_imports()
+    yield
+
+
+app = FastAPI(title="Loom", lifespan=_lifespan)
 
 # 本地服务的两道安全闸(本地无鉴权模型成立的前提):
 # 1) 只认 Host=127.0.0.1/localhost → 挡 DNS rebinding(恶意网站把域名重绑到本机再调本地端点)
@@ -84,6 +116,11 @@ def _is_project(p: Path) -> bool:
 def _state(root: Path) -> dict:
     cfg = load_config(root)
     st = load_state(root)
+    brain_names = list(BRAIN_FILES)
+    for optional_brain in ("修炼体系", "立项卡", "文风参考"):
+        if (root / "外置大脑" / f"{optional_brain}.md").is_file():
+            brain_names.append(optional_brain)
+    brains = [{"rel": f"外置大脑/{n}.md", "name": n} for n in brain_names]
     body = root / "正文"
     chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
     chs = []
@@ -99,14 +136,11 @@ def _state(root: Path) -> dict:
         "title": cfg.title,
         "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
                     "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
+                    "key_status": key_status(root),
                     "openai_compat_key_set": openai_compat_key_is_set(root),
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
-                 + ([{"rel": "外置大脑/立项卡.md", "name": "立项卡"}]
-                    if (root / "外置大脑" / "立项卡.md").is_file() else [])
-                 + ([{"rel": "外置大脑/文风参考.md", "name": "文风参考"}]
-                    if (root / "外置大脑" / "文风参考.md").is_file() else [])
+        "brain": brains
                  + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
                     if (root / "外置大脑" / "违禁词.md").is_file() else []),
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
@@ -127,9 +161,37 @@ class RootBody(BaseModel):
     root: str
 
 
+class DefaultDirBody(BaseModel):
+    path: str
+
+
 @app.get("/api/genres")
 def genres():
     return {"genres": available_genres()}
+
+
+@app.get("/api/projects")
+def projects_list():
+    return project_registry.list_all()
+
+
+@app.post("/api/projects/register")
+def register_project(b: RootBody):
+    root = Path(b.root).expanduser()
+    if not _is_project(root):
+        return JSONResponse({"error": f"{root} is not a loom project (missing loom.toml)."}, status_code=400)
+    return project_registry.register(root)
+
+
+@app.delete("/api/projects/{name}")
+def delete_project(name: str):
+    project_registry.remove(name)
+    return project_registry.list_all()
+
+
+@app.put("/api/projects/default-dir")
+def update_default_dir(b: DefaultDirBody):
+    return project_registry.set_default_dir(Path(b.path))
 
 
 @app.post("/api/project/create")
@@ -138,7 +200,12 @@ def create_project(b: CreateBody):
         root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    return _state(root)
+    try:
+        state = _state(root)
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    project_registry.register(root, default_dir=Path(b.parent).expanduser())
+    return state
 
 
 class ParentBody(BaseModel):
@@ -149,7 +216,14 @@ class ParentBody(BaseModel):
 def sample_open(b: ParentBody):
     """拷一份内置样例书到 parent 并打开,让陌生作者先看一本跑通的书。"""
     from .scaffold import open_sample
-    return _state(open_sample(Path(b.parent).expanduser()))
+    parent = Path(b.parent).expanduser()
+    root = open_sample(parent)
+    try:
+        state = _state(root)
+    except (FileNotFoundError, ValueError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    project_registry.register(root, default_dir=parent)
+    return state
 
 
 @app.post("/api/project/open")
@@ -158,9 +232,11 @@ def open_project(b: RootBody):
     if not _is_project(root):
         return JSONResponse({"error": f"{root} 不是 loom 项目(没有 loom.toml)。"}, status_code=400)
     try:
-        return _state(root)
+        state = _state(root)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    project_registry.register(root)
+    return state
 
 
 @app.get("/api/project/state")
@@ -251,6 +327,11 @@ class ConfigBody(BaseModel):
     api_key: str | None = None
 
 
+class GlobalKeyBody(BaseModel):
+    root: str
+    api_key: str
+
+
 @app.get("/api/backend/probe")
 def backend_probe(provider: str):
     return probe_backend(provider)
@@ -333,6 +414,18 @@ def update_config(b: ConfigBody):
     if warn:
         st["model_warning"] = warn
     return st
+
+
+@app.post("/api/settings/global-key")
+def update_global_key(b: GlobalKeyBody):
+    key = (b.api_key or "").strip()
+    if not key:
+        return JSONResponse({"error": "API Key 不能为空"}, status_code=400)
+    try:
+        set_global_env_key(key)
+    except OSError as e:
+        return JSONResponse({"error": f"写入全局 API Key 失败:{e}"}, status_code=500)
+    return _state(Path(b.root))
 
 
 # ----------------------------- seed / learn -----------------------------
@@ -494,6 +587,13 @@ class WriteBody(BaseModel):
     force: bool = False
 
 
+class PlanGenerateBody(BaseModel):
+    root: str
+    total_chapters: int
+    start_from: int = 1
+    force: bool = False
+
+
 @app.post("/api/write")
 def write(b: WriteBody):
     root = Path(b.root)
@@ -539,5 +639,274 @@ def write(b: WriteBody):
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
+@app.post("/api/plan/generate")
+def plan_generate(b: PlanGenerateBody):
+    root = Path(b.root).expanduser()
+    q: queue.Queue = queue.Queue()
+
+    def worker():
+        try:
+            cfg = load_config(root)
+            backend = get_backend(cfg)
+            chapter_plan.plan_chapters(
+                root,
+                b.total_chapters,
+                backend,
+                start_from=b.start_from,
+                force=b.force,
+                progress=q.put,
+            )
+        except (LoomBackendError, ValueError, FileNotFoundError) as e:
+            q.put({"type": "error", "message": str(e)})
+        except Exception as e:
+            q.put({"type": "error", "message": f"意外错误:{e}"})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        while True:
+            event = q.get()
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
 # 静态界面挂在最后(/api/* 已先匹配)
+class ImportChaptersBody(BaseModel):
+    chapters: list[dict]
+
+
+class ImportResultsBody(BaseModel):
+    worldview: str
+    system: str
+    characters: str
+    outlines: str
+
+
+class ImportCreateBody(BaseModel):
+    name: str
+    parent_dir: str
+    genre: str | None = None
+    include_source_chapters: bool = True
+
+
+def _import_error(error: Exception, status_code: int, **extra: object) -> JSONResponse:
+    return JSONResponse({"error": str(error), **extra}, status_code=status_code)
+
+
+def _import_detail(store: ImportJobStore, task_id: str) -> dict:
+    return {
+        **store.get(task_id),
+        "chapters": store.get_chapters(task_id),
+        "results": store.get_results(task_id),
+    }
+
+
+@app.post("/api/imports", status_code=201)
+async def create_import(file: UploadFile = File(...)) -> dict:
+    filename = file.filename or ""
+    if Path(filename).suffix.lower() != ".txt":
+        return _import_error(ValueError("Only .txt files can be imported"), 400)
+
+    raw = bytearray()
+    try:
+        while chunk := await file.read(1024 * 1024):
+            raw.extend(chunk)
+            if len(raw) > MAX_IMPORT_BYTES:
+                return _import_error(
+                    ValueError(f"TXT exceeds the {MAX_IMPORT_BYTES}-byte import limit"),
+                    413,
+                )
+    finally:
+        await file.close()
+
+    payload = bytes(raw)
+    try:
+        text, encoding = decode_txt(payload)
+        split = split_chapters(text)
+        task = _import_store().create(
+            filename,
+            payload,
+            text,
+            encoding,
+            split.chapters,
+            split.confidence,
+        )
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+    return JSONResponse(task, status_code=201)
+
+
+@app.get("/api/imports")
+def list_imports() -> list[dict]:
+    store = _import_store()
+    imports = []
+    for task in store.list():
+        try:
+            imports.append({**task, "chapter_count": store.chapter_count(task["id"])})
+        except (ImportJobError, OSError, ValueError, UnicodeError) as error:
+            imports.append(
+                {
+                    **task,
+                    "chapter_count": None,
+                    "damaged": True,
+                    "error": f"chapters.json is damaged: {error}",
+                }
+            )
+    return imports
+
+
+@app.get("/api/imports/{task_id}")
+def get_import(task_id: str) -> dict:
+    try:
+        return _import_detail(_import_store(), task_id)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.put("/api/imports/{task_id}/chapters")
+def put_import_chapters(task_id: str, body: ImportChaptersBody) -> dict:
+    store = _import_store()
+    try:
+        with store.lock(task_id):
+            if store.get(task_id).get("status") == "running":
+                raise ImportJobConflict("A running import job cannot be edited")
+            validate_chapters(body.chapters)
+            return store.save_chapters(task_id, body.chapters)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.post("/api/imports/{task_id}/parse")
+def parse_import(task_id: str) -> StreamingResponse:
+    store = _import_store()
+    with _import_parse_start_lock:
+        try:
+            task = store.get(task_id)
+            status = task.get("status")
+            if status == "running":
+                raise ImportJobConflict("Import job is already running")
+            if status in {"completed", "created"}:
+                raise ImportJobConflict("Completed import job cannot be parsed again")
+            if status not in {"ready", "failed", "interrupted"}:
+                raise ValueError(f"Import job is not ready to parse: {status!r}")
+            if not any(
+                chapter.get("selected") is True
+                for chapter in store.get_chapters(task_id)
+            ):
+                raise ValueError("At least one selected chapter is required")
+            backend = get_backend(load_config(store.runtime_root(task_id)))
+        except ImportJobNotFound as error:
+            return _import_error(error, 404)
+        except ImportJobConflict as error:
+            return JSONResponse(
+                {"error": str(error), "task": task}, status_code=409
+            )
+        except (ImportJobError, LoomBackendError, ValueError, FileNotFoundError) as error:
+            return _import_error(error, 400)
+
+        events: queue.Queue = queue.Queue()
+        worker_error: Exception | None = None
+
+        def worker() -> None:
+            nonlocal worker_error
+            try:
+                run_parse(store, task_id, backend, progress=events.put)
+            except Exception as error:
+                worker_error = error
+            finally:
+                events.put(None)
+
+        threading.Thread(target=worker, daemon=True).start()
+        first_event = events.get()
+        if first_event is None:
+            if isinstance(worker_error, ImportJobConflict):
+                return _import_error(worker_error, 409)
+            if isinstance(
+                worker_error,
+                (ImportJobError, LoomBackendError, ValueError, FileNotFoundError),
+            ):
+                return _import_error(worker_error, 400)
+            if worker_error is not None:
+                return _import_error(worker_error, 500)
+            return _import_error(
+                RuntimeError("Import parse ended before emitting progress"), 500
+            )
+
+    def stream():
+        yield json.dumps(first_event, ensure_ascii=False) + "\n"
+        while True:
+            event = events.get()
+            if event is None:
+                break
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.put("/api/imports/{task_id}/results")
+def put_import_results(task_id: str, body: ImportResultsBody) -> dict:
+    store = _import_store()
+    try:
+        with store.lock(task_id):
+            if store.get(task_id).get("status") == "running":
+                raise ImportJobConflict("A running import job cannot be edited")
+            return store.save_results(task_id, body.model_dump())
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError, UnicodeError) as error:
+        return _import_error(error, 400)
+
+
+@app.post("/api/imports/{task_id}/create-project")
+def create_import_project(task_id: str, body: ImportCreateBody) -> dict:
+    store = _import_store()
+    parent = Path(body.parent_dir).expanduser()
+    destination = parent / body.name
+    try:
+        return materialize_import(
+            store,
+            task_id,
+            name=body.name,
+            parent_dir=parent,
+            genre=body.genre,
+            include_source_chapters=body.include_source_chapters,
+            state_loader=_state,
+            register=lambda root: project_registry.register(root, default_dir=parent),
+        )
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except (ImportJobConflict, FileExistsError) as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError) as error:
+        return _import_error(error, 400)
+    except Exception as error:
+        return _import_error(error, 500, path=str(destination))
+
+
+@app.delete("/api/imports/{task_id}")
+def delete_import(task_id: str) -> Response:
+    try:
+        _import_store().delete(task_id)
+    except ImportJobNotFound as error:
+        return _import_error(error, 404)
+    except ImportJobConflict as error:
+        return _import_error(error, 409)
+    except (ImportJobError, ValueError) as error:
+        return _import_error(error, 400)
+    return Response(status_code=204)
+
+
 app.mount("/", StaticFiles(directory=str(WEBUI_DIR), html=True), name="ui")

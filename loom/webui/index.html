@@ -27,6 +27,14 @@
         <button id="btn-sample" class="primary"><span class="ico" data-ico="sample"></span> 先看看样例(一本跑通的书)</button>
       </div>
 
+      <section id="project-library" class="project-library hidden">
+        <div class="welcome-row">
+          <h3>项目库</h3>
+          <button id="btn-refresh-projects" class="ghost mini" title="刷新项目库" aria-label="刷新项目库"><span class="ico" data-ico="redo"></span></button>
+        </div>
+        <div id="project-list" class="project-list"></div>
+      </section>
+
       <div class="welcome-block">
         <h3>新建一本书</h3>
         <label>放在哪个文件夹</label>
@@ -43,7 +51,14 @@
         <label>项目文件夹完整路径</label>
         <input id="open-path" type="text" placeholder="/Users/你/Desktop/我的小说" />
         <button id="btn-open">打开</button>
+        <button id="btn-import" class="ghost"><span class="ico" data-ico="import"></span> 导入小说</button>
       </div>
+      <section id="import-history-wrap" class="import-history-wrap hidden">
+        <div class="welcome-row">
+          <h3>导入记录</h3>
+        </div>
+        <div id="import-history" class="import-history"></div>
+      </section>
       <details class="welcome-help">
         <summary><span class="ico" data-ico="key"></span> 怎么拿 DeepSeek API key(自带 key)</summary>
         <p>Loom 用你自己的 key 写作,稿子不离开你的电脑。四步:</p>
@@ -79,7 +94,9 @@
         <select id="model" class="model" title="选择模型(下拉选;第三方供应商点「拉取可用模型」拉真实列表)"></select>
         <input id="model-custom" type="text" class="model hidden" autocomplete="off" placeholder="手动输入模型名" title="列表里没有想要的型号时,手动输入一个模型名" />
         <input id="base-url" type="text" class="model base-url hidden" title="第三方 OpenAI 兼容供应商的接口地址 base_url" placeholder="base_url(自定义供应商)" />
-        <input id="api-key" type="password" class="model" title="DeepSeek / 自定义供应商需填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <input id="api-key" type="password" class="model" title="DeepSeek 可保存为全局默认 Key,也可通过保存后端写入本项目 .env 覆盖;自定义供应商写入项目 .env;Claude / Codex 复用各自客户端的登录,不用填 key" />
+        <button id="btn-save-global-key" class="ghost hidden" title="保存为所有项目共用的 DeepSeek Key"><span class="ico" data-ico="key"></span> 保存全局 Key</button>
+        <span id="key-source" class="key-source"></span>
         <button id="btn-fetch-models" class="ghost hidden" title="拉取这个供应商当前真实可用的模型列表(只读、不耗 token)"><span class="ico" data-ico="focus"></span> 拉取可用模型</button>
         <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
         <span id="backend-status" class="backend-status"></span>
@@ -101,6 +118,19 @@
             <button id="btn-write-next" class="mini primary">写下一章 <span class="ico" data-ico="writeNext"></span></button>
           </div>
           <ul id="chapters" class="list"></ul>
+          <div class="plan-panel">
+            <div class="plan-head">
+              <span><span class="ico" data-ico="outline"></span> 章节规划</span>
+            </div>
+            <div class="plan-grid">
+              <label>总章数 <input id="plan-total" type="number" min="1" step="1" /></label>
+              <label>起始章 <input id="plan-start" type="number" min="1" step="1" /></label>
+            </div>
+            <label class="check-row"><input id="plan-force" type="checkbox" /> 覆盖已有细纲</label>
+            <button id="btn-plan-generate" class="mini"><span class="ico" data-ico="outline"></span> 批量生成细纲</button>
+            <div id="plan-status" class="plan-status" aria-live="polite"></div>
+            <div id="plan-results" class="plan-results"></div>
+          </div>
           <div class="book-actions">
             <button id="btn-export" class="mini"><span class="ico" data-ico="export"></span> 导出全书</button>
             <button id="btn-backup" class="mini"><span class="ico" data-ico="backup"></span> 备份整本</button>
@@ -291,6 +321,107 @@
       </div>
     </div>
   </div>
+
+  <section id="import-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="import-title">
+    <div class="run-card import-workflow">
+      <header class="import-head">
+        <h2 id="import-title">导入小说</h2>
+        <button id="import-close" class="icon-btn" title="关闭" aria-label="关闭">×</button>
+      </header>
+      <nav id="import-steps" class="segmented" aria-label="导入步骤">
+        <button data-step="upload">上传</button>
+        <button data-step="chapters">章节</button>
+        <button data-step="parse">解析</button>
+        <button data-step="results">结果</button>
+      </nav>
+
+      <section id="import-step-upload" class="import-step">
+        <label id="import-drop" class="import-drop" for="import-file">
+          <span class="ico" data-ico="import"></span>
+          <strong>选择或拖入 TXT 小说</strong>
+          <span>支持 UTF-8、GB18030 编码</span>
+        </label>
+        <input id="import-file" class="visually-hidden" type="file" accept=".txt,text/plain" />
+        <div class="row-end">
+          <button id="import-upload" class="primary">上传并识别章节</button>
+        </div>
+        <div id="import-upload-error" class="error"></div>
+      </section>
+
+      <section id="import-step-chapters" class="import-step hidden">
+        <div class="import-toolbar">
+          <label>从 <input id="import-range-start" type="number" min="1" value="1" /></label>
+          <label>到 <input id="import-range-end" type="number" min="1" value="1" /></label>
+          <button id="import-range-select" class="ghost">选择范围</button>
+          <span id="import-chapter-summary" class="muted"></span>
+        </div>
+        <div class="import-table-scroll">
+          <table class="import-chapter-table">
+            <colgroup><col class="import-select-col" /><col class="import-order-col" /><col /><col class="import-actions-col" /></colgroup>
+            <thead><tr><th>选</th><th>序</th><th>章节标题</th><th>操作</th></tr></thead>
+            <tbody id="import-chapter-body"></tbody>
+          </table>
+        </div>
+        <div class="row-end import-footer-actions">
+          <button id="import-delete-chapters" class="danger">删除导入任务</button>
+          <button id="import-save-chapters" class="ghost">保存章节</button>
+          <button id="import-start-parse" class="primary">保存并解析</button>
+        </div>
+        <div id="import-chapter-error" class="error"></div>
+      </section>
+
+      <section id="import-step-parse" class="import-step hidden">
+        <div class="import-phase-list">
+          <div class="import-phase" data-phase="worldview"><span class="import-phase-mark">1</span><span>世界观</span><span class="import-phase-status">等待</span></div>
+          <div class="import-phase" data-phase="system"><span class="import-phase-mark">2</span><span>力量体系</span><span class="import-phase-status">等待</span></div>
+          <div class="import-phase" data-phase="characters"><span class="import-phase-mark">3</span><span>人物卡</span><span class="import-phase-status">等待</span></div>
+          <div class="import-phase" data-phase="outlines"><span class="import-phase-mark">4</span><span>章节细纲</span><span class="import-phase-status">等待</span></div>
+        </div>
+        <progress id="import-progress" max="1" value="0"></progress>
+        <p id="import-parse-note" class="hint"></p>
+        <div class="row-end import-footer-actions">
+          <button id="import-delete-parse" class="danger">删除导入任务</button>
+          <button id="import-retry-parse" class="primary">开始解析</button>
+        </div>
+        <div id="import-parse-error" class="error"></div>
+      </section>
+
+      <section id="import-step-results" class="import-step hidden">
+        <div class="import-results">
+          <nav id="import-result-tabs" class="import-result-tabs" aria-label="解析结果">
+            <button data-result="worldview">世界观</button>
+            <button data-result="system">力量体系</button>
+            <button data-result="characters">人物卡</button>
+            <button data-result="outlines">章节细纲</button>
+          </nav>
+          <div class="import-result-panes">
+            <textarea id="import-result-worldview" data-result-pane="worldview" aria-label="世界观"></textarea>
+            <textarea id="import-result-system" class="hidden" data-result-pane="system" aria-label="力量体系"></textarea>
+            <textarea id="import-result-characters" class="hidden" data-result-pane="characters" aria-label="人物卡"></textarea>
+            <textarea id="import-result-outlines" class="hidden" data-result-pane="outlines" aria-label="章节细纲"></textarea>
+          </div>
+        </div>
+        <div class="import-project-fields">
+          <label>项目名称 <input id="import-project-name" type="text" placeholder="小说名称" /></label>
+          <label>父目录 <input id="import-parent-dir" type="text" value="~/Desktop" /></label>
+          <label>题材 <select id="import-genre"><option value="">不选题材</option></select></label>
+          <div class="import-source-field">
+            <span>原文章节</span>
+            <div id="import-source-mode" class="segmented" aria-label="原文章节模式">
+              <button data-source-mode="include">保留原稿</button>
+              <button data-source-mode="exclude">仅导入设定</button>
+            </div>
+          </div>
+        </div>
+        <div class="row-end import-footer-actions">
+          <button id="import-delete-results" class="danger">删除导入任务</button>
+          <button id="import-save-results" class="ghost">保存结果</button>
+          <button id="import-create-project" class="primary">创建项目</button>
+        </div>
+        <div id="import-result-error" class="error"></div>
+      </section>
+    </div>
+  </section>
 
   <!-- 命令面板 ⌘K -->
   <div id="cmdk" class="cmdk hidden">

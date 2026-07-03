@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from .fsutil import atomic_write_text
+
+
+_APPLIED_DEEPSEEK_KEY: str | None = None
+_DEEPSEEK_KEY_OWNER_ENV = "_LOOM_DEEPSEEK_KEY_OWNER"
+_APPLIED_OPENAI_COMPAT_KEY: str | None = None
+_OPENAI_COMPAT_KEY_OWNER_ENV = "_LOOM_OPENAI_COMPAT_KEY_OWNER"
 
 
 @dataclass
@@ -34,9 +41,121 @@ def find_project_root(start: Path | None = None) -> Path:
     raise FileNotFoundError(render("project_root_not_found"))
 
 
+def global_config_dir() -> Path:
+    """Return the per-user Loom config directory."""
+    return Path.home() / ".loom"
+
+
+def global_env_path() -> Path:
+    """Return the per-user Loom dotenv path."""
+    return global_config_dir() / ".env"
+
+
+def _read_env_var(path: Path, name: str) -> str | None:
+    if not path.exists():
+        return None
+    value = dotenv_values(path).get(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _replace_env_var(path: Path, name: str, value: str) -> None:
+    target_assignment = re.compile(rf"^(?:export\s+)?{re.escape(name)}\s*=")
+
+    def is_target_assignment(line: str) -> bool:
+        return bool(target_assignment.match(line.strip()))
+
+    lines: list[str] = []
+    if path.exists():
+        lines = [
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not is_target_assignment(line)
+        ]
+    lines.append(f"{name}={value}")
+    atomic_write_text(path, "\n".join(lines) + "\n")
+
+
+def _loom_owns_process_key(process_key: str) -> bool:
+    return (
+        bool(process_key)
+        and _APPLIED_DEEPSEEK_KEY is not None
+        and process_key == _APPLIED_DEEPSEEK_KEY
+        and os.environ.get(_DEEPSEEK_KEY_OWNER_ENV) == "1"
+    )
+
+
+def resolve_deepseek_key(project_root: Path) -> tuple[str | None, str]:
+    """Resolve the effective DeepSeek key without exposing it in API state."""
+    process_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if process_key and not _loom_owns_process_key(process_key):
+        return process_key, "process"
+
+    project_key = _read_env_var(project_root / ".env", "DEEPSEEK_API_KEY")
+    if project_key:
+        return project_key, "project"
+
+    global_key = _read_env_var(global_env_path(), "DEEPSEEK_API_KEY")
+    if global_key:
+        return global_key, "global"
+
+    return None, "none"
+
+
+def apply_deepseek_key(project_root: Path) -> str:
+    """Apply the resolved DeepSeek key to os.environ for existing backends."""
+    global _APPLIED_DEEPSEEK_KEY
+    key, source = resolve_deepseek_key(project_root)
+    if key:
+        os.environ["DEEPSEEK_API_KEY"] = key
+        if source == "process":
+            _APPLIED_DEEPSEEK_KEY = None
+            os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
+        else:
+            _APPLIED_DEEPSEEK_KEY = key
+            os.environ[_DEEPSEEK_KEY_OWNER_ENV] = "1"
+    else:
+        if _loom_owns_process_key(os.environ.get("DEEPSEEK_API_KEY", "").strip()):
+            os.environ.pop("DEEPSEEK_API_KEY", None)
+        os.environ.pop(_DEEPSEEK_KEY_OWNER_ENV, None)
+        _APPLIED_DEEPSEEK_KEY = None
+    return source
+
+
+def _loom_owns_openai_compat_key(process_key: str) -> bool:
+    return (
+        bool(process_key)
+        and _APPLIED_OPENAI_COMPAT_KEY is not None
+        and process_key == _APPLIED_OPENAI_COMPAT_KEY
+        and os.environ.get(_OPENAI_COMPAT_KEY_OWNER_ENV) == "1"
+    )
+
+
+def apply_openai_compat_key(project_root: Path) -> str:
+    """Apply this project's OpenAI-compatible provider key when present."""
+    global _APPLIED_OPENAI_COMPAT_KEY
+    name = "LOOM_OPENAI_COMPAT_KEY"
+    process_key = os.environ.get(name, "").strip()
+    project_key = _read_env_var(project_root / ".env", name)
+    if project_key:
+        os.environ[name] = project_key
+        _APPLIED_OPENAI_COMPAT_KEY = project_key
+        os.environ[_OPENAI_COMPAT_KEY_OWNER_ENV] = "1"
+        return "project"
+    if _loom_owns_openai_compat_key(process_key):
+        os.environ.pop(name, None)
+        process_key = ""
+    os.environ.pop(_OPENAI_COMPAT_KEY_OWNER_ENV, None)
+    _APPLIED_OPENAI_COMPAT_KEY = None
+    return "process" if process_key else "none"
+
+
 def load_config(project_root: Path) -> Config:
-    # .env 从项目根读(里面放 DEEPSEEK_API_KEY);override=True 保证切换项目时当前项目的 key 生效
-    load_dotenv(project_root / ".env", override=True)
+    # Explicitly apply API keys so switching projects does not leak a previous project's key.
+    apply_deepseek_key(project_root)
+    apply_openai_compat_key(project_root)
     try:
         data = tomllib.loads((project_root / "loom.toml").read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
@@ -59,33 +178,45 @@ def load_config(project_root: Path) -> Config:
 def _set_env_var(project_root: Path, name: str, value: str) -> None:
     """把 name=value 写进项目根的 .env,只替换 name 那一行——多个 key(DeepSeek / 自定义供应商)各占一行,互不覆盖。"""
     env = project_root / ".env"
-    lines = []
-    if env.exists():
-        lines = [l for l in env.read_text(encoding="utf-8").splitlines()
-                 if not l.strip().startswith(f"{name}=") and l.strip() != name]
-    lines.append(f"{name}={value}")
-    atomic_write_text(env, "\n".join(lines) + "\n")
+    _replace_env_var(env, name, value)
     if os.name == "posix":
         env.chmod(0o600)  # .env 存 API key:只留属主读写(Windows 无此权限位,跳过)
 
 
 def _env_var_set(project_root: Path, name: str) -> bool:
-    env = project_root / ".env"
-    if not env.exists():
-        return False
-    for line in env.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith(f"{name}="):
-            return bool(line.split("=", 1)[1].strip())
-    return False
+    return _read_env_var(project_root / ".env", name) is not None
 
 
 def set_env_key(project_root: Path, key: str) -> None:
     """把 DEEPSEEK_API_KEY 写进项目根的 .env(替换已有行)。"""
+    set_project_env_key(project_root, key)
+
+
+def set_project_env_key(project_root: Path, key: str) -> None:
+    """Write DEEPSEEK_API_KEY into the project .env file."""
     _set_env_var(project_root, "DEEPSEEK_API_KEY", key)
 
 
 def key_is_set(project_root: Path) -> bool:
-    return _env_var_set(project_root, "DEEPSEEK_API_KEY")
+    return bool(key_status(project_root)["effective"])
+
+
+def set_global_env_key(key: str) -> None:
+    """Write DEEPSEEK_API_KEY into the per-user Loom .env file."""
+    global_config_dir().mkdir(parents=True, exist_ok=True)
+    _replace_env_var(global_env_path(), "DEEPSEEK_API_KEY", key)
+
+
+def key_status(project_root: Path) -> dict:
+    """Return key presence and effective source without returning the secret."""
+    _, source = resolve_deepseek_key(project_root)
+    return {
+        "effective": source != "none",
+        "source": source,
+        "process": source == "process",
+        "project": _read_env_var(project_root / ".env", "DEEPSEEK_API_KEY") is not None,
+        "global": _read_env_var(global_env_path(), "DEEPSEEK_API_KEY") is not None,
+    }
 
 
 def set_openai_compat_key(project_root: Path, key: str) -> None:
