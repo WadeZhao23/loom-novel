@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import os
 import re
 from datetime import datetime
@@ -18,11 +19,19 @@ _KEEP = 30  # 每章最多保留的历史份数
 _CHAP_RE = re.compile(r"^正文/(第.+?章)\.md$")
 
 
+_TMP_SEQ = itertools.count()  # 进程内递增序号:tmp 名唯一,防同进程并发写同一文件时共用 tmp 互相拆台
+
+
 def atomic_write_text(path: Path | str, content: str, encoding: str = "utf-8") -> None:
-    """原子写文本:写 .tmp → fsync → os.replace。失败不会留下半截目标文件。"""
+    """原子写文本:写 .tmp → fsync → os.replace。失败不会留下半截目标文件。
+
+    tmp 名带 pid + 进程内序号:同一文件被并发写(如自动保存 debounce 撞上 learn 前的
+    显式落盘)时各写各的 tmp,谁后 replace 谁生效,绝不再出现「tmp 被对方替换走 →
+    FileNotFoundError → 这次保存丢失」。
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}.{next(_TMP_SEQ)}")
     try:
         with open(tmp, "w", encoding=encoding) as f:
             f.write(content)

@@ -164,6 +164,8 @@ function bind() {
   $("learn-keep").onclick = () => { $("learn-overlay").classList.add("hidden"); openFile("外置大脑/写作指纹.md", true, null); };
   $("learn-revert").onclick = revertLearn;
   $("run-close").onclick = closeRun;
+  $("run-minimize").onclick = minimizeRun;
+  $("rs-expand").onclick = () => { if (_stripDone != null) { hideStrip(); closeRun(); } else expandRun(); };
 
   // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
   $("editor").addEventListener("input", () => { updateWordCount(); markDirty(); if (_searchOn) runSearch(); noteTyping(); });
@@ -346,6 +348,50 @@ function render() {
   fillList("brain", DATA.brain, true);
   fillSkills(DATA.skills);
   fillAgents(DATA.agents);
+  renderJourney();
+}
+
+// ---------- 起步旅程卡(五步向导的书内形态):四步闭环,全完成自动收起 ----------
+function renderJourney() {
+  const card = $("journey-card");
+  if (!DATA) { card.classList.add("hidden"); return; }
+  const dKey = "loom_journey_dismiss:" + DATA.root;
+  if (localStorage.getItem(dKey) === "1") { card.classList.add("hidden"); return; }
+  const be = DATA.backend || {};
+  const spec = providerSpec(be.provider) || {};
+  const keyed = spec.kind === "cli" ||
+    (be.provider === "openai_compat" ? !!be.openai_compat_key_set : !!be.key_set);
+  const steps = [
+    { label: "接入模型(填 key 或用订阅)", done: keyed, run: openSettings },
+    { label: "喂样本,让它懂你(seed)", done: DATA.fingerprint_source !== "default", run: openSeed },
+    { label: "织第一章", done: (DATA.chapters || []).length > 0,
+      run: () => writeChapter(DATA.next_chapter, false) },
+    { label: "手改后 learn(越写越像你)", done: (DATA.chapters || []).some((c) => c.learned),
+      run: () => { const c = (DATA.chapters || [])[0];
+        if (c) openFile(`正文/第${c.n}章.md`, true, c.n); else toast("先织第一章"); } },
+  ];
+  if (steps.every((s) => s.done)) { localStorage.setItem(dKey, "1"); card.classList.add("hidden"); return; }
+  const n = steps.filter((s) => s.done).length;
+  card.innerHTML = "";
+  const head = document.createElement("div"); head.className = "jc-head";
+  const t = document.createElement("span"); t.textContent = `起步 · ${n}/4`; head.appendChild(t);
+  const x = document.createElement("button"); x.className = "jc-dismiss";
+  x.title = "不再显示"; x.textContent = "×";
+  x.onclick = () => { localStorage.setItem(dKey, "1"); card.classList.add("hidden"); };
+  head.appendChild(x); card.appendChild(head);
+  let nextMarked = false;
+  steps.forEach((s) => {
+    const el = document.createElement("div");
+    const isNext = !s.done && !nextMarked; if (isNext) nextMarked = true;
+    el.className = "jc-step" + (s.done ? " done" : isNext ? " next" : "");
+    const mark = document.createElement("span"); mark.className = "jc-mark";
+    mark.textContent = s.done ? "✓" : "○";
+    const lab = document.createElement("span"); lab.textContent = s.label;
+    el.appendChild(mark); el.appendChild(lab);
+    el.onclick = s.run;
+    card.appendChild(el);
+  });
+  card.classList.remove("hidden");
 }
 
 // 5 个 agent 不是「提示词文件」,是流水线上五个有人设的角色。点卡片 → 看整条流水线(不贴 Markdown)。
@@ -660,13 +706,19 @@ function clearDirty() {
   _dirty = false;
   document.querySelector(".path").classList.remove("dirty");
 }
+let _saving = null;   // 串行化自动保存:debounce 与 learn 前的显式落盘可能撞上,后到的等前一个写完
 async function autosave() {
   if (!CUR || !CUR.editable || !_dirty) return;
+  if (_saving) { await _saving; if (!_dirty) return; }   // 等在飞的那次;它已把最新内容存了就不重复写
   const rel = CUR.rel, content = $("editor").value;
-  try {
-    await jreq("PUT", "/api/file", { root: DATA.root, rel, content });
-    if (CUR && CUR.rel === rel) { clearDirty(); $("status-note").innerHTML = "已自动保存 " + icon("check"); }
-  } catch (e) { $("status-note").textContent = "自动保存失败:" + e.message; }
+  _saving = (async () => {
+    try {
+      await jreq("PUT", "/api/file", { root: DATA.root, rel, content });
+      if (CUR && CUR.rel === rel) { clearDirty(); $("status-note").innerHTML = "已自动保存 " + icon("check"); }
+    } catch (e) { $("status-note").textContent = "自动保存失败:" + e.message; }
+    finally { _saving = null; }
+  })();
+  await _saving;
 }
 
 // ---------- 本章版本历史(覆盖前自动留快照,可回滚) ----------
@@ -785,6 +837,14 @@ function extractRecap(kataGang, n) {
 function showLearnChanges(changes, recap, supp) {
   const box = $("learn-changes"); box.innerHTML = "";
   const add = changes.added || [], rem = changes.removed || [];
+  // 盖印仪式:摘要一行 + 朱印落下(一次性动效,reduced-motion 下静止)
+  const anchors = add.filter((l) => l.trim().startsWith(">")).length;
+  $("learn-summary").innerHTML = (add.length || rem.length)
+    ? `学进 <b>${add.length}</b> 条` + (anchors ? `(含你的 anchor 例句 ${anchors} 条)` : "") +
+      (rem.length ? ` · 拆掉 ${rem.length} 条` : "")
+    : "指纹这次没有明显变化。";
+  const st = $("learn-stamp");
+  st.style.animation = "none"; void st.offsetWidth; st.style.animation = "";
   if (!add.length && !rem.length) {
     box.innerHTML = '<div class="hint">这次没有明显的规则变化。</div>';
   } else {
@@ -959,6 +1019,8 @@ async function writeChapter(n, force) {
     flashSetting(!be.base_url ? "base-url" : "api-key"); return;
   }
   _wroteChapter = null;
+  _runMinimized = false; _streamChars = 0; _stripDone = null; _stripErr = null;
+  hideStrip(); $("run-strip").classList.remove("err");
   $("run-title").textContent = `正在写第 ${n} 章…`;
   $("agent-pills").innerHTML = "";
   $("run-log").innerHTML = "";
@@ -1054,6 +1116,47 @@ function handleEvent(ev) {
   } else if (ev.type === "error") {
     logRun(ev.message, "err", "cross");
   }
+  updateStrip(ev);
+}
+
+// ---------- 织章状态条:弹窗收起后,织机在底部继续响 ----------
+let _runMinimized = false, _streamChars = 0, _stripDone = null, _stripErr = null;
+function minimizeRun() { _runMinimized = true; $("run-overlay").classList.add("hidden"); renderStrip(); }
+function expandRun() { _runMinimized = false; hideStrip(); $("run-overlay").classList.remove("hidden"); }
+function hideStrip() { $("run-strip").classList.add("hidden"); }
+function updateStrip(ev) {
+  if (ev.type === "agent_start" || ev.type === "gate_revise") _streamChars = 0;
+  else if (ev.type === "agent_chunk") _streamChars += (ev.delta || "").length;
+  else if (ev.type === "chapter_done") _stripDone = ev.chapter;
+  else if (ev.type === "error") _stripErr = ev.message || "出错";
+  if (!_runMinimized) return;
+  renderStrip();
+  if (ev.type === "chapter_done") toast(`第${ev.chapter}章写完 · 墨落定`);
+  else if (ev.type === "error") toast(ev.message, true);
+}
+function renderStrip() {
+  const strip = $("run-strip");
+  strip.classList.remove("hidden");
+  strip.classList.toggle("err", !!_stripErr);
+  $("rs-label").textContent = _stripErr ? "织章出错" :
+    (_stripDone != null ? `第${_stripDone}章写完` : $("run-title").textContent || "织章中");
+  const pills = [...document.querySelectorAll("#agent-pills .pill")];
+  const box = $("rs-pills"); box.innerHTML = "";
+  pills.forEach((p, i) => {
+    if (i > 0) {
+      const c = document.createElement("span");
+      c.className = "rs-conn" + (pills[i - 1].classList.contains("done") ? " done" : "");
+      box.appendChild(c);
+    }
+    const s = document.createElement("span");
+    s.className = "rs-role" + (p.classList.contains("done") ? " done"
+      : p.classList.contains("running") ? " running" : "");
+    s.textContent = p.textContent;
+    box.appendChild(s);
+  });
+  $("rs-count").textContent =
+    (_stripDone == null && !_stripErr && _streamChars > 0) ? `已织 ${_streamChars.toLocaleString()} 字` : "";
+  $("rs-expand").textContent = _stripDone != null ? "去看正文" : "展开";
 }
 function logRun(text, cls, ic) {
   const div = document.createElement("div");
@@ -1071,6 +1174,7 @@ function showRunForce(n) {
 }
 async function closeRun() {
   $("run-overlay").classList.add("hidden");
+  hideStrip(); _runMinimized = false;
   await refresh();
   if (_wroteChapter != null) {
     await openFile(`正文/第${_wroteChapter}章.md`, true, _wroteChapter);
@@ -1372,7 +1476,7 @@ function closeTopOverlay() {
   const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
-      if (id === "run-overlay" && $("run-close").classList.contains("hidden")) return true; // 写作中,别误关
+      if (id === "run-overlay" && $("run-close").classList.contains("hidden")) { minimizeRun(); return true; } // 写作中 Esc=收起后台织,不误关
       $(id).classList.add("hidden");
       return true;
     }

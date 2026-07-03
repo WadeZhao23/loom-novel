@@ -80,6 +80,7 @@
 
     <main class="main">
       <aside class="sidebar">
+        <div id="journey-card" class="journey-card hidden"></div>
         <div class="side-section">
           <div class="side-head">
             <span><span class="ico" data-ico="chapters"></span> 正文</span>
@@ -156,6 +157,7 @@
       <div id="run-log" class="run-log"></div>
       <div id="run-stream" class="run-stream"></div>
       <div class="run-actions">
+        <button id="run-minimize" class="ghost">收起,后台织</button>
         <button id="run-force" class="danger hidden">覆盖重写</button>
         <button id="run-close" class="ghost hidden">完成,去看正文</button>
       </div>
@@ -190,7 +192,8 @@
   <!-- learn 结果:看清这次学到了什么,可一键撤销 -->
   <div id="learn-overlay" class="overlay hidden">
     <div class="run-card">
-      <h3>这次 learn 学到了什么</h3>
+      <h3><span id="learn-stamp" class="seal-stamp" aria-hidden="true">学</span>这次 learn 学到了什么</h3>
+      <div id="learn-summary" class="learn-sum"></div>
       <p class="hint">下面是写作指纹这次的变化:<b>朱底=新学进的</b>(像印上了你的痕迹);<b>划线=拆掉的</b>(这条原来在你的指纹里、这次被抹掉了)。若有"形对神错",或删掉的是你不想丢的嗓音,点「撤销这次 learn」一键还原。</p>
       <div id="learn-changes" class="learn-changes"></div>
       <div id="learn-recap-wrap" class="hidden">
@@ -323,6 +326,14 @@
   <div id="seal-bar" class="seal-bar">
     <button id="seal-rewrite" class="sb-rewrite"><span class="ico" data-ico="rewrite"></span> 重写这段</button>
     <button id="seal-copy">复制</button>
+  </div>
+
+  <!-- 织章状态条:写章弹窗收起后,织机在底部继续响着 -->
+  <div id="run-strip" class="run-strip hidden">
+    <span id="rs-label" class="rs-label"></span>
+    <span id="rs-pills" class="rs-pills"></span>
+    <span id="rs-count" class="rs-count"></span>
+    <button id="rs-expand" class="mini ghost">展开</button>
   </div>
 
   <div id="toast" class="toast hidden"></div>
