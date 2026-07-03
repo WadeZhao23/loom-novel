@@ -5,7 +5,10 @@
   风格相似度(生成稿 vs 作者真稿的纯字符串统计距离,「越写越像你」的回归度量)。
 - **LLM-judge grader**(需后端):复用 loom.gates 的复审 critic(CRITIC_质检 / CRITIC_去AI味)。
 
-loom.* 任一不可用时,grader 优雅降级为「跳过」(score=0、gating=False、不拖垮整跑)。
+对 loom 的所有复用只走公共门面 loom.evalapi(evals ↔ loom 的唯一接缝)。
+门面 import 失败**不降级**:被测物坏了,评测就该当场崩、让 `--gate` 变红——
+门禁在被测物坏掉时变绿是最危险的失败模式。只有 LLM 后端**调用**失败才降级跳过
+(那是运行时环境问题,不是引擎坏了,且 LLM grader 本就不进 CI 门禁)。
 """
 
 from __future__ import annotations
@@ -13,6 +16,14 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+
+from loom.evalapi import (
+    CRITIC_去AI味,
+    CRITIC_质检,
+    detect_aitell,
+    parse_critic_verdict,
+    segment_sentences,
+)
 
 
 @dataclass
@@ -59,13 +70,8 @@ def grade_length(text: str, target_chars: int, tol: float = 0.5, weight: float =
 
 def grade_aitell(text: str, anchors: list[str] | None = None,
                  max_hits: int = 0, weight: float = 0.30) -> GraderResult:
-    """复用 loom.aitell.detect:数「不是A而是B」这类 AI 翻转句。命中越少越好。"""
-    try:
-        from loom.aitell import detect
-    except Exception as e:  # noqa: BLE001 — loom 不可用时降级跳过
-        return GraderResult("去AI味·确定性", 0.0, True, weight, gating=False,
-                            detail=f"(跳过:loom.aitell 不可用 — {e})")
-    hits = detect(text, anchors or [])
+    """复用 loom.aitell.detect(经 evalapi):数「不是A而是B」这类 AI 翻转句。命中越少越好。"""
+    hits = detect_aitell(text, anchors or [])
     n = len(hits)
     return GraderResult("去AI味·确定性", round(1.0 / (1.0 + n), 3), n <= max_hits, weight,
                         detail=f"命中 {n} 处 AI 对比句式(阈值 ≤{max_hits})",
@@ -105,14 +111,9 @@ _FUNC_WORDS = (
 
 
 def _sentences(text: str) -> list[str]:
-    """句切:直接复用 loom.fingerprint._segment(引号感知版),与 learn 的对齐口径一致;
-    loom 不可用时退化到裸句末切分(grader 只观测,不因缺 loom 崩掉整跑)。"""
+    """句切:复用 evalapi.segment_sentences(fingerprint 的引号感知句切),与 learn 的对齐口径一致。"""
     body = _H1.sub("", text, count=1)
-    try:
-        from loom.fingerprint import _segment
-        return _segment(body)
-    except Exception:
-        return [s.strip() for s in re.split(r"(?<=[。!?!?…\n])", body) if s.strip()]
+    return segment_sentences(body)
 
 
 def _len_dist(sents: list[str]) -> list[float]:
@@ -202,18 +203,14 @@ def grade_style_ab(text_neutral: str, text_learned: str, author_ref: str,
 # ───────────────────────────── LLM-judge grader ─────────────────────────────
 
 def grade_quality_llm(text: str, setting: str, backend, weight: float = 0.20) -> GraderResult:
-    """复用 loom.gates 的「质检」复审 critic 当 LLM-judge:挑 OOC / 设定漂移 / 断钩子 / 无爽点 / 信息越界。"""
-    try:
-        from loom.gates import CRITIC_质检, _parse_verdict
-    except Exception as e:  # noqa: BLE001
-        return GraderResult("质检·LLM", 0.0, True, weight, gating=False, detail=f"(跳过 — {e})")
+    """复用 loom.gates 的「质检」复审 critic(经 evalapi)当 LLM-judge:挑 OOC / 设定漂移 / 断钩子 / 无爽点 / 信息越界。"""
     user = (f"## 设定与标准\n{setting}\n\n## 待复审的本章稿\n{text}\n\n"
             "## 你的任务\n按上面的标准,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。")
     try:
         verdict = backend.complete(CRITIC_质检, user, max_chars=600)
     except Exception as e:  # noqa: BLE001 — 后端报错不拖垮整跑
         return GraderResult("质检·LLM", 0.0, True, weight, gating=False, detail=f"(后端调用失败 — {e})")
-    issues = _parse_verdict(verdict)
+    issues = parse_critic_verdict(verdict)
     n = len(issues)
     return GraderResult("质检·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,
                         detail=f"复审挑出 {n} 处硬伤",
@@ -221,18 +218,14 @@ def grade_quality_llm(text: str, setting: str, backend, weight: float = 0.20) ->
 
 
 def grade_deslop_llm(text: str, fingerprint: str, backend, weight: float = 0.10) -> GraderResult:
-    """复用「去AI味」复审 critic:LLM 视角下的 AI 腔命中(与确定性 aitell 互补)。"""
-    try:
-        from loom.gates import CRITIC_去AI味, _parse_verdict
-    except Exception as e:  # noqa: BLE001
-        return GraderResult("去AI味·LLM", 0.0, True, weight, gating=False, detail=f"(跳过 — {e})")
+    """复用「去AI味」复审 critic(经 evalapi):LLM 视角下的 AI 腔命中(与确定性 aitell 互补)。"""
     user = (f"## 写作指纹(命中前先看这个豁免作者签名句)\n{fingerprint}\n\n## 待审读的本章终稿\n{text}\n\n"
             "## 你的任务\n按《去AI味》黑名单挑具体命中,严格按格式输出;无命中只回一行「通过」。")
     try:
         verdict = backend.complete(CRITIC_去AI味, user, max_chars=600)
     except Exception as e:  # noqa: BLE001
         return GraderResult("去AI味·LLM", 0.0, True, weight, gating=False, detail=f"(后端调用失败 — {e})")
-    issues = _parse_verdict(verdict)
+    issues = parse_critic_verdict(verdict)
     n = len(issues)
     return GraderResult("去AI味·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,
                         detail=f"复审命中 {n} 处 AI 腔",
