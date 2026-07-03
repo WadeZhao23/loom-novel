@@ -73,6 +73,8 @@ def _render(event: dict) -> None:
         console.print(f"[bold]终稿已落:[/bold] {event['path']}")
     elif t in ("seed_done", "learn_done"):
         console.print(f"[green]✓ 写作指纹已更新:[/green] {event['path']}")
+    elif t == "outline_done":
+        console.print(f"[green]✓ 第{event['chapter']}章细纲已生成[/green]")
 
 
 @app.command(help="离线铺一个写小说项目的骨架。")

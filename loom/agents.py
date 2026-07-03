@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import gates, paths
+from . import events, gates, paths
 from .backends import Backend, LoomBackendError
 from .chaptertext import compose, strip_title
 from .config import Config
@@ -70,7 +70,7 @@ def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Pro
     """留痕落盘外的 .审稿留痕/(人可读可改,绝不被任何 learn/写作指纹流程读取)。"""
     path = paths.review_note_path(project_root, chapter_n)
     atomic_write_text(path, note + "\n")
-    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+    progress(events.edit_note(chapter_n, path))
 
 
 def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
@@ -87,7 +87,7 @@ def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
         lines.append(f"- {i.kind}:{i.desc}{ev}")
     with path.open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+    progress(events.edit_note(chapter_n, path))
 
 
 def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, progress: Progress) -> None:
@@ -103,7 +103,7 @@ def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, p
     with path.open("a", encoding="utf-8") as f:
         f.write(f"\n## 篇幅提醒(非阻断,供你定夺)\n"
                 f"- 本章 {n} 字,超出目标 {target} 字较多,可能注水——建议手删或重写\n")
-    progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
+    progress(events.edit_note(chapter_n, path))
 
 
 def _flag_stale_foreshadow(project_root: Path, chapter_n: int, config: Config, progress: Progress) -> None:
@@ -145,7 +145,7 @@ def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
             clean = st["buf"][:idx]
         new = clean[st["emitted"]:]
         if new:
-            progress({"type": "agent_chunk", "role": "编辑", "delta": new})
+            progress(events.agent_chunk("编辑", new))
             st["emitted"] += len(new)
         if idx != -1:
             st["cut"] = True
@@ -210,7 +210,7 @@ def _read_files(project_root: Path, rels: list[str], progress: Progress) -> str:
         elif p.exists():
             blocks.append(f"【{rel}】\n{p.read_text(encoding='utf-8').strip()}")
         else:
-            progress({"type": "warn", "message": f"跳过缺失文件 {rel}"})
+            progress(events.warn(f"跳过缺失文件 {rel}"))
     return "\n\n".join(blocks)
 
 
@@ -332,9 +332,9 @@ def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
         if picked:
             blocks.append("\n\n".join(picked))
         else:
-            progress({"type": "warn", "message":
-                      "世界观里没识别到硬设定小节(如「## 力量体系」「## 地理 / 势力」),"
-                      "等级/专名这次没有逐字保护——请检查标题写法"})
+            progress(events.warn(
+                "世界观里没识别到硬设定小节(如「## 力量体系」「## 地理 / 势力」),"
+                "等级/专名这次没有逐字保护——请检查标题写法"))
     roster = _name_roster(project_root / paths.CHARS_REL)
     if roster:
         blocks.append("【人物专名册(照此写,别改名/别另造名)】\n" + roster)
@@ -431,7 +431,7 @@ def run_pipeline(
     """
     from . import ledger
 
-    progress({"type": "pipeline_start", "chapter": chapter_n, "roles": PIPELINE})
+    progress(events.pipeline_start(chapter_n, PIPELINE))
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)  # 硬设定逐字块,进大纲师/写手 prompt
 
@@ -450,13 +450,13 @@ def run_pipeline(
     if resume:
         start_idx, workspace = ledger.resume_point(project_root, chapter_n, _upstream_of)
         for role in PIPELINE[:start_idx]:
-            progress({"type": "agent_skip", "role": role, "reason": "已完成且上游未变"})
+            progress(events.agent_skip(role, "已完成且上游未变"))
     else:
         start_idx, workspace = 0, []
 
     for role in PIPELINE[start_idx:]:
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
-        progress({"type": "agent_start", "role": role})
+        progress(events.agent_start(role))
         up_sha = _sig(knowledge, workspace)  # 记录入此工序时的上游签名(供下次续跑比对)
 
         max_chars = _SHORT.get(role, config.chapter_chars)
@@ -464,14 +464,14 @@ def run_pipeline(
         if outline_path and outline_path.is_file() and outline_path.read_text(encoding="utf-8").strip():
             # 已有细纲(多半你手改过)→ 直接用它,不再调大纲师;改它/清空它即重新生成(WYSIWYG)。
             output = outline_path.read_text(encoding="utf-8").strip()
-            progress({"type": "agent_chunk", "role": role, "delta": output})
-            progress({"type": "info", "message": f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"})
+            progress(events.agent_chunk(role, output))
+            progress(events.info(f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"))
         else:
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                              target_chars=max_chars)
             # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
-                        else (lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d})))
+                        else (lambda d, r=role: progress(events.agent_chunk(r, d))))
             output = backend.complete(agent.system_prompt, user_prompt, max_chars=max_chars, on_chunk=chunk_cb)
             if outline_path:  # 大纲师首次生成 → 落一份可看可改的细纲,之后就读这份
                 atomic_write_text(outline_path, output.strip() + "\n")
@@ -509,7 +509,7 @@ def run_pipeline(
                                    code="model_output_invalid")
         ledger.record_step(project_root, chapter_n, role, output, up_sha)  # 即时落盘=断点可续
         workspace.append((agent.produces, output))
-        progress({"type": "agent_done", "role": role, "produces": agent.produces})
+        progress(events.agent_done(role, agent.produces))
         if slow:
             time.sleep(slow)
 
@@ -526,15 +526,8 @@ def run_pipeline(
     ledger.record_snapshot(project_root, chapter_n, final)  # 与 正文/.原稿 同口径(都含 H1),不会误判 drifted
     _scan_sensitive(project_root, chapter_n, final_body, progress)  # 违禁词扫正文体即可(标题不必扫)
     _flag_overlong(project_root, chapter_n, final_body, config.chapter_chars, progress)  # 超长只留痕,不拦稿
-    progress({
-        "type": "chapter_done",
-        "chapter": chapter_n,
-        "path": str(path),
-        "title": title,
-        "chars": len(final_body),
-        "preview": final_body[:300],
-        "text": final,
-    })
+    progress(events.chapter_done(chapter=chapter_n, path=path, title=title,
+                                  chars=len(final_body), preview=final_body[:300], text=final))
     return path, final
 
 
@@ -576,8 +569,8 @@ def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Pro
     except Exception:
         return
     if hits:
-        progress({"type": "sensitive", "chapter": chapter_n,
-                  "count": sum(h["count"] for h in hits), "hits": hits[:20]})
+        progress(events.sensitive(chapter=chapter_n,
+                                  count=sum(h["count"] for h in hits), hits=hits[:20]))
 
 
 def _save_chapter(project_root: Path, chapter_n: int, final: str) -> Path:
@@ -602,20 +595,20 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     outline = ""
     for role in ("设定师", "大纲师"):
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
-        progress({"type": "agent_start", "role": role})
+        progress(events.agent_start(role))
         max_chars = _SHORT.get(role, config.chapter_chars)  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                          target_chars=max_chars)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
-            on_chunk=lambda d, r=role: progress({"type": "agent_chunk", "role": r, "delta": d}),
+            on_chunk=lambda d, r=role: progress(events.agent_chunk(r, d)),
         )
         workspace.append((agent.produces, out))
-        progress({"type": "agent_done", "role": role, "produces": agent.produces})
+        progress(events.agent_done(role, agent.produces))
         outline = out
     if not outline.strip():  # 模型这次没出细纲 → 不拿空覆盖你原来的细纲
         raise LoomBackendError(render("model_output_invalid", detail="细纲:模型这次返回空"),
                                code="model_output_invalid")
     atomic_write_text(_outline_path(project_root, chapter_n), outline.strip() + "\n")
-    progress({"type": "outline_done", "chapter": chapter_n})
+    progress(events.outline_done(chapter_n))
     return outline.strip()

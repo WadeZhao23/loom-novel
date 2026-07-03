@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text
 from .paths import CARD_REL, chapter_path
@@ -56,23 +57,23 @@ def recap_chapter(project_root: Path, chapter_n: int,
     if not any(_ch_line(chapter_n).match(ln) for ln in card.splitlines()):
         return None
     if _already_recapped(card, chapter_n):
-        progress({"type": "recap_skip", "chapter": chapter_n})
+        progress(events.recap_skip(chapter_n))
         return None
 
     final = final_path.read_text(encoding="utf-8").strip()
-    progress({"type": "info", "message": f"正在为第 {chapter_n} 章补写后摘要…"})
+    progress(events.info(f"正在为第 {chapter_n} 章补写后摘要…"))
     raw = backend.complete(_RECAP_SYSTEM, f"第 {chapter_n} 章定稿正文:\n\n{final}", max_chars=600)
     if not raw.strip():  # 模型没产出 → 干净跳过(附赠功能,绝不阻断 learn)
-        progress({"type": "recap_skip", "chapter": chapter_n})
+        progress(events.recap_skip(chapter_n))
         return None
     block = _format_block(chapter_n, raw)
 
     new_card = _append_recap(card, chapter_n, block)
     if new_card is None:           # 没找到该章规划行 / 已存在
-        progress({"type": "recap_skip", "chapter": chapter_n})
+        progress(events.recap_skip(chapter_n))
         return None
     atomic_write_text(card_path, new_card)
-    progress({"type": "recap_done", "chapter": chapter_n, "path": str(card_path)})
+    progress(events.recap_done(chapter_n, card_path))
     return card_path
 
 

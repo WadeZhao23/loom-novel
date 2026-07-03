@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
@@ -96,7 +97,7 @@ def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progr
     cfg = load_config(project_root)
     title = (cfg.title or "").strip() or "（未命名）"
     genre = _genre(project_root)
-    progress({"type": "info", "message": "AI 正在起草 世界观 / 人物卡 / 卡章纲…"})
+    progress(events.info("AI 正在起草 世界观 / 人物卡 / 卡章纲…"))
     user = (
         f"书名:{title}\n"
         f"题材:{genre or '（未指定，自己挑一个适合的网文题材）'}\n"
@@ -119,5 +120,5 @@ def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progr
         header = f"# {key}\n\n> AI 起草的初稿——改成你自己的。每条都可删可改。\n\n"
         atomic_write_text(path, header + body.strip() + "\n")
         written[key] = body
-    progress({"type": "draft_done", "written": list(written.keys()), "skipped": skipped})
+    progress(events.draft_done(list(written.keys()), skipped))
     return {"written": written, "skipped": skipped}

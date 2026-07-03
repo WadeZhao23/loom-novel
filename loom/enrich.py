@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text
 from .paths import CHARS_REL, WORLD_REL, chapter_path
@@ -104,17 +105,17 @@ def enrich_chapter(project_root: Path, chapter_n: int,
     c_done = bool(chars) and _already_supplemented(chars, chapter_n)
     # 两边都没处可补(文件缺失)或都已补过这章 → 跳过,连一次 LLM 都不浪费
     if (not world_path.exists() or w_done) and (not chars_path.exists() or c_done):
-        progress({"type": "enrich_skip", "chapter": chapter_n})
+        progress(events.enrich_skip(chapter_n))
         return None
 
     final = final_path.read_text(encoding="utf-8").strip()
-    progress({"type": "info", "message": f"正在看第 {chapter_n} 章给世界观/人物卡补设定…"})
+    progress(events.info(f"正在看第 {chapter_n} 章给世界观/人物卡补设定…"))
     user = (f"## 现有世界观\n{world.strip() or '(还没有)'}\n\n"
             f"## 现有人物卡\n{chars.strip() or '(还没有)'}\n\n"
             f"## 第 {chapter_n} 章定稿正文\n{final}")
     raw = backend.complete(_ENRICH_SYSTEM, user, max_chars=700)
     if not raw.strip():  # 模型没产出 → 干净跳过(附赠功能,绝不阻断、也不吓人)
-        progress({"type": "enrich_skip", "chapter": chapter_n})
+        progress(events.enrich_skip(chapter_n))
         return None
     world_body, chars_body = _parse_sections(raw)
 
@@ -131,10 +132,9 @@ def enrich_chapter(project_root: Path, chapter_n: int,
             result["人物卡"] = chars_body
 
     if result["世界观"] or result["人物卡"]:
-        progress({"type": "enrich_done", "chapter": chapter_n,
-                  "世界观": result["世界观"], "人物卡": result["人物卡"]})
+        progress(events.enrich_done(chapter_n, result["世界观"], result["人物卡"]))
     else:
-        progress({"type": "enrich_skip", "chapter": chapter_n})
+        progress(events.enrich_skip(chapter_n))
     return result
 
 

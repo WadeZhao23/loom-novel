@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .backends import Backend, LoomBackendError
 from .chaptertext import strip_title
 from .errors import render
@@ -93,7 +94,7 @@ def neutral_default() -> str:
 def seed_from_samples(project_root: Path, samples: str, backend: Backend, progress: Progress = _noop) -> Path:
     if not samples.strip():
         raise LoomBackendError("样本是空的。给我一段你真写过的文字(越像你平时越好)。")
-    progress({"type": "info", "message": "正在从你的样本里提炼写作指纹…"})
+    progress(events.info("正在从你的样本里提炼写作指纹…"))
     user = (
         f"这是我真写过的文字样本:\n\n{samples.strip()}\n\n"
         f"请按下面的结构输出我的写作指纹:\n\n{_FORMAT_HINT}"
@@ -102,7 +103,7 @@ def seed_from_samples(project_root: Path, samples: str, backend: Backend, progre
     path = project_root / FINGERPRINT_REL
     guard_write(path, fp, FINGERPRINT)   # 空/残缺不覆盖:宁可不种,也不拿一坨空的盖掉默认指纹
     set_fingerprint_source(project_root, "sample")
-    progress({"type": "seed_done", "path": str(path), "source": "sample"})
+    progress(events.seed_done(path, "sample"))
     return path
 
 
@@ -115,7 +116,7 @@ def seed_from_reference(project_root: Path, reference_text: str, backend: Backen
     """
     if not reference_text.strip():
         raise LoomBackendError("范文是空的。给我一段你欣赏的作者的原文(当起点用)。")
-    progress({"type": "info", "message": "正在从这段范文里蒸出可作起点的写作指纹…"})
+    progress(events.info("正在从这段范文里蒸出可作起点的写作指纹…"))
     user = (
         f"这是我欣赏的作者的原文范文,请蒸出可作为起点的写作指纹:\n\n{reference_text.strip()}\n\n"
         f"请按下面的结构输出这份【起点】写作指纹:\n\n{_FORMAT_HINT}"
@@ -124,7 +125,7 @@ def seed_from_reference(project_root: Path, reference_text: str, backend: Backen
     path = project_root / FINGERPRINT_REL
     guard_write(path, fp, FINGERPRINT)   # 校验结构(不校验来源):空/残缺不覆盖默认指纹
     set_fingerprint_source(project_root, "reference")
-    progress({"type": "seed_done", "path": str(path), "source": "reference"})
+    progress(events.seed_done(path, "reference"))
     return path
 
 
@@ -139,7 +140,7 @@ def seed_from_inherit(project_root: Path, other_fingerprint: Path, progress: Pro
     path = project_root / FINGERPRINT_REL
     atomic_write_text(path, content)
     set_fingerprint_source(project_root, "inherit")
-    progress({"type": "seed_done", "path": str(path), "source": "inherit"})
+    progress(events.seed_done(path, "inherit"))
     return path
 
 
@@ -212,7 +213,7 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     fp_path = project_root / FINGERPRINT_REL
     old_fp = fp_path.read_text(encoding="utf-8") if fp_path.exists() else neutral_default()
 
-    progress({"type": "info", "message": f"正在从你对第 {chapter_n} 章的手改里学习…"})
+    progress(events.info(f"正在从你对第 {chapter_n} 章的手改里学习…"))
     user = (
         f"## 现有指纹\n{old_fp}\n\n"
         f"## 作者对第 {chapter_n} 章的手改(已按句对齐)\n{signal}\n\n"
@@ -233,7 +234,7 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     atomic_write_text(fp_path, new_fp + "\n")
     mark_learned(project_root, chapter_n)
     if warn:
-        progress({"type": "warn", "message": warn})
+        progress(events.warn(warn))
     # 写后摘要 / 外置大脑生长都是「管 what 的附赠」,可走便宜模型;指纹蒸馏(上面)始终用主模型保「像你」
     appraise = appraisal_backend or backend
     # 写后摘要补卡章纲:附赠动作,失败绝不阻断 learn(指纹已落盘)
@@ -241,14 +242,14 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
         from .recap import recap_chapter
         recap_chapter(project_root, chapter_n, appraise, progress)
     except LoomBackendError as e:
-        progress({"type": "warn", "message": f"写后摘要没补成(不影响指纹):{e}"})
+        progress(events.warn(f"写后摘要没补成(不影响指纹):{e}"))
     # 外置大脑随章生长:把这章新设定/新人物追加进世界观/人物卡(同为附赠,绝不阻断 learn)
     try:
         from .enrich import enrich_chapter
         enrich_chapter(project_root, chapter_n, appraise, progress)
     except Exception as e:  # 附赠功能,任何失败都不能拖累已落盘的指纹
-        progress({"type": "warn", "message": f"外置大脑补充没补成(不影响指纹):{e}"})
-    progress({"type": "learn_done", "path": str(fp_path), "chapter": chapter_n, "shrink_warning": warn})
+        progress(events.warn(f"外置大脑补充没补成(不影响指纹):{e}"))
+    progress(events.learn_done(fp_path, chapter_n, warn))
     return fp_path
 
 

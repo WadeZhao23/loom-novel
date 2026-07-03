@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .fsutil import atomic_write_text
 from .paths import DECONSTRUCT_DIR
 
@@ -46,7 +47,7 @@ def deconstruct(root: Path, source_text: str, name: str,
                 backend, render: Render = _noop) -> Path:
     if not source_text.strip():
         raise ValueError("参考书文本是空的,没东西可拆。")
-    render({"type": "info", "message": f"拆书中:{name} …"})
+    render(events.info(f"拆书中:{name} …"))
 
     system = _load_skill(root) + "\n\n---\n\n" + _GUARD
     out_text = backend.complete(system, source_text, max_chars=3000)
@@ -54,5 +55,5 @@ def deconstruct(root: Path, source_text: str, name: str,
     # 物理隔离(红线②):只写隔离草稿区,绝不碰 世界观.md / 写作指纹.md / 正文/
     out_path = root / DECONSTRUCT_DIR / f"{name}-拆解.md"
     atomic_write_text(out_path, out_text.strip() + "\n")
-    render({"type": "info", "message": f"已落:{out_path}"})
+    render(events.info(f"已落:{out_path}"))
     return out_path

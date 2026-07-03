@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text, snapshot_chapter
 from .paths import FINGERPRINT_REL, chapter_path, chapter_rel, snapshot_path
@@ -32,7 +33,7 @@ def rewrite_span(project_root: Path, chapter_n: int, full_text: str, span: str,
         raise ValueError("没选中要重写的段落。先在正文里选一段。")
     fp_path = project_root / FINGERPRINT_REL
     fp = fp_path.read_text(encoding="utf-8") if fp_path.exists() else "(还没有写作指纹)"
-    progress({"type": "info", "message": "正在按你的嗓音重写选中段…"})
+    progress(events.info("正在按你的嗓音重写选中段…"))
     user = (
         f"## 写作指纹\n{fp}\n\n"
         f"## 整章上下文(供衔接,别整章输出)\n{full_text}\n\n"

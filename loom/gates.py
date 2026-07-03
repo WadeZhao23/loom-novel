@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from . import events
 from .backends import Backend
 
 Progress = Callable[[dict], None]
@@ -112,7 +113,7 @@ def run_gate(
     text = draft
     last: list[Issue] = []
     for r in range(1, rounds + 1):
-        progress({"type": "gate_start", "label": label, "role": owner_role, "round": r})
+        progress(events.gate_start(label, owner_role, r))
         critic_user = (
             f"## 设定与标准\n{knowledge}\n\n## 待复审的本章稿\n{text}\n\n"
             "## 你的任务\n按上面的标准,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。"
@@ -123,19 +124,16 @@ def run_gate(
             issues = _merge_issues(detector(text), issues)
 
         if not issues:
-            progress({"type": "gate_pass", "label": label, "role": owner_role, "round": r})
+            progress(events.gate_pass(label, owner_role, r))
             return GateResult(text, r, True, [])
 
         last = issues
-        progress({
-            "type": "gate_issues", "label": label, "role": owner_role, "round": r,
-            "issues": [i.as_dict() for i in issues],
-        })
+        progress(events.gate_issues(label, owner_role, r, [i.as_dict() for i in issues]))
 
         if r == rounds:
             break  # 最后一轮只诊断、不再回炉
 
-        progress({"type": "gate_revise", "label": label, "role": owner_role, "round": r})
+        progress(events.gate_revise(label, owner_role, r))
         issue_lines = "\n".join(
             f"- {i.kind}:{i.desc}" + (f"(证据:「{i.evidence}」)" if i.evidence else "")
             for i in issues
@@ -145,14 +143,10 @@ def run_gate(
             f"## 复审挑出的硬伤(只修这些,别动没问题的地方)\n{issue_lines}\n\n"
             "## 你的任务\n针对性修好上面的硬伤,只输出修订后的整章正文,不要解释、不要列清单。"
         )
-        chunk_cb = lambda d, role=owner_role: progress(
-            {"type": "agent_chunk", "role": role, "delta": d})
+        chunk_cb = lambda d, role=owner_role: progress(events.agent_chunk(role, d))
         text = backend.complete(revise_system, revise_user, max_chars=max_chars, on_chunk=chunk_cb)
 
-    progress({
-        "type": "gate_exhausted", "label": label, "role": owner_role, "rounds": rounds,
-        "issues": [i.as_dict() for i in last],
-    })
+    progress(events.gate_exhausted(label, owner_role, rounds, [i.as_dict() for i in last]))
     return GateResult(text, rounds, False, last)
 
 

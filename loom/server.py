@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import events
 from .agents import run_pipeline
 from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
                        probe as probe_backend, provider_catalog, validate_model)
@@ -529,9 +530,9 @@ def write(b: WriteBody):
             run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25, resume=not b.force,
                          critic_backend=cheap_backend(cfg))
         except (LoomBackendError, ValueError, FileNotFoundError) as e:
-            q.put({"type": "error", "message": str(e)})
+            q.put(events.error(str(e)))
         except Exception as e:  # 兜底,别让流挂死
-            q.put({"type": "error", "message": f"意外错误:{e}"})
+            q.put(events.error(f"意外错误:{e}"))
         finally:
             lock.release()   # 锁跟着 worker 走(响应流着,写还没完),在哨兵 None 之前放
             q.put(None)
