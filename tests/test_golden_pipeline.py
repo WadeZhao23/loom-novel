@@ -14,8 +14,9 @@ import json
 import os
 from pathlib import Path
 
-from loom.agents import EDIT_NOTE_SENTINEL, run_pipeline
+from loom.agents import run_pipeline
 from loom.config import load_config
+from loom.parse import EDIT_NOTE_CLOSE, EDIT_NOTE_OPEN
 
 GOLDEN = Path(__file__).parent / "golden" / "pipeline_v1.json"
 
@@ -24,7 +25,7 @@ _SETTER = "本章设定锚点:主角沈砚在矿场;境界凡境;金手指为重
 _OUTLINE = "分镜一:醒来验伤。分镜二:遇周楠。分镜三:章末钩(危机迫近)。"
 _DRAFT = "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀。"
 _EDITED = ("寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得谁递的刀。\n"
-           + EDIT_NOTE_SENTINEL + "\n《本章改动留痕》\n- 补了一句悬念,钩子更硬。")
+           + EDIT_NOTE_OPEN + "\n《本章改动留痕》\n- 补了一句悬念,钩子更硬。\n" + EDIT_NOTE_CLOSE)
 _POLISHED = "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。"
 _PASS = "通过"
 _TITLE = "矿灯"

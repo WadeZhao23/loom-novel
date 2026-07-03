@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +16,7 @@ from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
 from .guard import DRAFT_SECTION, validate_output
+from .parse import split_brain_draft as _split  # 读侧解析共置 parse.py(S7),薄别名保引用面
 from .paths import CARD_REL, CHARS_REL, WORLD_REL
 
 Progress = Callable[[dict], None]
@@ -81,15 +81,6 @@ def _is_blank_or_template(path: Path) -> bool:
     if not text.strip():
         return True
     return ("占位示例" in text) or ("待 seed" in text) or ("待填充" in text)
-
-
-def _split(raw: str) -> dict:
-    out: dict = {}
-    for key in ("世界观", "人物卡", "卡章纲"):
-        m = re.search(rf"==={key}===\s*(.*?)(?=\n===|\Z)", raw, re.DOTALL)
-        if m and m.group(1).strip():
-            out[key] = m.group(1).strip()
-    return out
 
 
 def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progress = _noop) -> dict:

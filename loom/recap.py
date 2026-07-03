@@ -17,6 +17,8 @@ from typing import Callable
 from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text
+from .parse import _RECAP_MARK  # [AI回顾] 标记单一真相在 parse.py(S7),薄别名保引用面
+from .parse import format_recap_block as _format_block
 from .paths import CARD_REL, chapter_path
 
 Progress = Callable[[dict], None]
@@ -25,8 +27,6 @@ Progress = Callable[[dict], None]
 def _noop(event: dict) -> None:
     pass
 
-
-_RECAP_MARK = "[AI回顾]"   # 物理隔离标记
 
 _RECAP_SYSTEM = """你是剧情脊柱记录员。我给你某一章的【作者定稿正文】。
 请只描述这一章【实际写成了什么】(管 what,不管文笔好坏、不评价风格)。
@@ -88,18 +88,6 @@ def _already_recapped(card: str, n: int) -> bool:
                     return True
             return False
     return False
-
-
-def _format_block(n: int, raw: str) -> str:
-    # 把 LLM 两段输出折成卡章纲下的缩进子块;截断摘要 ≤150 字硬保险
-    text = raw.strip()
-    m = re.search(r"摘要[:：]\s*(.+?)(?=\n伏笔|$)", text, re.DOTALL)
-    summary = (m.group(1).strip() if m else text)[:150]
-    fm = re.search(r"伏笔[:：]?\s*\n(.+)$", text, re.DOTALL)
-    fore = fm.group(1).strip() if fm else "- 无"
-    foreshadow = "\n".join("    " + l.strip() for l in fore.splitlines() if l.strip())
-    return (f"  - {_RECAP_MARK} 摘要:{summary}\n"
-            f"    伏笔:\n{foreshadow}")
 
 
 def _append_recap(card: str, n: int, block: str) -> str | None:

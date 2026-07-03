@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Callable
 
 from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text
+from .parse import parse_enrich_sections as _parse_sections  # 读侧解析共置 parse.py(S7)
 from .paths import CHARS_REL, WORLD_REL, chapter_path
 
 Progress = Callable[[dict], None]
@@ -51,30 +51,6 @@ def _supp_head(n: int) -> str:
 
 def _already_supplemented(text: str, n: int) -> bool:
     return _supp_head(n) in text
-
-
-def _clean_section(body: str) -> str:
-    """只留 `- ` 条目行,滤掉「无」占位与空行;返回干净的多行块(可能为空串)。"""
-    keep: list[str] = []
-    for raw in body.splitlines():
-        s = raw.strip()
-        if not s.startswith(("-", "•", "・")):
-            continue
-        inner = s.lstrip("-•・ ").strip()
-        if not inner or inner in ("无", "无。", "(无)", "(无)"):
-            continue
-        keep.append("- " + inner)
-    return "\n".join(keep)
-
-
-def _parse_sections(raw: str) -> tuple[str, str]:
-    """把 LLM 两段输出拆成 (世界观补充, 人物卡补充);各自已清洗,空段返回空串。"""
-    text = raw.strip()
-    wm = re.search(r"【世界观补充】\s*(.*?)(?=【人物卡补充】|$)", text, re.DOTALL)
-    cm = re.search(r"【人物卡补充】\s*(.*)$", text, re.DOTALL)
-    world = _clean_section(wm.group(1)) if wm else ""
-    chars = _clean_section(cm.group(1)) if cm else ""
-    return world, chars
 
 
 def _append_supplement(text: str, n: int, body: str) -> str | None:

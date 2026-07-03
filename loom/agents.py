@@ -19,6 +19,11 @@ from .config import Config
 from .errors import render
 from .fsutil import atomic_write_text, snapshot_chapter
 from .guard import STEP, chapter_profile, validate_output
+# 留痕围栏/标题解析共置 parse.py(S7);EDIT_NOTE_SENTINEL 保留导出(旧哨兵,读侧永久兼容)
+from .parse import EDIT_NOTE_MARKS, EDIT_NOTE_SENTINEL  # noqa: F401
+from .parse import clean_title as _clean_title
+from .parse import split_edit_note as _split_edit_note
+from .parse import strip_edit_note as _strip_edit_note
 
 Progress = Callable[[dict], None]
 
@@ -73,21 +78,8 @@ _PRODUCES = {
     "润色师": "本章终稿",
 }
 
-# 编辑产出"改稿 + 《本章改动留痕》",用哨兵分隔。留痕给作者看,绝不进正文/快照/写作指纹。
-EDIT_NOTE_SENTINEL = "<!--LOOM:EDIT-NOTE-->"
-
-
-def _split_edit_note(text: str) -> tuple[str, str]:
-    """按哨兵首次出现切分 →(干净正文 body, 留痕 note)。无哨兵则 (text, "")。"""
-    idx = text.find(EDIT_NOTE_SENTINEL)
-    if idx == -1:
-        return text, ""
-    return text[:idx].rstrip(), text[idx + len(EDIT_NOTE_SENTINEL):].strip()
-
-
-def _strip_edit_note(text: str) -> str:
-    """落盘前兜底:只保留哨兵前的干净正文(保护 learn 的 diff 源不被留痕污染)。"""
-    return _split_edit_note(text)[0] if EDIT_NOTE_SENTINEL in text else text
+# 编辑产出"改稿 + 《本章改动留痕》",用围栏/哨兵分隔(解析在 parse.split_edit_note,三态兼容)。
+# 留痕给作者看,绝不进正文/快照/写作指纹。
 
 
 def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Progress) -> None:
@@ -151,10 +143,14 @@ def _flag_stale_foreshadow(project_root: Path, chapter_n: int, config: Config, p
     )
 
 
-def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
-    """编辑棒的流式过滤:只把哨兵【之前】的干净改稿流给前端,哨兵及其后的留痕不外流。
+_EDIT_TAIL = max(len(m) for m in EDIT_NOTE_MARKS)   # 尾窗取最长开标记,半截标记不漏判
 
-    哨兵可能被切成多个 delta,故按累计串判断、并留一个尾窗防止半截哨兵漏判。
+
+def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
+    """编辑棒的流式过滤:只把开标记【之前】的干净改稿流给前端,标记及其后的留痕不外流。
+
+    兼容两种开标记(新围栏 <LOOM:EDIT-NOTE> / 旧哨兵);标记可能被切成多个 delta,
+    故按累计串判断、并留一个尾窗防止半截标记漏判。
     """
     st = {"buf": "", "emitted": 0, "cut": False}
 
@@ -162,9 +158,10 @@ def _edit_stream_filter(progress: Progress) -> Callable[[str], None]:
         if st["cut"]:
             return
         st["buf"] += delta
-        idx = st["buf"].find(EDIT_NOTE_SENTINEL)
+        hits = [i for i in (st["buf"].find(m) for m in EDIT_NOTE_MARKS) if i != -1]
+        idx = min(hits) if hits else -1
         if idx == -1:
-            clean = st["buf"][: max(0, len(st["buf"]) - len(EDIT_NOTE_SENTINEL))]
+            clean = st["buf"][: max(0, len(st["buf"]) - _EDIT_TAIL)]
         else:
             clean = st["buf"][:idx]
         new = clean[st["emitted"]:]
@@ -376,16 +373,6 @@ _TITLE_SYSTEM = (
     "你是网文编辑,给这一章起一个【章节标题】。要求:6-16 字,贴合内容、有点钩子、不剧透章末反转;"
     "不要带「第N章/第一章」之类章号,不要书名号/引号/星号包裹,只输出标题本身这一行,别的什么都不要输出。"
 )
-
-
-def _clean_title(raw: str) -> str:
-    """把模型返回收成一个干净标题:取首行、去包裹、去「第N章」前缀;太长/太短/像句子就当没有。"""
-    if not raw or not raw.strip():
-        return ""
-    t = raw.strip().splitlines()[0].strip().lstrip("#").strip()
-    t = t.strip("「」『』“”‘’《》<>#*`： ").strip()
-    t = re.sub(r"^第\s*[0-9一二三四五六七八九十百零]+\s*章[:：、.\s]*", "", t).strip()
-    return t if 1 < len(t) <= 24 else ""   # 太长多半是模型答非所问吐了一段话 → 回退无标题
 
 
 def _generate_title(backend: Backend, prose: str) -> str:
