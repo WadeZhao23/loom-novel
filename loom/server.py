@@ -15,24 +15,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import events
-from .agents import run_pipeline
+from . import events, usecases
 from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
-                       probe as probe_backend, provider_catalog, validate_model)
-from . import chapters as chap
-from . import paths
-from .chaptertext import body_changed, parse_title
-from . import ledger
-from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
-                     provider_key_is_set, save_config, set_provider_key)
-from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN, report, run_checks
-from .fingerprint import changed_rules, neutral_default, revert_learn
-from .fingerprint import learn as fp_learn
-from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
-from .fsutil import atomic_write_text, list_history, restore_history, safe_join, snapshot_chapter
+                       probe as probe_backend, validate_model)
+from .config import Config, load_config, save_config, set_provider_key
+from .doctor import report, run_checks
+from .fsutil import atomic_write_text, list_history, safe_join, snapshot_chapter
 from .scaffold import available_genres
 from .scaffold import init as scaffold_init
-from .state import load_state
+from .usecases import ProjectBusyError
 
 WEBUI_DIR = Path(__file__).parent / "webui"
 
@@ -55,66 +46,19 @@ async def _block_cross_site_writes(request, call_next):
             return JSONResponse({"error": "跨站写请求被拒"}, status_code=403)
     return await call_next(request)
 
-# ---- 写锁:write/learn/seed 这类「跑模型再落盘」端点的进程内互斥 ----
-# 双击/并发请求会同写一章(或同写指纹)。per-project 非阻塞锁,拿不到直接 409;
-# 单用户本地应用,故意不做跨进程锁。
-_write_locks: dict[str, threading.Lock] = {}
-_write_locks_guard = threading.Lock()
-
-
-def _try_lock(root: Path) -> threading.Lock | None:
-    """非阻塞拿这本书的写锁;拿不到返回 None(调用方直接回「正在写作中」)。"""
-    with _write_locks_guard:
-        lock = _write_locks.setdefault(str(Path(root).resolve()), threading.Lock())
-    return lock if lock.acquire(blocking=False) else None
-
-
-def _busy() -> JSONResponse:
-    return JSONResponse({"error": "本书正在写作中,等这一次跑完再操作。", "code": "project_busy"},
-                        status_code=409)
-
-
-# ---- 编辑器允许读写的文件(外置大脑可改、skills/agents 只读展示) ----
-# 外置大脑四件套 / 5 个 agent 的清单单一真相在 doctor.py(BRAIN_FILES/AGENT_FILES)。
-_SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md", "金手指.md"]
+# ---- 写锁:下沉到 usecases(单一宿主),这里只把「锁被占」统一映射成 409 project_busy ----
+# 【红线】PUT /api/file(外置大脑保存)豁免不锁:整章生成几分钟,期间必须能存世界观。
+@app.exception_handler(ProjectBusyError)
+async def _project_busy(request, exc: ProjectBusyError):
+    return JSONResponse({"error": str(exc), "code": exc.code}, status_code=409)
 
 
 def _is_project(p: Path) -> bool:
     return (p / "loom.toml").exists()
 
 
-def _state(root: Path) -> dict:
-    cfg = load_config(root)
-    st = load_state(root)
-    chapters = paths.chapter_numbers(root)
-    chs = []
-    for n in chapters:
-        out, snap = paths.chapter_path(root, n), paths.snapshot_path(root, n)
-        out_text = out.read_text(encoding="utf-8")
-        # 「改过」只看正文体(去掉标题再比):改标题不算手改、不该亮「改过」徽标(与 learn/drift 同口径)
-        edited = snap.exists() and body_changed(out_text, snap.read_text(encoding="utf-8"))
-        chs.append({"n": n, "title": parse_title(out_text), "written": True,
-                    "edited": edited, "learned": n in set(st.get("learned", []))})
-    return {
-        "root": str(root),
-        "title": cfg.title,
-        "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
-                    "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
-                    "openai_compat_key_set": openai_compat_key_is_set(root),
-                    # 每个供应商各自的 key 是否已设置(cli 类免 key,恒 True):前端守卫/旅程卡统一读它
-                    "keys_set": {pid: (spec["kind"] == "cli" or
-                                       provider_key_is_set(root, spec.get("key_env", "")))
-                                 for pid, spec in PROVIDERS.items()},
-                    "providers": provider_catalog()},
-        "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": paths.brain_rel(n), "name": n} for n in BRAIN_FILES]
-                 + [{"rel": paths.brain_rel(n), "name": n} for n in OPTIONAL_BRAIN
-                    if (root / paths.brain_rel(n)).is_file()],
-        "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
-        "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
-        "chapters": chs,
-        "next_chapter": (chapters[-1] + 1) if chapters else 1,
-    }
+# 项目全景响应体单一真相在 usecases.project_state,server 只留薄壳
+_state = usecases.project_state
 
 
 # ----------------------------- 项目 -----------------------------
@@ -236,7 +180,7 @@ class RestoreBody(BaseModel):
 @app.post("/api/history/restore")
 def history_restore(b: RestoreBody):
     try:
-        content = restore_history(b.root, b.rel, b.id)  # 回滚前会先把当前版本也存一份
+        content = usecases.history_restore(b.root, b.rel, b.id)  # 回滚前会先把当前版本也存一份
     except (ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     return {"ok": True, "content": content}
@@ -281,7 +225,7 @@ class ChapterOpBody(BaseModel):
 @app.post("/api/chapter/delete")
 def chapter_delete(b: ChapterOpBody):
     try:
-        return {**chap.delete_chapter(b.root, b.n), **{"state": _state(Path(b.root))}}
+        return {**usecases.chapter_delete(b.root, b.n), **{"state": _state(Path(b.root))}}
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -289,7 +233,7 @@ def chapter_delete(b: ChapterOpBody):
 @app.post("/api/chapter/insert")
 def chapter_insert(b: ChapterOpBody):
     try:
-        return {**chap.insert_after(b.root, b.n), **{"state": _state(Path(b.root))}}
+        return {**usecases.chapter_insert(b.root, b.n), **{"state": _state(Path(b.root))}}
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -297,7 +241,7 @@ def chapter_insert(b: ChapterOpBody):
 @app.post("/api/chapter/move")
 def chapter_move(b: ChapterOpBody):
     try:
-        return {**chap.move_chapter(b.root, b.n, b.direction or "up"), **{"state": _state(Path(b.root))}}
+        return {**usecases.chapter_move(b.root, b.n, b.direction or "up"), **{"state": _state(Path(b.root))}}
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -356,20 +300,10 @@ class SeedBody(BaseModel):
 @app.post("/api/seed")
 def seed(b: SeedBody):
     root = Path(b.root)
-    lock = _try_lock(root)
-    if lock is None:
-        return _busy()
     try:
-        if b.reference:
-            seed_from_reference(root, b.reference, get_backend(load_config(root)))
-        elif b.inherit:
-            seed_from_inherit(root, Path(b.inherit).expanduser())
-        else:
-            seed_from_samples(root, b.text or "", get_backend(load_config(root)))
+        usecases.seed_fingerprint(root, text=b.text or "", inherit=b.inherit, reference=b.reference or "")
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    finally:
-        lock.release()
     return _state(root)
 
 
@@ -381,34 +315,20 @@ class ChapterBody(BaseModel):
 @app.post("/api/learn")
 def learn(b: ChapterBody):
     root = Path(b.root)
-    lock = _try_lock(root)
-    if lock is None:
-        return _busy()
-    fp_file = root / paths.FINGERPRINT_REL
-    events: list[dict] = []
     try:
-        # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
-        old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
         cfg = load_config(root)
-        fp_learn(root, b.chapter, get_backend(cfg), events.append, appraisal_backend=cheap_backend(cfg))
+        rep = usecases.learn_chapter(root, b.chapter, get_backend(cfg),
+                                     appraisal_backend=cheap_backend(cfg))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    finally:
-        lock.release()
-    new_fp = fp_file.read_text(encoding="utf-8")
-    from .enrich import extract_supplement
-    world_p = root / paths.WORLD_REL
-    chars_p = root / paths.CHARS_REL
-    world_supp = extract_supplement(world_p.read_text(encoding="utf-8"), b.chapter) if world_p.exists() else ""
-    chars_supp = extract_supplement(chars_p.read_text(encoding="utf-8"), b.chapter) if chars_p.exists() else ""
-    done = next((e for e in events if e.get("type") == "learn_done"), {})
+    # LearnReport → 响应字段逐字节兼容(前端 app.js 零改动)
     return {"ok": True,
-            "fingerprint": new_fp,
-            "卡章纲": (root / paths.CARD_REL).read_text(encoding="utf-8"),
-            "changes": changed_rules(old_fp, new_fp),
-            "世界观补充": world_supp,
-            "人物卡补充": chars_supp,
-            "warn": done.get("shrink_warning") or ""}   # 软提示:疑似把嗓音磨短/丢 anchor,可一键撤销
+            "fingerprint": rep.fingerprint,
+            "卡章纲": rep.card,
+            "changes": rep.changes,
+            "世界观补充": rep.world_supp,
+            "人物卡补充": rep.chars_supp,
+            "warn": rep.warn}   # 软提示:疑似把嗓音磨短/丢 anchor,可一键撤销
 
 
 class DraftBody(BaseModel):
@@ -419,17 +339,11 @@ class DraftBody(BaseModel):
 @app.post("/api/brain/draft")
 def brain_draft(b: DraftBody):
     """从书名+题材+一句话设定,AI 起草 世界观/人物卡/卡章纲 初稿(只覆盖空白/模板,不动你写的)。"""
-    from .draft import draft_brain
     root = Path(b.root)
-    lock = _try_lock(root)
-    if lock is None:
-        return _busy()
     try:
-        res = draft_brain(root, b.idea, get_backend(load_config(root)))
+        res = usecases.draft_brain(root, b.idea)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    finally:
-        lock.release()
     return {"ok": True, "written": list(res["written"].keys()),
             "skipped": res["skipped"], "state": _state(root)}
 
@@ -437,24 +351,17 @@ def brain_draft(b: DraftBody):
 @app.post("/api/outline/regen")
 def outline_regen(b: ChapterBody):
     """重新生成第 N 章细纲(设定师→大纲师),覆盖 正文/.细纲/第N章.md 并返回。不碰正文。"""
-    from .agents import regen_outline
     root = Path(b.root)
-    lock = _try_lock(root)
-    if lock is None:
-        return _busy()
     try:
-        cfg = load_config(root)
-        text = regen_outline(root, b.chapter, get_backend(cfg), cfg)
+        text = usecases.regen_outline(root, b.chapter)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
-    finally:
-        lock.release()
     return {"ok": True, "outline": text}
 
 
 @app.post("/api/learn/revert")
 def learn_revert(b: ChapterBody):
-    p = revert_learn(Path(b.root), b.chapter)
+    p = usecases.learn_revert(Path(b.root), b.chapter)
     if p is None:
         return JSONResponse({"error": "没有可撤销的 learn 备份(可能已撤过)。"}, status_code=400)
     return {"ok": True, "fingerprint": p.read_text(encoding="utf-8")}
@@ -492,8 +399,7 @@ class RewriteApplyBody(BaseModel):
 @app.post("/api/rewrite/apply")
 def rewrite_apply(b: RewriteApplyBody):
     """应用重写:落盘正文 + 外科式同步 .原稿 快照(守 learn 不被 AI 重写污染)。"""
-    from .rewrite import apply_rewrite
-    apply_rewrite(Path(b.root), b.chapter, b.content, b.old_span, b.new_span)
+    usecases.rewrite_apply(Path(b.root), b.chapter, b.content, b.old_span, b.new_span)
     return {"ok": True}
 
 
@@ -507,28 +413,17 @@ class WriteBody(BaseModel):
 @app.post("/api/write")
 def write(b: WriteBody):
     root = Path(b.root)
-    out = paths.chapter_path(root, b.chapter)
-    if out.exists() and not b.force:
-        if ledger.chapter_drifted(root, b.chapter):
-            return JSONResponse(
-                {"error": f"第 {b.chapter} 章正文与上次记录不符(手改过?)。先 learn,或勾选覆盖以你的正文为准重写。",
-                 "code": "chapter_drifted"}, status_code=409)
-        return JSONResponse(
-            {"error": f"第 {b.chapter} 章已写完。要重写请勾选覆盖。", "code": "chapter_exists"}, status_code=409)
+    rej = usecases.write_precheck(root, b.chapter, b.force)   # 已存在 / drifted / force 三态
+    if rej:
+        return JSONResponse(rej, status_code=409)
 
-    lock = _try_lock(root)
-    if lock is None:
-        return _busy()
+    lock = usecases.acquire_lock(root)   # 拿不到 → ProjectBusyError → 409(流式场景锁随 worker)
 
     q: queue.Queue = queue.Queue()
 
     def worker():
         try:
-            cfg = load_config(root)
-            backend = get_backend(cfg)
-            # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序
-            run_pipeline(root, b.chapter, backend, cfg, q.put, slow=0.25, resume=not b.force,
-                         critic_backend=cheap_backend(cfg))
+            usecases.write_chapter(root, b.chapter, q.put, force=b.force, slow=0.25)
         except (LoomBackendError, ValueError, FileNotFoundError) as e:
             q.put(events.error(str(e)))
         except Exception as e:  # 兜底,别让流挂死

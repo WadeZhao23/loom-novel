@@ -10,6 +10,7 @@ pytest.importorskip("httpx")   # starlette TestClient 依赖 httpx(随 openai �
 from starlette.testclient import TestClient  # noqa: E402
 
 import loom.server as server  # noqa: E402
+import loom.usecases as usecases  # noqa: E402
 
 
 def test_write_mutex_blocks_concurrent_write_and_learn(project, monkeypatch):
@@ -21,7 +22,10 @@ def test_write_mutex_blocks_concurrent_write_and_learn(project, monkeypatch):
         progress({"type": "chapter_done", "chapter": chapter_n})
         return root, "x"
 
-    monkeypatch.setattr(server, "run_pipeline", fake_pipeline)
+    # 编排(锁 + pipeline 调用)已下沉 usecases;server 只在 learn 端点建后端 → 两处都补桩
+    monkeypatch.setattr(usecases, "run_pipeline", fake_pipeline)
+    monkeypatch.setattr(usecases, "get_backend", lambda cfg: object())
+    monkeypatch.setattr(usecases, "cheap_backend", lambda cfg: None)
     monkeypatch.setattr(server, "get_backend", lambda cfg: object())
     monkeypatch.setattr(server, "cheap_backend", lambda cfg: None)
 

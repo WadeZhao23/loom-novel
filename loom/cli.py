@@ -119,18 +119,18 @@ def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
          text: str = typer.Option(None, "--文本", "--text"),
          inherit: Path = typer.Option(None, "--继承", "--inherit"),
          reference: Path = typer.Option(None, "--参考", "--reference")) -> None:
-    from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
+    from . import usecases
 
     try:
         root = find_project_root()
         if reference is not None:
             if not reference.exists():
                 _die(f"范文文件不存在:{reference}")
-            seed_from_reference(root, reference.read_text(encoding="utf-8"),
-                                get_backend(load_config(root)), _render)
+            usecases.seed_fingerprint(root, reference=reference.read_text(encoding="utf-8"),
+                                      progress=_render)
             return
         if inherit is not None:
-            seed_from_inherit(root, inherit, _render)
+            usecases.seed_fingerprint(root, inherit=inherit, progress=_render)
             return
         if sample is not None:
             if not sample.exists():
@@ -138,44 +138,41 @@ def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
             text = sample.read_text(encoding="utf-8")
         if not text:
             _die("给我点料:--样本 文件 / --文本 '一段字' / --继承 另一本书的指纹。")
-        seed_from_samples(root, text, get_backend(load_config(root)), _render)
+        usecases.seed_fingerprint(root, text=text, progress=_render)
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 
 
 @app.command(help="跑 5 个 Agent 写第 N 章。")
 def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, "--force", "-f")) -> None:
-    from . import ledger
-    from .agents import run_pipeline
+    from . import usecases
 
     try:
         root = find_project_root()
-        out = paths.chapter_path(root, chapter)
-        if out.exists() and not force:
-            if ledger.chapter_drifted(root, chapter):
-                _die(f"第 {chapter} 章正文与上次记录不符(你手改过?)。先 learn {chapter},或加 --force 以你的正文为准重写。")
-            _die(f"第 {chapter} 章已写完。要重写加 --force。")
+        rej = usecases.write_precheck(root, chapter, force)   # 三态检查单点在 usecases,措辞按 CLI
+        if rej:
+            _die({"chapter_drifted": f"第 {chapter} 章正文与上次记录不符(你手改过?)。"
+                                     f"先 learn {chapter},或加 --force 以你的正文为准重写。",
+                  "chapter_exists": f"第 {chapter} 章已写完。要重写加 --force。"}[rej["code"]])
         config = load_config(root)
         console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字[/dim]\n")
-        # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序,省 DeepSeek 计费
-        run_pipeline(root, chapter, get_backend(config), config, _render, slow=0.3, resume=not force,
-                     critic_backend=cheap_backend(config))
+        with usecases.write_lock(root):
+            usecases.write_chapter(root, chapter, _render, force=force, slow=0.3)
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 
 
 @app.command(help="把你对第 N 章的手改蒸馏进指纹。")
 def learn(chapter: int = typer.Argument(...)) -> None:
-    from .fingerprint import changed_rules
-    from .fingerprint import learn as do_learn
+    from . import usecases
 
     try:
         root = find_project_root()
-        fp = root / paths.FINGERPRINT_REL
-        old = fp.read_text(encoding="utf-8") if fp.exists() else ""
         cfg = load_config(root)
-        do_learn(root, chapter, get_backend(cfg), _render, appraisal_backend=cheap_backend(cfg))
-        ch = changed_rules(old, fp.read_text(encoding="utf-8"))
+        # 编排(含旧基线 neutral_default)单点在 usecases:与 server 同源,不再各修各的
+        rep = usecases.learn_chapter(root, chapter, get_backend(cfg), progress=_render,
+                                     appraisal_backend=cheap_backend(cfg))
+        ch = rep.changes
         if ch["added"] or ch["removed"]:
             console.print("\n[bold]本次指纹变化[/bold] [dim](学歪了?在 app 里点撤销,或删 外置大脑/.指纹历史/)[/dim]")
             for l in ch["removed"]:

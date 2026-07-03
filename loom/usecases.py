@@ -1,0 +1,259 @@
+"""引擎用例宿主:cli 与 server 共用的编排单点 + 每本书的写锁。
+
+双入口各自编排引擎调用已经漂移过一次(learn 旧指纹基线 server 用 neutral_default()、
+cli 用 "",同一缺陷只修了一边)。此后「先查什么、再调什么、报告怎么拼」只在这里写一次,
+入口退化成参数解析 + 渲染(HTTP JSON / Rich)。
+
+写锁:per-root 非阻塞,拿不到抛 ProjectBusyError(server 统一映射 409 project_busy)。
+覆盖全部「跑模型/落盘」用例;【红线】PUT /api/file(外置大脑保存)豁免不锁——
+整章生成要几分钟,期间作者必须能存世界观。
+"""
+
+from __future__ import annotations
+
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterator
+
+from . import chapters as chap
+from . import ledger, paths
+from .agents import regen_outline as _regen_outline
+from .agents import run_pipeline
+from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
+from .chaptertext import body_changed, parse_title
+from .config import key_is_set, load_config, openai_compat_key_is_set, provider_key_is_set
+from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN
+from .draft import draft_brain as _draft_brain
+from .enrich import extract_supplement
+from .fingerprint import changed_rules
+from .fingerprint import learn as fp_learn
+from .fingerprint import (neutral_default, revert_learn, seed_from_inherit,
+                          seed_from_reference, seed_from_samples)
+from .fsutil import restore_history
+from .rewrite import apply_rewrite
+from .state import load_state
+
+Progress = Callable[[dict], None]
+
+
+def _noop(event: dict) -> None:
+    pass
+
+
+# ---------------------------------------------------------------- 写锁
+BUSY_MESSAGE = "本书正在写作中,等这一次跑完再操作。"
+
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+class ProjectBusyError(RuntimeError):
+    """写锁被占(同一本书正有跑模型/落盘任务)。刻意不继承 LoomBackendError/ValueError:
+    入口的 400 网不该兜住它,busy 永远走 409。"""
+
+    code = "project_busy"
+
+    def __init__(self) -> None:
+        super().__init__(BUSY_MESSAGE)
+
+
+def try_lock(root: Path | str) -> threading.Lock | None:
+    """非阻塞拿这本书的写锁;拿不到返回 None。单用户本地应用,故意不做跨进程锁。"""
+    with _locks_guard:
+        lock = _locks.setdefault(str(Path(root).resolve()), threading.Lock())
+    return lock if lock.acquire(blocking=False) else None
+
+
+def acquire_lock(root: Path | str) -> threading.Lock:
+    """拿锁或抛 ProjectBusyError。给 write 流式场景:锁随 worker 线程持有,调用方自行 release。"""
+    lock = try_lock(root)
+    if lock is None:
+        raise ProjectBusyError()
+    return lock
+
+
+@contextmanager
+def write_lock(root: Path | str) -> Iterator[None]:
+    lock = acquire_lock(root)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+# ---------------------------------------------------------------- write
+def write_precheck(root: Path | str, chapter: int, force: bool = False) -> dict | None:
+    """写前三态检查:None=放行;否则 {"error","code"}(措辞即 server 409 响应体)。"""
+    if force or not paths.chapter_path(root, chapter).exists():
+        return None
+    if ledger.chapter_drifted(Path(root), chapter):
+        return {"error": f"第 {chapter} 章正文与上次记录不符(手改过?)。先 learn,或勾选覆盖以你的正文为准重写。",
+                "code": "chapter_drifted"}
+    return {"error": f"第 {chapter} 章已写完。要重写请勾选覆盖。", "code": "chapter_exists"}
+
+
+def write_chapter(root: Path | str, chapter: int, progress: Progress, *,
+                  force: bool = False, slow: float = 0.25) -> None:
+    """跑 5 Agent 写第 N 章。不拿锁:流式场景锁随 worker 线程(调用方 acquire_lock / write_lock)。"""
+    root = Path(root)
+    cfg = load_config(root)
+    # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序,省计费
+    run_pipeline(root, chapter, get_backend(cfg), cfg, progress, slow=slow, resume=not force,
+                 critic_backend=cheap_backend(cfg))
+
+
+# ---------------------------------------------------------------- learn
+@dataclass
+class LearnReport:
+    """learn 的完整回执:server 直接 JSON 化,cli 挑着渲染。"""
+
+    fingerprint: str   # 新指纹全文
+    card: str          # 卡章纲全文(前端自己抠 recap,响应兼容)
+    changes: dict      # {"added": [...], "removed": [...]}
+    recap: str         # 第 N 章 [AI回顾] 块(app.js extractRecap 的 Python 版)
+    world_supp: str    # 世界观 [AI补充] 块
+    chars_supp: str    # 人物卡 [AI补充] 块
+    warn: str          # 疑似磨短指纹的软提示(可一键撤销)
+
+
+def learn_chapter(root: Path | str, chapter: int, backend: Backend, *,
+                  appraisal_backend: Backend | None = None,
+                  progress: Progress = _noop) -> LearnReport:
+    """learn 全编排:记旧基线 → 蒸馏 → 拼报告。旧基线统一 neutral_default
+    (曾经 cli 用 "" 漂移:缺指纹文件时 changes 全量误报)。"""
+    root = Path(root)
+    fp_file = root / paths.FINGERPRINT_REL
+    with write_lock(root):
+        old_fp = fp_file.read_text(encoding="utf-8") if fp_file.exists() else neutral_default()
+        evs: list[dict] = []
+
+        def tee(ev: dict) -> None:   # 转发给入口渲染,同时留底捞 shrink_warning
+            evs.append(ev)
+            progress(ev)
+
+        fp_learn(root, chapter, backend, tee, appraisal_backend=appraisal_backend)
+        new_fp = fp_file.read_text(encoding="utf-8")
+        card_p = root / paths.CARD_REL
+        world_p, chars_p = root / paths.WORLD_REL, root / paths.CHARS_REL
+        done = next((e for e in evs if e.get("type") == "learn_done"), {})
+        return LearnReport(
+            fingerprint=new_fp,
+            card=card_p.read_text(encoding="utf-8") if card_p.exists() else "",
+            changes=changed_rules(old_fp, new_fp),
+            recap=_recap_block(root, chapter),
+            world_supp=extract_supplement(world_p.read_text(encoding="utf-8"), chapter) if world_p.exists() else "",
+            chars_supp=extract_supplement(chars_p.read_text(encoding="utf-8"), chapter) if chars_p.exists() else "",
+            warn=done.get("shrink_warning") or "",
+        )
+
+
+def _recap_block(root: Path, chapter: int) -> str:
+    """卡章纲里第 N 章的 [AI回顾] 块(含标记、已去缩进):解析复用 studio.timeline。"""
+    from .studio import timeline
+    row = next((r for r in timeline(root) if r["n"] == chapter), None)
+    return f"[AI回顾] {row['recap']}" if row and row.get("recap") else ""
+
+
+def learn_revert(root: Path | str, chapter: int) -> Path | None:
+    """撤销第 N 章最近一次 learn(锁内:防与写章竞态)。"""
+    with write_lock(root):
+        return revert_learn(Path(root), chapter)
+
+
+# ---------------------------------------------------------------- seed
+def seed_fingerprint(root: Path | str, *, text: str = "", inherit: Path | str | None = None,
+                     reference: str = "", progress: Progress = _noop) -> Path:
+    """seed 三源分发(优先级同 server 现状:参考范文 > 继承 > 样本);继承不建后端,免 key 可用。"""
+    root = Path(root)
+    with write_lock(root):
+        if reference:
+            return seed_from_reference(root, reference, get_backend(load_config(root)), progress)
+        if inherit:
+            return seed_from_inherit(root, Path(inherit).expanduser(), progress)
+        return seed_from_samples(root, text or "", get_backend(load_config(root)), progress)
+
+
+# ---------------------------------------------------------------- 其余落盘用例(锁内薄封装)
+def draft_brain(root: Path | str, idea: str) -> dict:
+    """AI 起草外置大脑初稿(只覆盖空白/模板,不动人写的)。"""
+    root = Path(root)
+    with write_lock(root):
+        return _draft_brain(root, idea, get_backend(load_config(root)))
+
+
+def regen_outline(root: Path | str, chapter: int) -> str:
+    """重新生成第 N 章细纲(设定师→大纲师),不碰正文。"""
+    root = Path(root)
+    with write_lock(root):
+        cfg = load_config(root)
+        return _regen_outline(root, chapter, get_backend(cfg), cfg)
+
+
+def rewrite_apply(root: Path | str, chapter: int, content: str, old_span: str, new_span: str) -> None:
+    """应用局部重写:落盘正文 + 外科式同步 .原稿 快照(锁内:新增覆盖)。"""
+    with write_lock(root):
+        apply_rewrite(Path(root), chapter, content, old_span, new_span)
+
+
+def chapter_delete(root: Path | str, n: int) -> dict:
+    with write_lock(root):
+        return chap.delete_chapter(root, n)
+
+
+def chapter_insert(root: Path | str, n: int) -> dict:
+    with write_lock(root):
+        return chap.insert_after(root, n)
+
+
+def chapter_move(root: Path | str, n: int, direction: str) -> dict:
+    with write_lock(root):
+        return chap.move_chapter(root, n, direction)
+
+
+def history_restore(root: Path | str, rel: str, snap_id: str) -> str:
+    """回滚单章历史版本(锁内:防与写章竞态;回滚前会先把当前版本也存一份)。"""
+    with write_lock(root):
+        return restore_history(root, rel, snap_id)
+
+
+# ---------------------------------------------------------------- 项目状态
+# 编辑器展示的 skills 清单(外置大脑可改、skills/agents 只读展示)
+_SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md", "金手指.md"]
+
+
+def project_state(root: Path | str) -> dict:
+    """项目全景(后端配置/章节/外置大脑清单):server 各端点的统一响应体。"""
+    root = Path(root)
+    cfg = load_config(root)
+    st = load_state(root)
+    chapters = paths.chapter_numbers(root)
+    chs = []
+    for n in chapters:
+        out, snap = paths.chapter_path(root, n), paths.snapshot_path(root, n)
+        out_text = out.read_text(encoding="utf-8")
+        # 「改过」只看正文体(去掉标题再比):改标题不算手改、不该亮「改过」徽标(与 learn/drift 同口径)
+        edited = snap.exists() and body_changed(out_text, snap.read_text(encoding="utf-8"))
+        chs.append({"n": n, "title": parse_title(out_text), "written": True,
+                    "edited": edited, "learned": n in set(st.get("learned", []))})
+    return {
+        "root": str(root),
+        "title": cfg.title,
+        "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
+                    "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
+                    "openai_compat_key_set": openai_compat_key_is_set(root),
+                    # 每个供应商各自的 key 是否已设置(cli 类免 key,恒 True):前端守卫/旅程卡统一读它
+                    "keys_set": {pid: (spec["kind"] == "cli" or
+                                       provider_key_is_set(root, spec.get("key_env", "")))
+                                 for pid, spec in PROVIDERS.items()},
+                    "providers": provider_catalog()},
+        "fingerprint_source": st.get("fingerprint_source", "default"),
+        "brain": [{"rel": paths.brain_rel(n), "name": n} for n in BRAIN_FILES]
+                 + [{"rel": paths.brain_rel(n), "name": n} for n in OPTIONAL_BRAIN
+                    if (root / paths.brain_rel(n)).is_file()],
+        "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
+        "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
+        "chapters": chs,
+        "next_chapter": (chapters[-1] + 1) if chapters else 1,
+    }
