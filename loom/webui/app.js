@@ -121,6 +121,13 @@ function bind() {
   $("kbd-hint").onclick = openCmdk;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
+  $("nav-timeline").onclick = () => openStudio("timeline");
+  $("nav-foreshadow").onclick = () => openStudio("foreshadow");
+  $("nav-names").onclick = () => openStudio("names");
+  $("studio-tab-timeline").onclick = () => renderStudio("timeline");
+  $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
+  $("studio-tab-names").onclick = () => renderStudio("names");
+  $("studio-close").onclick = () => $("studio-overlay").classList.add("hidden");
   $("flow-close").onclick = () => $("flow-overlay").classList.add("hidden");
   $("flow-prompt").onclick = () => {
     const a = (DATA.agents || []).find((x) => x.name === _flowAgent);   // 留个口子:仍能去看/改提示词
@@ -299,6 +306,7 @@ async function runDoctor() {
 // ---------- 渲染 ----------
 function render() {
   $("proj-title").textContent = DATA.title;
+  rebuildProviderOptions();   // 供应商下拉从服务端注册表下发,不在 HTML 里写死
   $("provider").value = DATA.backend.provider;
   rebuildModelPresets(DATA.backend.provider);
   setModelValue(DATA.backend.model);
@@ -358,9 +366,7 @@ function renderJourney() {
   const dKey = "loom_journey_dismiss:" + DATA.root;
   if (localStorage.getItem(dKey) === "1") { card.classList.add("hidden"); return; }
   const be = DATA.backend || {};
-  const spec = providerSpec(be.provider) || {};
-  const keyed = spec.kind === "cli" ||
-    (be.provider === "openai_compat" ? !!be.openai_compat_key_set : !!be.key_set);
+  const keyed = providerKeyed(be.provider);
   const steps = [
     { label: "接入模型(填 key 或用订阅)", done: keyed, run: openSettings },
     { label: "喂样本,让它懂你(seed)", done: DATA.fingerprint_source !== "default", run: openSeed },
@@ -554,8 +560,9 @@ function maybeBrainGuide(rel, content) {
 async function draftBrain(idea) {
   // 起草也要后端就绪:顺手保存后端(同写章),deepseek 仍缺 key 才拦
   try { await persistBackend(true); } catch (e) { toast("先配置好后端:" + e.message, true); return; }
-  if (DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
-    toast("先在设置里填 DeepSeek key(或把供应商切到 Claude / Codex 免 key)再生成初稿", true);
+  const dspec = providerSpec(DATA.backend.provider) || {};
+  if (dspec.needs_key && !providerKeyed(DATA.backend.provider)) {
+    toast(`先在设置里填 ${dspec.label || ""} 的 key(或把供应商切到 Claude / Codex 免 key)再生成初稿`, true);
     flashSetting("api-key");
     return;
   }
@@ -1010,13 +1017,14 @@ async function writeChapter(n, force) {
   try { await persistBackend(true); } catch (e) { toast("保存后端失败:" + e.message, true); return; }
   // 首跑防空转:没填 key/base_url 就别进面板转半天再报错——自动打开设置并高亮对应输入框
   const be = (DATA && DATA.backend) || {};
-  if (be.provider === "deepseek" && !be.key_set) {
-    toast("先在设置里填 DeepSeek API Key(或把供应商切到 Claude / Codex 免 key)再开写", true);
-    flashSetting("api-key"); return;
-  }
-  if (be.provider === "openai_compat" && (!be.base_url || !be.openai_compat_key_set)) {
+  const bspec = providerSpec(be.provider) || {};
+  if (be.provider === "openai_compat" && !be.base_url) {
     toast("自定义供应商要先填 base_url + API Key 再开写", true);
-    flashSetting(!be.base_url ? "base-url" : "api-key"); return;
+    flashSetting("base-url"); return;
+  }
+  if (bspec.needs_key && !providerKeyed(be.provider)) {
+    toast(`先在设置里填 ${bspec.label || be.provider} 的 API Key(或把供应商切到 Claude / Codex 免 key)再开写`, true);
+    flashSetting("api-key"); return;
   }
   _wroteChapter = null;
   _runMinimized = false; _streamChars = 0; _stripDone = null; _stripErr = null;
@@ -1187,6 +1195,30 @@ function providerSpec(pid) {
   return ((DATA.backend && DATA.backend.providers) || []).find((p) => p.id === pid) || null;
 }
 
+// 供应商下拉 = 服务端 PROVIDERS 注册表(provider_catalog)的投影
+function rebuildProviderOptions() {
+  const sel = $("provider");
+  const cur = sel.value;
+  sel.innerHTML = "";
+  ((DATA.backend && DATA.backend.providers) || []).forEach((p) => {
+    const o = document.createElement("option");
+    o.value = p.id; o.textContent = p.label;
+    sel.appendChild(o);
+  });
+  if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+// 这个供应商「接入就绪」了吗:cli 免 key 恒 true;其余看各自 key 是否已存(keys_set 由服务端按 key_env 逐家算)
+function providerKeyed(pid) {
+  const spec = providerSpec(pid);
+  if (spec && spec.kind === "cli") return true;
+  const ks = (DATA.backend && DATA.backend.keys_set) || {};
+  if (pid in ks) return !!ks[pid];
+  // 老服务端兜底(没有 keys_set 字段时)
+  return pid === "openai_compat" ? !!(DATA.backend && DATA.backend.openai_compat_key_set)
+                                 : !!(DATA.backend && DATA.backend.key_set);
+}
+
 // 用一组 {id,label} 重填模型【下拉】(末尾永远留一个「手动输入…」兜底,但默认是选、不是填)
 function fillModelOptions(models) {
   const sel = $("model");
@@ -1289,9 +1321,12 @@ function applyProviderUI(provider) {
   $("btn-probe").classList.toggle("hidden", !isCli);
   if (!needsKey || !isCli) { $("backend-status").textContent = ""; $("backend-status").className = "backend-status"; }
   if (needsKey) {
-    const keySet = isCustom ? (DATA.backend && DATA.backend.openai_compat_key_set) : (DATA.backend && DATA.backend.key_set);
-    $("api-key").placeholder = keySet ? "API Key 已设置" : (isCustom ? "填这家供应商的 API Key" : "填 DeepSeek API Key");
+    const keySet = providerKeyed(provider);
+    const label = spec ? spec.label : provider;
+    $("api-key").placeholder = keySet ? "API Key 已设置" : `填 ${label} 的 API Key`;
   }
+  // 每家供应商的「怎么拿 key」提示(注册表 hint 下发)
+  $("key-hint").textContent = (spec && spec.hint) || "";
   if (isCustom && spec && spec.hint) $("base-url").title = spec.hint;
 }
 async function probeBackend() {
@@ -1388,6 +1423,9 @@ function buildCmds() {
                run: () => openFile(`正文/第${ch.n}章.md`, true, ch.n) });
     });
     c.push({ label: "喂样本 / 继承指纹 seed", run: openSeed });
+    c.push({ label: "书房 · 时间轴(故事到哪了)", keywords: "编年史 回顾 studio", run: () => openStudio("timeline") });
+    c.push({ label: "书房 · 伏笔账本", keywords: "埋设 回收 悬空 studio", run: () => openStudio("foreshadow") });
+    c.push({ label: "书房 · 专名册", keywords: "人名 境界 地名 studio", run: () => openStudio("names") });
     c.push({ label: "设置(后端 / 模型 / API Key / 字数)", keywords: "配置 供应商 config settings", run: openSettings });
     c.push({ label: "导出全书", run: exportBook });
     c.push({ label: "备份整本", run: backupBook });
@@ -1424,6 +1462,61 @@ function moveCmdSel(d) {
   [...$("cmdk-list").children].forEach((el, i) => el.classList.toggle("sel", i === _cmdSel));
   const sel = $("cmdk-list").children[_cmdSel];
   if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+}
+
+// ---------- 书房:时间轴 / 伏笔账本 / 专名册(只读投影) ----------
+let _studio = null;
+async function openStudio(tab) {
+  $("studio-body").innerHTML = `<div class="hint">读取中…</div>`;
+  $("studio-overlay").classList.remove("hidden");
+  try {
+    _studio = await jreq("GET", `/api/studio?root=${encodeURIComponent(DATA.root)}`);
+  } catch (e) { $("studio-body").innerHTML = `<div class="error">${escHtml(e.message)}</div>`; return; }
+  renderStudio(tab);
+}
+function renderStudio(tab) {
+  ["timeline", "foreshadow", "names"].forEach((t) =>
+    $("studio-tab-" + t).classList.toggle("on", t === tab));
+  const box = $("studio-body"); box.innerHTML = "";
+  if (!_studio) return;
+  if (tab === "timeline") {
+    const rows = _studio.timeline || [];
+    if (!rows.length) { box.innerHTML = `<div class="hint">卡章纲里还没有「- 第N章:…」的章行。写规划、learn 之后,这里会长成整本书的时间轴。</div>`; return; }
+    rows.forEach((r) => {
+      const el = document.createElement("div"); el.className = "st-row st-click";
+      el.innerHTML = `<span class="st-ch">第${r.n}章</span><div class="st-body">` +
+        `<div class="st-plan">${escHtml(r.plan || "")}</div>` +
+        (r.recap ? `<div class="st-recap">${escHtml(r.recap)}</div>` : "") + `</div>`;
+      el.onclick = () => { $("studio-overlay").classList.add("hidden"); openFile(`正文/第${r.n}章.md`, true, r.n); };
+      box.appendChild(el);
+    });
+  } else if (tab === "foreshadow") {
+    const d = _studio.foreshadow || {}; const rows = d.rows || []; const staleSet = new Set(d.stale || []);
+    if (!rows.length) { box.innerHTML = `<div class="hint">还没有伏笔记录。每章 learn 后,写后摘要会把 [埋设/推进/回收] 自动记进卡章纲,这里就有账可查了。</div>`; return; }
+    rows.forEach((r) => {
+      const isStale = r.kind === "埋设" && staleSet.has((r.text || "").slice(0, 60));
+      const el = document.createElement("div"); el.className = "st-row";
+      el.innerHTML = `<span class="st-ch">第${r.chapter}章</span>` +
+        `<span class="st-kind st-${r.kind === "埋设" ? "plant" : r.kind === "回收" ? "pay" : "push"}">${r.kind}</span>` +
+        `<div class="st-body">${escHtml(r.text)}${isStale ? '<span class="st-stale">悬空</span>' : ""}</div>`;
+      box.appendChild(el);
+    });
+  } else {
+    const d = _studio.names || {};
+    if ((d.roster || []).length) {
+      const h = document.createElement("div"); h.className = "sub-head"; h.textContent = "人物专名册(逐字直送写手的那份)"; box.appendChild(h);
+      const wrap = document.createElement("div"); wrap.className = "st-chips";
+      d.roster.forEach((n) => { const c = document.createElement("span"); c.className = "st-chip"; c.textContent = n; wrap.appendChild(c); });
+      box.appendChild(wrap);
+    }
+    (d.sections || []).forEach((s) => {
+      const h = document.createElement("div"); h.className = "sub-head"; h.textContent = s.title; box.appendChild(h);
+      const b = document.createElement("div"); b.className = "recap-block"; b.textContent = s.body; box.appendChild(b);
+    });
+    if (!(d.roster || []).length && !(d.sections || []).length) {
+      box.innerHTML = `<div class="hint">世界观里还没识别到硬设定小节(如「## 力量体系」「## 地理」),人物卡也没有「## 类型 · 名字」式的角色。填了之后,这里就是写手照抄的专名册。</div>`;
+    }
+  }
 }
 
 // ---------- 设置抽屉 / 输入退场 / 朱批浮条 ----------
@@ -1473,7 +1566,7 @@ function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
   if ($("seal-bar").classList.contains("on")) { hideSealBar(); return true; }
-  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "run-overlay"];
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) { minimizeRun(); return true; } // 写作中 Esc=收起后台织,不误关

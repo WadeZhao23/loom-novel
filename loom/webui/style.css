@@ -198,6 +198,12 @@ button:disabled { opacity: .55; cursor: default; }
 .welcome-head .weave-mark { width: 38px; height: 38px; flex: none; }
 .logo { font-family: var(--font-brand); font-size: var(--fs-display); font-weight: 400; line-height: 1.1; }
 .tag { color: var(--text-soft); margin-top: var(--space-1); font-family: var(--font-brand); font-size: 15px; }
+/* 欢迎页旅程条:告诉你整趟路有五步,此刻只做第一步(一屏一事) */
+.journey-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: var(--space-4); font-size: var(--fs-caption); color: var(--text-mute); }
+.journey-strip i { font-style: normal; color: var(--line-strong); }
+.journey-strip .js-on { color: var(--text); font-weight: 600; }
+
 .welcome-block { margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--line-soft); }
 .welcome-block h3 { margin: 0 0 var(--space-3); font-size: var(--fs-h2); font-weight: 700; }
 .welcome-block label { display: block; color: var(--text-soft); font-size: var(--fs-xs); margin: 10px 0 5px; }
@@ -512,6 +518,27 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 .journey-card .jc-step.done { color: var(--text-mute); }
 .journey-card .jc-step.done .jc-mark { color: var(--success); }
 .journey-card .jc-step.next { color: var(--text); font-weight: 600; }
+
+/* ---------- 7g. 书房:三个只读投影(时间轴/伏笔账本/专名册) ---------- */
+.studio-card { width: 560px; }
+.studio-body { margin-top: var(--space-3); max-height: 56vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px; }
+.st-row { display: flex; gap: var(--space-3); align-items: baseline; padding: 7px 10px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface); }
+.st-row.st-click { cursor: pointer; }
+.st-row.st-click:hover { border-color: var(--line-strong); }
+.st-ch { flex: none; font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-mute); }
+.st-body { min-width: 0; font-size: var(--fs-sm); line-height: 1.6; }
+.st-plan { color: var(--text); }
+.st-recap { margin-top: 2px; color: var(--text-soft); font-family: var(--font-read); white-space: pre-wrap; }
+.st-kind { flex: none; font-size: var(--fs-caption); padding: 1px 7px; border-radius: var(--radius-pill); }
+.st-plant { background: var(--seal-tint); color: var(--seal-ink); }        /* 埋设=落了一枚扣 */
+.st-push  { background: var(--line-soft); color: var(--text-soft); }
+.st-pay   { background: var(--accent-tint); color: var(--accent-ink); }    /* 回收=墨落定 */
+.st-stale { margin-left: 8px; font-size: var(--fs-caption); color: var(--seal); font-weight: 600; }
+.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-chip { font-size: var(--fs-sm); padding: 3px 10px; border-radius: var(--radius-pill);
+  background: var(--surface); border: 1px solid var(--line); }
 
 /* ---------- 8. 专注模式 ---------- */
 body.focus-mode .sidebar { margin-left: -256px; opacity: 0; pointer-events: none; }

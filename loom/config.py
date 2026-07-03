@@ -79,6 +79,15 @@ def _env_var_set(project_root: Path, name: str) -> bool:
     return False
 
 
+def set_provider_key(project_root: Path, key_env: str, key: str) -> None:
+    """按供应商的 key_env(PROVIDERS 注册表声明)把 key 写进项目 .env——各供应商各占一行,互不覆盖。"""
+    _set_env_var(project_root, key_env, key)
+
+
+def provider_key_is_set(project_root: Path, key_env: str) -> bool:
+    return _env_var_set(project_root, key_env)
+
+
 def set_env_key(project_root: Path, key: str) -> None:
     """把 DEEPSEEK_API_KEY 写进项目根的 .env(替换已有行)。"""
     _set_env_var(project_root, "DEEPSEEK_API_KEY", key)

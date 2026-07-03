@@ -16,13 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents import run_pipeline
-from .backends import (LoomBackendError, cheap_backend, get_backend, list_models, probe as probe_backend,
-                       provider_catalog, validate_model)
+from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
+                       probe as probe_backend, provider_catalog, validate_model)
 from . import chapters as chap
 from .chaptertext import parse_title, strip_title
 from . import ledger
 from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
-                     save_config, set_env_key, set_openai_compat_key)
+                     provider_key_is_set, save_config, set_provider_key)
 from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
@@ -100,6 +100,10 @@ def _state(root: Path) -> dict:
         "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
                     "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
                     "openai_compat_key_set": openai_compat_key_is_set(root),
+                    # 每个供应商各自的 key 是否已设置(cli 类免 key,恒 True):前端守卫/旅程卡统一读它
+                    "keys_set": {pid: (spec["kind"] == "cli" or
+                                       provider_key_is_set(root, spec.get("key_env", "")))
+                                 for pid, spec in PROVIDERS.items()},
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
         "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
@@ -312,6 +316,16 @@ def sensitive_scan(b: ScanBody):
     return {"hits": scan(b.text, b.root)}
 
 
+@app.get("/api/studio")
+def studio_view(root: str):
+    """书房三视图(时间轴/伏笔账本/专名册):纯只读投影,不调模型、不写盘。"""
+    from .studio import studio
+    try:
+        return studio(Path(root))
+    except Exception as e:
+        return JSONResponse({"error": f"书房读取失败:{e}"}, status_code=400)
+
+
 @app.put("/api/config")
 def update_config(b: ConfigBody):
     root = Path(b.root)
@@ -323,11 +337,10 @@ def update_config(b: ConfigBody):
     save_config(root, Config(provider=b.provider, model=b.model, base_url=base_url, title=cfg.title,
                              chapter_chars=b.chapter_chars, gate_rounds=cfg.gate_rounds))  # 别把回炉轮数静默重置回默认
     if b.api_key:
-        # key 按供应商分别落到对的 env var:DeepSeek→DEEPSEEK_API_KEY,自定义→LOOM_OPENAI_COMPAT_KEY(各占一行)
-        if b.provider == "openai_compat":
-            set_openai_compat_key(root, b.api_key.strip())
-        else:
-            set_env_key(root, b.api_key.strip())
+        # key 按供应商的 key_env(PROVIDERS 注册表声明)各落各行:DeepSeek/智谱/Kimi/…互不覆盖
+        key_env = (PROVIDERS.get(b.provider) or {}).get("key_env")
+        if key_env:
+            set_provider_key(root, key_env, b.api_key.strip())
     st = _state(root)
     warn = validate_model(b.provider, b.model)   # 软提示(如把 v4-flash 填进 deepseek)——只提示,不阻断保存
     if warn:

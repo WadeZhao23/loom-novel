@@ -45,6 +45,48 @@ PROVIDERS: dict[str, dict] = {
         ],
         "can_list_models": True,
     },
+    # ---- 国产一等预设(全走 OpenAI 兼容形态,base_url 锁死;模型列表刻意留空:----
+    # ---- 点「拉取可用模型」拉当前真实型号,模型名绝不硬编码进白名单(会过时)) ----
+    "zhipu": {
+        "label": "智谱 GLM", "kind": "openai",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4", "base_url_locked": True,
+        "key_env": "LOOM_ZHIPU_KEY", "needs_key": True,
+        "default_model": "", "models": [],
+        "hint": "key 在 open.bigmodel.cn 申请;填好后点「拉取可用模型」选一个",
+        "can_list_models": True,
+    },
+    "moonshot": {
+        "label": "Moonshot Kimi", "kind": "openai",
+        "base_url": "https://api.moonshot.cn/v1", "base_url_locked": True,
+        "key_env": "LOOM_MOONSHOT_KEY", "needs_key": True,
+        "default_model": "", "models": [],
+        "hint": "key 在 platform.moonshot.cn 申请;填好后点「拉取可用模型」选一个",
+        "can_list_models": True,
+    },
+    "qwen": {
+        "label": "通义 Qwen", "kind": "openai",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "base_url_locked": True,
+        "key_env": "LOOM_QWEN_KEY", "needs_key": True,
+        "default_model": "", "models": [],
+        "hint": "key 在 bailian.console.aliyun.com(百炼)申请;填好后点「拉取可用模型」选一个",
+        "can_list_models": True,
+    },
+    "doubao": {
+        "label": "豆包(火山方舟)", "kind": "openai",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3", "base_url_locked": True,
+        "key_env": "LOOM_DOUBAO_KEY", "needs_key": True,
+        "default_model": "", "models": [],
+        "hint": "key 在 console.volcengine.com(方舟)申请;模型填接入点或型号名,可先「拉取可用模型」",
+        "can_list_models": True,
+    },
+    "siliconflow": {
+        "label": "硅基流动", "kind": "openai",
+        "base_url": "https://api.siliconflow.cn/v1", "base_url_locked": True,
+        "key_env": "LOOM_SILICONFLOW_KEY", "needs_key": True,
+        "default_model": "", "models": [],
+        "hint": "key 在 cloud.siliconflow.cn 申请(聚合多家开源模型);填好后点「拉取可用模型」",
+        "can_list_models": True,
+    },
     "claude": {
         "label": "Claude Code", "kind": "cli",
         "needs_key": False, "default_model": "sonnet",
@@ -71,8 +113,7 @@ PROVIDERS: dict[str, dict] = {
         "key_env": "LOOM_OPENAI_COMPAT_KEY", "needs_key": True,
         "default_model": "",
         "models": [],   # 用户自填 / 点「拉取可用模型」实时拉
-        "hint": "智谱GLM: https://open.bigmodel.cn/api/paas/v4 · Moonshot: https://api.moonshot.cn/v1 · "
-                "通义Qwen: https://dashscope.aliyuncs.com/compatible-mode/v1 · 硅基流动: https://api.siliconflow.cn/v1",
+        "hint": "上面没列到的任何 OpenAI 兼容供应商:自填它的 base_url + key",
         "can_list_models": True,
     },
 }
@@ -467,12 +508,12 @@ def probe(provider: str) -> dict:
     """轻量探活:命令在不在 PATH、能不能跑 --version、(codex)登没登录、(openai_compat)base_url+key 齐不齐。
     只跑本地命令 / 查本地配置,不发任何 LLM 请求、不消耗 token。给「检测连接」按钮用。"""
     provider = (provider or "deepseek").lower()
-    if provider == "deepseek":
-        return {"provider": provider, "ok": True, "kind": "key",
-                "message": "DeepSeek 用 API Key 鉴权:把 key 填进右边、点「保存后端」即可。"}
-    if provider == "openai_compat":
-        return {"provider": provider, "ok": True, "kind": "key",
-                "message": "OpenAI 兼容供应商:填好 base_url + 模型名 + key,点「保存后端」;不确定模型名就点「拉取可用模型」。"}
+    _spec = PROVIDERS.get(provider)
+    if _spec and _spec["kind"] == "openai":
+        msg = ("OpenAI 兼容供应商:填好 base_url + 模型名 + key,点「保存」;不确定模型名就点「拉取可用模型」。"
+               if not _spec.get("base_url_locked")
+               else f"{_spec['label']} 用 API Key 鉴权:填好 key、点「保存」;模型可点「拉取可用模型」现选。")
+        return {"provider": provider, "ok": True, "kind": "key", "message": msg}
     cmd = {"claude": "claude", "codex": "codex"}.get(provider)
     if not cmd:
         return {"provider": provider, "ok": False, "message": f"未知后端 {provider}"}
@@ -509,15 +550,14 @@ def get_backend(config: Config) -> Backend:
     if os.environ.get("LOOM_DEMO"):
         return DemoBackend(config)
     provider = (config.provider or "deepseek").lower()
-    if provider == "deepseek":
-        return OpenAICompatBackend(config, "deepseek")
-    if provider == "openai_compat":
-        return OpenAICompatBackend(config, "openai_compat")
+    spec = PROVIDERS.get(provider)
+    if spec and spec["kind"] == "openai":   # deepseek / 国产预设 / 自定义,全走 OpenAI 兼容 HTTP
+        return OpenAICompatBackend(config, provider)
     if provider == "claude":
         return ClaudeCodeBackend(config)
     if provider == "codex":
         return CodexBackend(config)
-    raise LoomBackendError(f"未知后端 provider={provider!r}(支持 deepseek/claude/codex/openai_compat)。")
+    raise LoomBackendError(f"未知后端 provider={provider!r}(支持:{'/'.join(PROVIDERS)})。")
 
 
 def cheap_backend(config: Config) -> Backend | None:

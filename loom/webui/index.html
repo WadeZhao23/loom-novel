@@ -18,8 +18,12 @@
         </svg>
         <div>
           <div class="logo">Loom</div>
-          <p class="tag">一队 Agent,织成一条写小说的流水线。</p>
+          <p class="tag">不替你写书。帮你把书写得更像你。</p>
         </div>
+      </div>
+
+      <div class="journey-strip" aria-hidden="true">
+        <span class="js-on">① 开一本书</span><i>—</i><span>② 接入模型</span><i>—</i><span>③ 外置大脑</span><i>—</i><span>④ 你的声音</span><i>—</i><span>⑤ 织第一章</span>
       </div>
 
       <div class="welcome-intro">
@@ -45,15 +49,15 @@
         <button id="btn-open">打开</button>
       </div>
       <details class="welcome-help">
-        <summary><span class="ico" data-ico="key"></span> 怎么拿 DeepSeek API key(自带 key)</summary>
-        <p>Loom 用你自己的 key 写作,稿子不离开你的电脑。四步:</p>
+        <summary><span class="ico" data-ico="key"></span> 怎么接入模型(自带 key,稿子不离开你的电脑)</summary>
+        <p>开书后点右上角「设置」选供应商。国产直连(不用梯子)四步:</p>
         <ol>
-          <li>浏览器打开 <b>platform.deepseek.com</b>,注册 + 实名</li>
+          <li>去供应商官网注册:<b>DeepSeek</b>(platform.deepseek.com,默认推荐)/ 智谱 / Kimi / 通义 / 豆包 / 硅基流动</li>
           <li>充值(按字数计费,几块钱能写很久)</li>
-          <li>在「API Keys」里创建一个 key(sk- 开头)</li>
-          <li>新建/打开书后,点右上角「设置」,把 key 粘进 API Key 框 → 保存</li>
+          <li>在它的「API Keys」页创建一个 key</li>
+          <li>粘进 Loom 设置的 API Key 框 → 保存(key 只存你电脑的项目文件夹里)</li>
         </ol>
-        <p class="muted">不想自带 key?在「设置」里把供应商切到 <b>Claude Code</b> 或 <b>Codex</b>——它们复用你本机客户端的登录(含订阅),Loom 不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
+        <p class="muted">不想自带 key?供应商切到 <b>Claude Code</b> 或 <b>Codex</b>——复用你本机客户端的登录(含订阅),不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
       </details>
       <div id="welcome-error" class="error"></div>
     </div>
@@ -95,6 +99,11 @@
         <div class="side-section" id="brain-section">
           <div class="side-head"><span><span class="ico" data-ico="brain"></span> 外置大脑</span></div>
           <ul id="brain" class="list"></ul>
+          <ul id="studio-nav" class="list">
+            <li id="nav-timeline"><span class="ico" data-ico="history"></span> 时间轴(故事到哪了)</li>
+            <li id="nav-foreshadow"><span class="ico" data-ico="pin"></span> 伏笔账本</li>
+            <li id="nav-names"><span class="ico" data-ico="key"></span> 专名册</li>
+          </ul>
           <div class="voice-card" id="fp-card">
             <div class="vc-head"><span class="ico" data-ico="fingerprint"></span> 写作指纹</div>
             <div id="fp-source" class="vc-body"></div>
@@ -235,12 +244,8 @@
       <h3>设置</h3>
       <p class="hint">后端与写作偏好。配置存在这本书的项目文件夹里;点「写章」时也会自动保存这里的改动。</p>
       <label class="field-label">供应商</label>
-      <select id="provider">
-        <option value="deepseek">DeepSeek</option>
-        <option value="claude">Claude Code</option>
-        <option value="codex">Codex(GPT)</option>
-        <option value="openai_compat">OpenAI 兼容(自定义)</option>
-      </select>
+      <select id="provider"></select>
+      <div id="key-hint" class="hint"></div>
       <label class="field-label">模型</label>
       <div class="field-row">
         <select id="model" class="model" title="选择模型(下拉选;第三方供应商点「拉取可用模型」拉真实列表)"></select>
@@ -260,6 +265,22 @@
         <button id="btn-doctor" class="ghost">环境自检</button>
         <button id="settings-close" class="ghost">关闭</button>
         <button id="btn-save-backend" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 书房:外置大脑的三个只读投影(时间轴/伏笔账本/专名册) -->
+  <div id="studio-overlay" class="overlay hidden">
+    <div class="run-card studio-card">
+      <h3>书房</h3>
+      <div class="seg">
+        <button id="studio-tab-timeline" class="seg-btn on">时间轴</button>
+        <button id="studio-tab-foreshadow" class="seg-btn">伏笔账本</button>
+        <button id="studio-tab-names" class="seg-btn">专名册</button>
+      </div>
+      <div id="studio-body" class="studio-body"></div>
+      <div class="row-end">
+        <button id="studio-close" class="primary">关闭</button>
       </div>
     </div>
   </div>

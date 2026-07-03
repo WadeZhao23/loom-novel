@@ -9,9 +9,11 @@ from loom.config import (Config, key_is_set, load_config, openai_compat_key_is_s
                          save_config, set_env_key, set_openai_compat_key)
 
 
-def test_catalog_has_four_providers():
+def test_catalog_providers_order():
     ids = [p["id"] for p in provider_catalog()]
-    assert ids == ["deepseek", "claude", "codex", "openai_compat"]
+    # deepseek 默认第一;国产直连预设凑一组;订阅 CLI 随后;自定义兜底收尾(3.1 扩充)
+    assert ids == ["deepseek", "zhipu", "moonshot", "qwen", "doubao", "siliconflow",
+                   "claude", "codex", "openai_compat"]
     ds = next(p for p in provider_catalog() if p["id"] == "deepseek")
     assert ds["default_model"] == "deepseek-v4-pro"
     assert any(m["id"] == "deepseek-v4-flash" for m in ds["models"])
