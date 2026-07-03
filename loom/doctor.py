@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import key_is_set, load_config, openai_compat_key_is_set
+from .paths import brain_rel
 
 # 单一真相:server.py 也从这里导入,避免清单各存一份漂移
 BRAIN_FILES = ["世界观", "人物卡", "卡章纲", "写作指纹"]   # 外置大脑【四件套强制】
@@ -75,7 +76,7 @@ def run_checks(root: Path) -> list[Check]:
                          f"缺 agents/{n}.md", f"补回 agents/{n}.md(可对照 loom init 模板)"))
     # e. 外置大脑四件套在
     for n in BRAIN_FILES:
-        p = root / "外置大脑" / f"{n}.md"
+        p = root / brain_rel(n)
         fix = ("loom seed 重新生成,或从备份恢复" if n == "写作指纹"
                else f"外置大脑是人维护文件,手动补回 外置大脑/{n}.md")
         checks.append(_c(f"外置大脑 · {n}", p.is_file(), f"缺 外置大脑/{n}.md", fix))

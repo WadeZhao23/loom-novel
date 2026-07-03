@@ -19,8 +19,7 @@ import re
 from pathlib import Path
 
 from .gates import Issue
-
-REL_FINGERPRINT = "外置大脑/写作指纹.md"
+from .paths import FINGERPRINT_REL as REL_FINGERPRINT  # 指纹路径常量收敛到 paths(与 fingerprint 同源)
 
 _STOP = set("。！？!?\n")
 _SOFT_SEP = set("，,、；;：:")

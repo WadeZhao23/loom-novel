@@ -10,8 +10,7 @@ from pathlib import Path
 from .agents import _HARDFACT_KW, _SPOILER_KW, _md_h2_sections, _name_roster
 from .config import load_config
 from .hooks import _CH, parse_hooks, stale
-
-CARD_REL = "外置大脑/卡章纲.md"
+from .paths import CARD_REL, CHARS_REL, WORLD_REL
 
 
 def timeline(root: Path | str) -> list[dict]:
@@ -67,9 +66,9 @@ def names(root: Path | str) -> dict:
     """专名册:人物卡的「类型 · 名字」名册 + 世界观里命中硬设定关键词的小节(标题+原文)。"""
     root = Path(root)
     roster = [ln.lstrip("- ").strip()
-              for ln in _name_roster(root / "外置大脑" / "人物卡.md").splitlines() if ln.strip()]
+              for ln in _name_roster(root / CHARS_REL).splitlines() if ln.strip()]
     sections: list[dict] = []
-    wv = root / "外置大脑" / "世界观.md"
+    wv = root / WORLD_REL
     if wv.is_file():
         for head, body in _md_h2_sections(wv.read_text(encoding="utf-8")):
             if any(s in head for s in _SPOILER_KW):

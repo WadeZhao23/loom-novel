@@ -16,6 +16,7 @@ from typing import Callable
 
 from .backends import Backend
 from .fsutil import atomic_write_text
+from .paths import CARD_REL, chapter_path
 
 Progress = Callable[[dict], None]
 
@@ -24,7 +25,6 @@ def _noop(event: dict) -> None:
     pass
 
 
-CARD_REL = "外置大脑/卡章纲.md"
 _RECAP_MARK = "[AI回顾]"   # 物理隔离标记
 
 _RECAP_SYSTEM = """你是剧情脊柱记录员。我给你某一章的【作者定稿正文】。
@@ -44,7 +44,7 @@ def _ch_line(n: int) -> re.Pattern:
 
 def recap_chapter(project_root: Path, chapter_n: int,
                   backend: Backend, progress: Progress = _noop) -> Path | None:
-    final_path = project_root / "正文" / f"第{chapter_n}章.md"
+    final_path = chapter_path(project_root, chapter_n)
     if not final_path.exists():
         return None  # 没正文不报错(recap 是附赠,不阻断 learn)
     card_path = project_root / CARD_REL

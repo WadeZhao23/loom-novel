@@ -15,23 +15,10 @@ from pathlib import Path
 
 from . import state
 from .fsutil import atomic_write_text
+from .paths import CHAPTER_ARTIFACTS as _ARTIFACTS  # 每章产物注册表(布局单点在 paths)
+from .paths import BRAIN_DIR, TRASH_DIR, chapter_numbers, chapter_path
 
-# 每章的关联产物:(相对目录, 文件名模板, 是否目录)
-_ARTIFACTS = [
-    ("正文", "第{n}章.md", False),
-    ("正文/.原稿", "第{n}章.md", False),
-    ("正文/.原稿", "第{n}章.ledger.json", False),
-    ("正文/.细纲", "第{n}章.md", False),
-    ("正文/.历史", "第{n}章", True),
-    (".审稿留痕", "第{n}章.md", False),
-    ("外置大脑/.指纹历史", "第{n}章-learn前.md", False),
-]
 SYNC_NOTE = "章节已重排,记得同步更新「卡章纲」里对应的章号(卡章纲是你写的,没自动改)。"
-
-
-def chapter_numbers(root: Path | str) -> list[int]:
-    body = Path(root) / "正文"
-    return sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.is_dir() else []
 
 
 def _paths(root: Path, n: int) -> list[Path]:
@@ -74,7 +61,7 @@ def delete_chapter(root: Path | str, n: int) -> dict:
     if n not in nums:
         raise ValueError(f"第 {n} 章不存在")
     ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    trash = root / "正文" / ".回收站" / f"第{n}章-{ts}"
+    trash = root / TRASH_DIR / f"第{n}章-{ts}"
     for d, tmpl, _ in _ARTIFACTS:                    # 1) 进回收站(镜像目录结构,避免同名互相覆盖)
         src = root / d / tmpl.format(n=n)
         if src.exists():
@@ -86,10 +73,10 @@ def delete_chapter(root: Path | str, n: int) -> dict:
     from .enrich import strip_supplement
     removed_recap = strip_recap(root, n)
     if removed_recap:
-        atomic_write_text(trash / "外置大脑" / f"卡章纲-第{n}章-AI回顾.md", removed_recap)
+        atomic_write_text(trash / BRAIN_DIR / f"卡章纲-第{n}章-AI回顾.md", removed_recap)
     removed_supp = strip_supplement(root, n)
     if removed_supp:
-        atomic_write_text(trash / "外置大脑" / f"第{n}章-AI补充.md", removed_supp)
+        atomic_write_text(trash / BRAIN_DIR / f"第{n}章-AI补充.md", removed_supp)
     state.unmark_learned(root, n)                   # 2) learned 先摘掉这章
     _renumber(root, {k: k - 1 for k in nums if k > n})  # 3) 高于 n 的整体下移 1
     return {"ok": True, "deleted": n, "trash": str(trash), "note": SYNC_NOTE}
@@ -101,7 +88,7 @@ def insert_after(root: Path | str, n: int) -> dict:
     nums = chapter_numbers(root)
     _renumber(root, {k: k + 1 for k in nums if k > n})  # n 之后整体上移 1,空出 n+1
     new_n = n + 1
-    atomic_write_text(root / "正文" / f"第{new_n}章.md", "")
+    atomic_write_text(chapter_path(root, new_n), "")
     return {"ok": True, "inserted": new_n, "note": SYNC_NOTE}
 
 

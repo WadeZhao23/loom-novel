@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import load_config
 from .fsutil import atomic_write_text
+from .paths import chapter_numbers, chapter_path
 
 _EXPORT_DIR = "导出"
 _BACKUP_DIR = ".备份"
@@ -38,14 +39,13 @@ def _title(project_root: Path) -> str:
 
 def export_text(project_root: Path) -> dict:
     """全书正文 → 一个 txt,落到 项目/导出/。返回 {path, chapters, chars}。"""
-    body = project_root / "正文"
-    chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
+    chapters = chapter_numbers(project_root)
     if not chapters:
         raise ValueError("还没有正文可导出。先写一章。")
     title = _title(project_root)
     parts = []
     for n in chapters:
-        text = (body / f"第{n}章.md").read_text(encoding="utf-8").strip()
+        text = chapter_path(project_root, n).read_text(encoding="utf-8").strip()
         parts.append(f"第{n}章\n\n{text}")
     content = f"《{title}》\n\n\n" + "\n\n\n".join(parts) + "\n"
     out_dir = project_root / _EXPORT_DIR

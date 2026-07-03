@@ -13,7 +13,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 
-from . import __version__
+from . import __version__, paths
 from .backends import LoomBackendError, cheap_backend, get_backend
 from .config import find_project_root, load_config
 from .state import load_state
@@ -92,9 +92,9 @@ def init(name: str = typer.Argument(...),
 
 def _walk(node: Tree, path: Path, base: Path, highlight: str) -> None:
     for child in sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name)):
-        if child.name in (".原稿", ".loom_state.json"):
+        rel = str(child.relative_to(base)).replace("\\", "/")
+        if rel in (paths.SNAPSHOT_DIR, ".loom_state.json"):
             continue
-        rel = str(child.relative_to(base))
         if child.is_dir():
             _walk(node.add(f"[blue]{child.name}/[/blue]"), child, base, highlight)
         elif rel == highlight:
@@ -148,7 +148,7 @@ def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, 
 
     try:
         root = find_project_root()
-        out = root / "正文" / f"第{chapter}章.md"
+        out = paths.chapter_path(root, chapter)
         if out.exists() and not force:
             if ledger.chapter_drifted(root, chapter):
                 _die(f"第 {chapter} 章正文与上次记录不符(你手改过?)。先 learn {chapter},或加 --force 以你的正文为准重写。")
@@ -169,7 +169,7 @@ def learn(chapter: int = typer.Argument(...)) -> None:
 
     try:
         root = find_project_root()
-        fp = root / "外置大脑" / "写作指纹.md"
+        fp = root / paths.FINGERPRINT_REL
         old = fp.read_text(encoding="utf-8") if fp.exists() else ""
         cfg = load_config(root)
         do_learn(root, chapter, get_backend(cfg), _render, appraisal_backend=cheap_backend(cfg))
@@ -196,20 +196,19 @@ def status() -> None:
         st.get("fingerprint_source", "default"), st.get("fingerprint_source"))
     console.print(f"[bold]写作指纹来源:[/bold] {src}")
     learned = set(st.get("learned", []))
-    body = root / "正文"
-    chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
+    chapters = paths.chapter_numbers(root)
     if not chapters:
         console.print("[dim]还没写任何一章。[/dim]")
         return
-    from .chaptertext import parse_title, strip_title
+    from .chaptertext import body_changed, parse_title
     table = Table(title="章节状态")
     for c in ("章", "标题", "写了", "你改过", "学进指纹"):
         table.add_column(c)
     for n in chapters:
-        out, snap = body / f"第{n}章.md", body / ".原稿" / f"第{n}章.md"
+        out, snap = paths.chapter_path(root, n), paths.snapshot_path(root, n)
         out_text = out.read_text(encoding="utf-8")
         # 「改过」只看正文体(去标题再比),与 learn/drift 同口径:改标题不算手改
-        edited = snap.exists() and strip_title(out_text).strip() != strip_title(snap.read_text(encoding="utf-8")).strip()
+        edited = snap.exists() and body_changed(out_text, snap.read_text(encoding="utf-8"))
         table.add_row(f"第{n}章", parse_title(out_text) or "[dim]—[/dim]", "✓",
                       "[green]✓[/green]" if edited else "—", "[green]✓[/green]" if n in learned else "—")
     console.print(table)

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import gates
+from . import gates, paths
 from .backends import Backend, LoomBackendError
 from .chaptertext import compose, strip_title
 from .config import Config
@@ -31,9 +31,9 @@ def _noop(event: dict) -> None:
 # role -> (人看的名字, 复审提示词, 回炉提示词, 复审要读的设定/方法论, 是否带上一章看钩子)
 _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
     "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
-            ["skills/评估自检.md", "外置大脑/人物卡.md", "外置大脑/世界观.md", "外置大脑/卡章纲.md"], True),
+            ["skills/评估自检.md", paths.CHARS_REL, paths.WORLD_REL, paths.CARD_REL], True),
     "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
-             ["skills/去AI味.md", "外置大脑/写作指纹.md"], False),
+             ["skills/去AI味.md", paths.FINGERPRINT_REL], False),
 }
 
 
@@ -68,7 +68,7 @@ def _strip_edit_note(text: str) -> str:
 
 def _save_edit_note(project_root: Path, chapter_n: int, note: str, progress: Progress) -> None:
     """留痕落盘外的 .审稿留痕/(人可读可改,绝不被任何 learn/写作指纹流程读取)。"""
-    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path = paths.review_note_path(project_root, chapter_n)
     atomic_write_text(path, note + "\n")
     progress({"type": "edit_note", "chapter": chapter_n, "path": str(path)})
 
@@ -79,7 +79,7 @@ def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
 
     header 给了就用它当小标题(伏笔悬空提醒复用此函数,但措辞不同、与"跑满复审轮数"无关)。
     """
-    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path = paths.review_note_path(project_root, chapter_n)
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [header or f"\n## {label}未解决项(跑满复审轮数仍残留,未阻断,供你定夺)"]
     for i in remaining:
@@ -98,7 +98,7 @@ def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, p
     n = len(re.sub(r"\s+", "", strip_title(body)))
     if target <= 0 or n <= int(target * 1.5):
         return
-    path = project_root / ".审稿留痕" / f"第{chapter_n}章.md"
+    path = paths.review_note_path(project_root, chapter_n)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(f"\n## 篇幅提醒(非阻断,供你定夺)\n"
@@ -218,7 +218,7 @@ def _prev_chapter(project_root: Path, chapter_n: int) -> str:
     """读上一章【手改后的】正文做行文衔接(不是 .原稿 快照);去掉标题行,只喂正文体。"""
     if chapter_n <= 1:
         return ""
-    p = project_root / "正文" / f"第{chapter_n - 1}章.md"
+    p = paths.chapter_path(project_root, chapter_n - 1)
     return strip_title(p.read_text(encoding="utf-8")).strip() if p.exists() else ""
 
 
@@ -326,7 +326,7 @@ def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
     且自动追加块不该被当真相喂写手);要让它们逐字护身,把它们手并进 ## 力量体系 / ## 地理 等正式段。
     """
     blocks: list[str] = []
-    wv = project_root / "外置大脑" / "世界观.md"
+    wv = project_root / paths.WORLD_REL
     if wv.is_file():
         picked = _pick_hardfacts(wv.read_text(encoding="utf-8"))
         if picked:
@@ -335,7 +335,7 @@ def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
             progress({"type": "warn", "message":
                       "世界观里没识别到硬设定小节(如「## 力量体系」「## 地理 / 势力」),"
                       "等级/专名这次没有逐字保护——请检查标题写法"})
-    roster = _name_roster(project_root / "外置大脑" / "人物卡.md")
+    roster = _name_roster(project_root / paths.CHARS_REL)
     if roster:
         blocks.append("【人物专名册(照此写,别改名/别另造名)】\n" + roster)
     return "\n\n".join(b for b in blocks if b.strip())
@@ -370,7 +370,7 @@ def _generate_title(backend: Backend, prose: str) -> str:
 def _outline_path(project_root: Path, chapter_n: int) -> Path:
     """本章细纲(大纲师的分镜)落盘处:可看可改。一旦存在,大纲师就读它(WYSIWYG)——
     你改了它,重写本章就按你的来;想要新方案,清空它或点「重新生成细纲」。"""
-    return project_root / "正文" / ".细纲" / f"第{chapter_n}章.md"
+    return paths.outline_path(project_root, chapter_n)
 
 
 def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
@@ -581,9 +581,9 @@ def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Pro
 
 
 def _save_chapter(project_root: Path, chapter_n: int, final: str) -> Path:
-    out = project_root / "正文" / f"第{chapter_n}章.md"
-    snap = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
-    snapshot_chapter(project_root, f"正文/第{chapter_n}章.md")  # 覆盖前留旧稿历史(force 重写时保住手改)
+    out = paths.chapter_path(project_root, chapter_n)
+    snap = paths.snapshot_path(project_root, chapter_n)
+    snapshot_chapter(project_root, paths.chapter_rel(chapter_n))  # 覆盖前留旧稿历史(force 重写时保住手改)
     atomic_write_text(out, final + "\n")
     atomic_write_text(snap, final + "\n")  # AI 原稿快照,只给 learn 做 diff
     return out

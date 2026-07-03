@@ -14,9 +14,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-HISTORY_DIR = ".历史"
+from .paths import CHAP_RE as _CHAP_RE  # 布局单点:章节 rel 正则由 paths 构造
+from .paths import history_dir as _hist_dir
+
 _KEEP = 30  # 每章最多保留的历史份数
-_CHAP_RE = re.compile(r"^正文/(第.+?章)\.md$")
 
 
 _TMP_SEQ = itertools.count()  # 进程内递增序号:tmp 名唯一,防同进程并发写同一文件时共用 tmp 互相拆台
@@ -59,12 +60,9 @@ def safe_join(root: Path | str, rel: str) -> Path:
 
 
 def _chapter_key(rel: str) -> str | None:
+    # 【红线】不匹配返回 None、调用方静默跳过——外置大脑等非章节文件的保存走同一写盘口,raise 会炸它们。
     m = _CHAP_RE.match(str(rel).replace("\\", "/"))
     return m.group(1) if m else None
-
-
-def _hist_dir(root: Path | str, key: str) -> Path:
-    return Path(root) / "正文" / HISTORY_DIR / key
 
 
 def snapshot_chapter(root: Path | str, rel: str) -> None:

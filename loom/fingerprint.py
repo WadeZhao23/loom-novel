@@ -24,6 +24,7 @@ from .chaptertext import strip_title
 from .errors import render
 from .fsutil import atomic_write_text
 from .guard import FINGERPRINT, guard_write, validate_output, visible_len
+from .paths import FINGERPRINT_REL, chapter_path, fp_history_path, snapshot_path
 from .state import mark_learned, set_fingerprint_source, unmark_learned
 
 Progress = Callable[[dict], None]
@@ -31,9 +32,6 @@ Progress = Callable[[dict], None]
 
 def _noop(event: dict) -> None:
     pass
-
-
-FINGERPRINT_REL = "外置大脑/写作指纹.md"
 
 _SEED_SYSTEM = """你是一个文风分析器。从用户给的真实写作样本里,提炼出一份可复用的【写作指纹】\
 ——也就是"这个人写东西的辨识特征"。只看怎么写(句式/用词/节奏/口头禅/爱用和绝不用的表达),\
@@ -197,8 +195,8 @@ def _aligned_signal(snapshot: str, edited: str) -> str:
 
 def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progress = _noop,
           *, appraisal_backend: Backend | None = None) -> Path:
-    edited_path = project_root / "正文" / f"第{chapter_n}章.md"
-    snap_path = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
+    edited_path = chapter_path(project_root, chapter_n)
+    snap_path = snapshot_path(project_root, chapter_n)
     if not snap_path.exists() or not edited_path.exists():
         raise LoomBackendError(f"第 {chapter_n} 章还没生成过(找不到原稿快照)。先写第 {chapter_n} 章。")
     # 去掉首行标题再比/再 diff:只改标题不算「手改」、绝不被当文风学进指纹(标题与正文体物理隔离)
@@ -231,8 +229,7 @@ def learn(project_root: Path, chapter_n: int, backend: Backend, progress: Progre
     # 磨短/丢 anchor 时,仍然写入,但显著提示「可一键撤销」——不硬拦,不替你判定 learn 合不合格。
     warn = _shrink_warning(old_fp, new_fp)
     # 备份 learn 前的指纹,供作者一键撤销(人兜"形对神错"——自动打分兜不住)
-    hist = project_root / "外置大脑" / ".指纹历史"
-    atomic_write_text(hist / f"第{chapter_n}章-learn前.md", old_fp)
+    atomic_write_text(fp_history_path(project_root, chapter_n), old_fp)
     atomic_write_text(fp_path, new_fp + "\n")
     mark_learned(project_root, chapter_n)
     if warn:
@@ -260,7 +257,7 @@ def revert_learn(project_root: Path, chapter_n: int) -> Path | None:
 
     撤完即清备份(撤销是一次性的);同章学过多次时,撤的是最近那次。
     """
-    backup = project_root / "外置大脑" / ".指纹历史" / f"第{chapter_n}章-learn前.md"
+    backup = fp_history_path(project_root, chapter_n)
     if not backup.exists():
         return None
     fp_path = project_root / FINGERPRINT_REL

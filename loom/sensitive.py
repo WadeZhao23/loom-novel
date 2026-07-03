@@ -8,8 +8,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-REL = "外置大脑/违禁词.md"
-CARD_REL = "外置大脑/立项卡.md"  # 立项卡的「平台:」行给基线定松紧(粗粒度二档,非逐平台白名单)
+from .paths import BANNED_REL as REL
+from .paths import PROJECT_CARD_REL as CARD_REL  # 立项卡的「平台:」行给基线定松紧(粗粒度二档,非逐平台白名单)
 _SPLIT = re.compile(r"[、,，/\s]+")
 _TRIGGER = re.compile(r"^\**\s*触发词\**\s*[:：]\s*(.+)$")
 _HEAD = re.compile(r"^#+\s*(.+?)\s*$")

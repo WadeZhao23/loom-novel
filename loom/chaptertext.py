@@ -40,6 +40,18 @@ def strip_title(text: str) -> str:
     return split_title(text)[1]
 
 
+def body_key(text: str) -> str:
+    """归一化正文体(去首行标题、去首尾空白)——「手改判定」的统一口径。
+    ledger 比的是落盘 sha,拿它归一后再哈希,与 body_changed 同一口径。"""
+    return strip_title(text).strip()
+
+
+def body_changed(a: str, b: str) -> bool:
+    """正文体是否被手改(改标题不算)。server 侧栏「改过」徽标 / cli status /
+    ledger.chapter_drifted 三处「手改判定」共用此谓词,口径永不漂移。"""
+    return body_key(a) != body_key(b)
+
+
 def compose(title: str | None, body: str) -> str:
     """把标题 + 正文体拼回章节文本(标题为空则只返回正文体)。不带尾换行,落盘处统一补。"""
     body = body.strip("\n")

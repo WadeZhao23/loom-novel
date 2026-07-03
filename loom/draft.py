@@ -16,6 +16,7 @@ from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
 from .guard import DRAFT_SECTION, validate_output
+from .paths import CARD_REL, CHARS_REL, WORLD_REL
 
 Progress = Callable[[dict], None]
 
@@ -24,9 +25,9 @@ def _noop(event: dict) -> None:
     pass
 
 
-_SECTIONS = [("世界观", "外置大脑/世界观.md"),
-             ("人物卡", "外置大脑/人物卡.md"),
-             ("卡章纲", "外置大脑/卡章纲.md")]
+_SECTIONS = [("世界观", WORLD_REL),
+             ("人物卡", CHARS_REL),
+             ("卡章纲", CARD_REL)]
 
 _DRAFT_SYSTEM = """你是资深网文设定师。根据【书名 + 题材 + 作者的一句话设定】,起草三份【外置大脑】底稿,\
 给作者一个不空的起点(是初稿、不是定稿,作者会接着改)。严格按下面三段输出,用三个分隔标记隔开,\

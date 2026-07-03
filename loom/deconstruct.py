@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from .fsutil import atomic_write_text
+from .paths import DECONSTRUCT_DIR
 
 Render = Callable[[dict], None]
 
@@ -51,7 +52,7 @@ def deconstruct(root: Path, source_text: str, name: str,
     out_text = backend.complete(system, source_text, max_chars=3000)
 
     # 物理隔离(红线②):只写隔离草稿区,绝不碰 世界观.md / 写作指纹.md / 正文/
-    out_path = root / "外置大脑" / ".拆书" / f"{name}-拆解.md"
+    out_path = root / DECONSTRUCT_DIR / f"{name}-拆解.md"
     atomic_write_text(out_path, out_text.strip() + "\n")
     render({"type": "info", "message": f"已落:{out_path}"})
     return out_path

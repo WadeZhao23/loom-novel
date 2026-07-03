@@ -20,16 +20,13 @@ from typing import Callable
 
 from .backends import Backend
 from .fsutil import atomic_write_text
+from .paths import CHARS_REL, WORLD_REL, chapter_path
 
 Progress = Callable[[dict], None]
 
 
 def _noop(event: dict) -> None:
     pass
-
-
-WORLD_REL = "外置大脑/世界观.md"
-CHARS_REL = "外置大脑/人物卡.md"
 _SUPP_SECTION = "## AI 补充(loom learn 后随章自动追加,你可改可删;绝不覆盖你上面手写的)"
 
 _ENRICH_SYSTEM = """你是设定连续性记录员。我给你:① 现有【世界观】;② 现有【人物卡】;③ 这一章的【作者定稿正文】。
@@ -88,7 +85,7 @@ def _append_supplement(text: str, n: int, body: str) -> str | None:
 def enrich_chapter(project_root: Path, chapter_n: int,
                    backend: Backend, progress: Progress = _noop) -> dict | None:
     """从第 N 章定稿蒸馏新设定/新人物,追加进世界观/人物卡。返回本次追加的 {世界观, 人物卡}。"""
-    final_path = project_root / "正文" / f"第{chapter_n}章.md"
+    final_path = chapter_path(project_root, chapter_n)
     if not final_path.exists():
         return None  # 没正文不报错(enrich 是附赠,绝不阻断 learn)
     world_path = project_root / WORLD_REL

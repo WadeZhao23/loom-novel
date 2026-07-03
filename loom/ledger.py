@@ -14,13 +14,10 @@ import hashlib
 import json
 from pathlib import Path
 
-from .chaptertext import strip_title
+from .chaptertext import body_key
 from .fsutil import atomic_write_text
+from .paths import chapter_path, ledger_path as _ledger_path
 from typing import Callable
-
-
-def _ledger_path(root: Path, n: int) -> Path:
-    return root / "正文" / ".原稿" / f"第{n}章.ledger.json"
 
 
 def sha(text: str) -> str:
@@ -49,22 +46,24 @@ def record_step(root: Path, n: int, role: str, output: str, upstream_sha: str) -
 
 
 def record_snapshot(root: Path, n: int, final_text: str) -> None:
-    # snapshot_sha 只比【正文体】(去掉首行标题):改标题不算「手改正文」,不该触发 drifted 重写闸。
-    # 老章无 H1 时 strip_title 原样返回,sha 与旧账本一致——向后兼容,无需迁移。
+    # snapshot_sha 只比【正文体】(chaptertext.body_key 归一):改标题不算「手改正文」,不该触发 drifted 重写闸。
+    # 老章无 H1 时 body_key 原样返回,sha 与旧账本一致——向后兼容,无需迁移。
     led = load_ledger(root, n)
-    led["snapshot_sha"] = sha(strip_title(final_text).strip())
+    led["snapshot_sha"] = sha(body_key(final_text))
     save_ledger(root, n, led)
 
 
 def chapter_drifted(root: Path, n: int) -> bool:
-    """正文/第N章.md 的【正文体】与上次落盘的终稿不一致(作者手改过正文)→ True。改标题不算。"""
-    out = root / "正文" / f"第{n}章.md"
+    """正文/第N章.md 的【正文体】与上次落盘的终稿不一致(作者手改过正文)→ True。改标题不算。
+
+    与 server 徽标 / cli status 的 body_changed 同口径(body_key 归一),只是这里比的是落盘 sha。"""
+    out = chapter_path(root, n)
     if not out.exists():
         return False
     led = load_ledger(root, n)
     if not led.get("snapshot_sha"):
         return False
-    return sha(strip_title(out.read_text(encoding="utf-8")).strip()) != led["snapshot_sha"]
+    return sha(body_key(out.read_text(encoding="utf-8"))) != led["snapshot_sha"]
 
 
 def resume_point(root: Path, n: int,

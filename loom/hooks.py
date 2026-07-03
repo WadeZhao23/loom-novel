@@ -18,8 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .gates import Issue
-
-CARD_REL = "外置大脑/卡章纲.md"
+from .paths import CARD_REL
 
 _CH = re.compile(r"^- 第(\d+)章[:：]")              # 顶格章规划行(人手写)
 _FORE = re.compile(r"\[(埋设|推进|回收)\]\s*(.+?)\s*$")  # recap 写的伏笔行(缩进)

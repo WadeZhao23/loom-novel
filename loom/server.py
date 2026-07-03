@@ -19,11 +19,12 @@ from .agents import run_pipeline
 from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
                        probe as probe_backend, provider_catalog, validate_model)
 from . import chapters as chap
-from .chaptertext import parse_title, strip_title
+from . import paths
+from .chaptertext import body_changed, parse_title
 from . import ledger
 from .config import (Config, key_is_set, load_config, openai_compat_key_is_set,
                      provider_key_is_set, save_config, set_provider_key)
-from .doctor import AGENT_FILES, BRAIN_FILES, report, run_checks
+from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN, report, run_checks
 from .fingerprint import changed_rules, neutral_default, revert_learn
 from .fingerprint import learn as fp_learn
 from .fingerprint import seed_from_inherit, seed_from_reference, seed_from_samples
@@ -84,14 +85,13 @@ def _is_project(p: Path) -> bool:
 def _state(root: Path) -> dict:
     cfg = load_config(root)
     st = load_state(root)
-    body = root / "正文"
-    chapters = sorted(int(p.stem[1:-1]) for p in body.glob("第*章.md")) if body.exists() else []
+    chapters = paths.chapter_numbers(root)
     chs = []
     for n in chapters:
-        out, snap = body / f"第{n}章.md", body / ".原稿" / f"第{n}章.md"
+        out, snap = paths.chapter_path(root, n), paths.snapshot_path(root, n)
         out_text = out.read_text(encoding="utf-8")
         # 「改过」只看正文体(去掉标题再比):改标题不算手改、不该亮「改过」徽标(与 learn/drift 同口径)
-        edited = snap.exists() and strip_title(out_text).strip() != strip_title(snap.read_text(encoding="utf-8")).strip()
+        edited = snap.exists() and body_changed(out_text, snap.read_text(encoding="utf-8"))
         chs.append({"n": n, "title": parse_title(out_text), "written": True,
                     "edited": edited, "learned": n in set(st.get("learned", []))})
     return {
@@ -106,13 +106,9 @@ def _state(root: Path) -> dict:
                                  for pid, spec in PROVIDERS.items()},
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": f"外置大脑/{n}.md", "name": n} for n in BRAIN_FILES]
-                 + ([{"rel": "外置大脑/立项卡.md", "name": "立项卡"}]
-                    if (root / "外置大脑" / "立项卡.md").is_file() else [])
-                 + ([{"rel": "外置大脑/文风参考.md", "name": "文风参考"}]
-                    if (root / "外置大脑" / "文风参考.md").is_file() else [])
-                 + ([{"rel": "外置大脑/违禁词.md", "name": "违禁词"}]
-                    if (root / "外置大脑" / "违禁词.md").is_file() else []),
+        "brain": [{"rel": paths.brain_rel(n), "name": n} for n in BRAIN_FILES]
+                 + [{"rel": paths.brain_rel(n), "name": n} for n in OPTIONAL_BRAIN
+                    if (root / paths.brain_rel(n)).is_file()],
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
         "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
         "chapters": chs,
@@ -387,7 +383,7 @@ def learn(b: ChapterBody):
     lock = _try_lock(root)
     if lock is None:
         return _busy()
-    fp_file = root / "外置大脑" / "写作指纹.md"
+    fp_file = root / paths.FINGERPRINT_REL
     events: list[dict] = []
     try:
         # 缺文件时用 neutral_default 兜底,与 learn() 内部的旧指纹基线同源(否则 changes 会全量误报)
@@ -400,14 +396,14 @@ def learn(b: ChapterBody):
         lock.release()
     new_fp = fp_file.read_text(encoding="utf-8")
     from .enrich import extract_supplement
-    world_p = root / "外置大脑" / "世界观.md"
-    chars_p = root / "外置大脑" / "人物卡.md"
+    world_p = root / paths.WORLD_REL
+    chars_p = root / paths.CHARS_REL
     world_supp = extract_supplement(world_p.read_text(encoding="utf-8"), b.chapter) if world_p.exists() else ""
     chars_supp = extract_supplement(chars_p.read_text(encoding="utf-8"), b.chapter) if chars_p.exists() else ""
     done = next((e for e in events if e.get("type") == "learn_done"), {})
     return {"ok": True,
             "fingerprint": new_fp,
-            "卡章纲": (root / "外置大脑" / "卡章纲.md").read_text(encoding="utf-8"),
+            "卡章纲": (root / paths.CARD_REL).read_text(encoding="utf-8"),
             "changes": changed_rules(old_fp, new_fp),
             "世界观补充": world_supp,
             "人物卡补充": chars_supp,
@@ -510,7 +506,7 @@ class WriteBody(BaseModel):
 @app.post("/api/write")
 def write(b: WriteBody):
     root = Path(b.root)
-    out = root / "正文" / f"第{b.chapter}章.md"
+    out = paths.chapter_path(root, b.chapter)
     if out.exists() and not b.force:
         if ledger.chapter_drifted(root, b.chapter):
             return JSONResponse(

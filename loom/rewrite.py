@@ -12,6 +12,7 @@ from typing import Callable
 
 from .backends import Backend
 from .fsutil import atomic_write_text, snapshot_chapter
+from .paths import FINGERPRINT_REL, chapter_path, chapter_rel, snapshot_path
 
 Progress = Callable[[dict], None]
 
@@ -29,7 +30,7 @@ def rewrite_span(project_root: Path, chapter_n: int, full_text: str, span: str,
                  instruction: str, backend: Backend, progress: Progress = _noop) -> str:
     if not span.strip():
         raise ValueError("没选中要重写的段落。先在正文里选一段。")
-    fp_path = project_root / "外置大脑" / "写作指纹.md"
+    fp_path = project_root / FINGERPRINT_REL
     fp = fp_path.read_text(encoding="utf-8") if fp_path.exists() else "(还没有写作指纹)"
     progress({"type": "info", "message": "正在按你的嗓音重写选中段…"})
     user = (
@@ -44,10 +45,10 @@ def rewrite_span(project_root: Path, chapter_n: int, full_text: str, span: str,
 def apply_rewrite(project_root: Path, chapter_n: int, new_content: str,
                   old_span: str, new_span: str) -> None:
     """落盘正文 + 外科式同步快照(把快照里的旧段换成新段,只换一处)。守住 learn 不被 AI 重写污染。"""
-    out = project_root / "正文" / f"第{chapter_n}章.md"
-    snap = project_root / "正文" / ".原稿" / f"第{chapter_n}章.md"
+    out = chapter_path(project_root, chapter_n)
+    snap = snapshot_path(project_root, chapter_n)
     body = new_content.rstrip() + "\n"
-    snapshot_chapter(project_root, f"正文/第{chapter_n}章.md")  # 应用重写前留一版,误替换可回滚
+    snapshot_chapter(project_root, chapter_rel(chapter_n))  # 应用重写前留一版,误替换可回滚
     atomic_write_text(out, body)
     if snap.exists():
         s = snap.read_text(encoding="utf-8")

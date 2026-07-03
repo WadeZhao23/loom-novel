@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .chaptertext import strip_title
 from .gates import Issue
+from .paths import chapter_path
 
 WINDOW = 5              # 只比最近 5 章(够抓套路,不拖)
 _OPEN_CLOSE_FLOOR = 0.62  # 章首/章末雷同的 Dice 阈值(偏高,避免误伤正常的相似过渡)
@@ -81,7 +82,7 @@ def scan(project_root: Path | str, chapter_n: int, draft: str,
 def _prior_chapters(project_root: Path, chapter_n: int, window: int) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
     for k in range(max(1, chapter_n - window), chapter_n):
-        p = project_root / "正文" / f"第{k}章.md"
+        p = chapter_path(project_root, k)
         if p.exists():
             body = strip_title(p.read_text(encoding="utf-8")).strip()
             if body:

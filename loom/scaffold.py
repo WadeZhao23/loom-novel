@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .fingerprint import neutral_default
 from .fsutil import atomic_write_text
+from .paths import BODY_DIR, FINGERPRINT_REL, SNAPSHOT_DIR
 
 # init 靠下面的 copytree 把整份 templates/ 铺进项目。外置大脑里的
 # 立项卡 / 文风参考 / 违禁词 三份都是【人手维护、init 拷一次、loom 从不回写】的可选卡——
@@ -17,7 +18,7 @@ from .fsutil import atomic_write_text
 # 中性默认(见下方 init 末尾),因为它要随 seed/learn 演进,不能只拷模板。
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 SAMPLE_DIR = Path(__file__).parent / "sample"  # 内置样例书《重生记忆》(2 章 + 进化过的指纹)
-HIGHLIGHT = "外置大脑/写作指纹.md"  # 全片卖点
+HIGHLIGHT = FINGERPRINT_REL  # 全片卖点
 GENRE_DIR = "skills/题材"  # 题材库目录(相对项目根)
 
 
@@ -84,11 +85,11 @@ def init(name: str, parent: Path | None = None, genre: str | None = None) -> Pat
     atomic_write_text(toml, toml.read_text(encoding="utf-8").replace("__TITLE__", name))
 
     # 写作指纹.md 离线落一份中性默认(不联网、不播种)
-    atomic_write_text(target / "外置大脑" / "写作指纹.md", neutral_default())
+    atomic_write_text(target / FINGERPRINT_REL, neutral_default())
 
     # 正文/.原稿 先建好(AI 原稿快照将落在这里)
-    (target / "正文" / ".原稿").mkdir(parents=True, exist_ok=True)
-    gitkeep = target / "正文" / ".gitkeep"
+    (target / SNAPSHOT_DIR).mkdir(parents=True, exist_ok=True)
+    gitkeep = target / BODY_DIR / ".gitkeep"
     if gitkeep.exists():
         gitkeep.unlink()
 
