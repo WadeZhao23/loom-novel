@@ -280,7 +280,7 @@ button:disabled { opacity: .55; cursor: default; }
   width: 40px; height: 40px; border-radius: 50%; flex: none;
   border: 1px solid var(--line); background: var(--accent-tint);
 }
-.agent-ava { object-fit: cover; filter: grayscale(.5) sepia(.14) contrast(.9) brightness(1.03); }
+.agent-ava { object-fit: cover; }
 .agent-fallback { display: flex; align-items: center; justify-content: center;
   color: var(--accent-ink); font-weight: 700; font-size: var(--fs-sm); }
 .agent-info { min-width: 0; }
@@ -303,7 +303,7 @@ button:disabled { opacity: .55; cursor: default; }
 .flow-stage.on { border-color: var(--accent); background: var(--accent-tint); box-shadow: var(--shadow-1); }
 .flow-ava, .flow-fallback { width: 56px; height: 56px; border-radius: 50%; flex: none;
   border: 1px solid var(--line); background: var(--accent-tint); }
-.flow-ava { object-fit: cover; filter: grayscale(.5) sepia(.14) contrast(.9) brightness(1.03); }
+.flow-ava { object-fit: cover; }
 .flow-fallback { display: flex; align-items: center; justify-content: center;
   color: var(--accent-ink); font-weight: 700; font-size: var(--fs-h2); }
 .flow-body { min-width: 0; }
