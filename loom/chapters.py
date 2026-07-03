@@ -1,9 +1,12 @@
 """章节结构操作:删除 / 在后插入空章 / 上下移。
 
 核心是**安全重编号**:把一章的全部关联产物一起搬,两段式 rename(先全搬到临时名,
-再搬到目标名)避免碰撞;删除走 正文/.回收站/ 可恢复;state.learned 章号同步重映射。
+再搬到目标名)避免碰撞;删除走 正文/.回收站/ 可恢复;state.learned 章号同步重映射;
+loom 自己写的嵌入式块(卡章纲 [AI回顾] 子块、世界观/人物卡 [AI补充·第N章])的章号键
+也跟着同一批 mapping 两段式搬(不搬会卡 write-once、显示错章内容)。
 
-不动**卡章纲**:那是人写的规划,自动改太脆;改完只提示作者手动同步对应章号。
+不动**人写的部分**:卡章纲的规划行 / 世界观人物卡的手写主体,自动改太脆,
+改完只提示作者手动同步对应章号(SYNC_NOTE)。
 所有移动复用 fsutil 的原子语义(os.replace),配合既有的原子写 + 单章历史,不丢稿。
 """
 from __future__ import annotations
@@ -49,6 +52,13 @@ def _renumber(root: Path, mapping: dict[int, int]) -> None:
         for tmp, i, new in staged:                 # 段二:临时 → new
             d, tmpl, _ = _ARTIFACTS[i]
             _move(tmp, root / d / tmpl.format(n=new))
+        # 嵌入式块的章号键跟着同一批 mapping 搬(同为两段式):世界观/人物卡的 [AI补充·第N章]
+        # 块 + 卡章纲的 [AI回顾] 子块。不搬是真 bug:键指旧章号 → learn 被 write-once 挡住、
+        # 界面显示错章的回顾/设定。只动 loom 自己写的块;人写的规划行/设定主体一字不碰。
+        from .enrich import remap_supplement_keys
+        from .recap import remap_recap_keys
+        remap_supplement_keys(root, mapping)
+        remap_recap_keys(root, mapping)
     # state.learned 跟着重映射(删除的章已在调用方先摘掉)
     st = state.load_state(root)
     st["learned"] = sorted({mapping.get(x, x) for x in st.get("learned", [])})

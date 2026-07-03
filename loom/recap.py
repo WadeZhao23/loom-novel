@@ -165,3 +165,35 @@ def strip_recap(project_root: Path, chapter_n: int) -> str | None:
     new_lines = lines[:s] + lines[e:]
     atomic_write_text(card_path, "\n".join(new_lines) + ("\n" if raw.endswith("\n") else ""))
     return removed
+
+
+def remap_recap_keys(project_root: Path, mapping: dict[int, int]) -> None:
+    """章节重编号时:把卡章纲里各章的 [AI回顾] 子块搬到新章号的规划行下。
+
+    两段式(与 chapters._renumber 搬文件同法):先把受影响章的子块全部摘下,再按新章号
+    逐个挂回,防 2↔3 互换互相覆盖。只搬 loom 自己写的 [AI回顾] 子块,人手写的规划行
+    一字不动(章号同步仍靠 SYNC_NOTE 提示作者)。新章号在卡章纲里还没有规划行(或该行下
+    已有别的 [AI回顾])→ 该子块无处可挂,放弃——宁可丢一条 AI 回顾,也不猜着造/改人写的规划行。
+    """
+    mapping = {o: n for o, n in mapping.items() if o != n}
+    card_path = project_root / CARD_REL
+    if not mapping or not card_path.exists():
+        return
+    raw = card_path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    moved: list[tuple[int, str]] = []
+    for old, new in mapping.items():       # 段一:摘下(逐个重定位——删行后下标会变)
+        span = _recap_span(lines, old)
+        if span is None:
+            continue
+        s, e = span
+        moved.append((new, "\n".join(lines[s:e])))
+        lines = lines[:s] + lines[e:]
+    if not moved:
+        return
+    card = "\n".join(lines) + ("\n" if raw.endswith("\n") else "")
+    for new, block in moved:               # 段二:挂回新章行下
+        updated = _append_recap(card, new, block)
+        if updated is not None:
+            card = updated
+    atomic_write_text(card_path, card)
