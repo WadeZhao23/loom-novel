@@ -97,6 +97,12 @@ author_errors: dict[str, AuthorError] = {
         impact="这一步没产出,你的稿子没受影响。",
         next_action="先在终端跑一次 `codex exec \"你好\"` 确认 codex 本身能用、已 `codex login`;若 model 填了 codex 不认的名字,清空模型框让它用默认。细节见下方反馈。",
     ),
+    "claude_call_failed": AuthorError(
+        title="调用 claude 没成功",
+        reason="`claude -p` 返回了非零、或子进程本身起不来(可能没登录、模型名不对、网络不通,或一个还没归类的 CLI 错误)。",
+        impact="这一步没产出,你的稿子没受影响。",
+        next_action="先在终端跑一次 `claude -p \"你好\"` 确认 claude 本身能用、已登录过;若 model 填了 claude 不认的名字,清空模型框让它用 sonnet。细节见下方反馈。",
+    ),
     "project_root_not_found": AuthorError(
         title="这里不是一个 Loom 项目",
         reason="从当前目录一路向上都没找到 loom.toml,无法确定要操作哪本书。",

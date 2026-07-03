@@ -49,3 +49,33 @@ def test_probe_presets_key_kind():
     for pid in _PRESETS:
         d = probe(pid)
         assert d["ok"] and d["kind"] == "key"
+
+
+# ---- S7c: capability 字段化 + CLI 错误 code 对齐 ----
+
+def test_capability_fields_drive_dispatch():
+    from loom.backends import PROVIDERS, _budget_tokens
+    # deepseek 声明思考型 → 底线预算;国产预设未声明 → 走通用换算(与旧 provider==deepseek 分支等价)
+    assert PROVIDERS["deepseek"].get("thinking_budget") is True
+    assert PROVIDERS["deepseek"].get("error_family") == "deepseek"
+    assert not PROVIDERS["zhipu"].get("thinking_budget")
+    assert _budget_tokens("deepseek", 24) == 6144           # 思考型底线
+    assert _budget_tokens("zhipu", 24) == int(24 * 2.2)     # 非思考型:通用换算,不吃底线
+
+
+def test_error_family_selects_deepseek_mapping(monkeypatch):
+    from loom.backends import OpenAICompatBackend
+    from loom.config import Config
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    monkeypatch.setenv("LOOM_ZHIPU_KEY", "zp-x")
+    ds = OpenAICompatBackend(Config(provider="deepseek", model="deepseek-v4-pro"), "deepseek")
+    zp = OpenAICompatBackend(Config(provider="zhipu", model="glm-x"), "zhipu")
+    assert ds._empty_code == "deepseek_empty_response"      # error_family=deepseek
+    assert zp._empty_code == "model_empty_response"          # 缺省 generic
+
+
+def test_cli_backends_raises_carry_codes():
+    # 三处此前裸 raise 的 CLI 错误现在都带 code(前端可差异化提示);错误目录条目都在
+    from loom.errors import render
+    assert "claude" in render("claude_call_failed")
+    assert "codex" in render("codex_call_failed")

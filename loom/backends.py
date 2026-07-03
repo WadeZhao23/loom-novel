@@ -31,12 +31,16 @@ OnChunk = Callable[[str], None]
 # ----------------------------- 供应商路由表(唯一真相) -----------------------------
 # kind: "openai"=OpenAI 兼容 HTTP;"cli"=shell 到本机客户端。
 # models 只是【预设建议】,前端是可编辑下拉 + 「拉取可用模型」实时拉真实列表,名字怎么变都不过时。
+# 行为字段(S7,缺省即默认值,新接供应商只改数据不改代码):
+#   thinking_budget: True=思考型,max_tokens 给底线+思考余量(缺省 False,见 _budget_tokens)
+#   error_family: "deepseek"=异常映射/空响应走 DeepSeek 专属错误目录(缺省 "generic")
 PROVIDERS: dict[str, dict] = {
     "deepseek": {
         "label": "DeepSeek", "kind": "openai",
         "base_url": "https://api.deepseek.com", "base_url_locked": True,
         "key_env": "DEEPSEEK_API_KEY", "needs_key": True,
         "default_model": "deepseek-v4-pro",
+        "thinking_budget": True, "error_family": "deepseek",
         # 现役 V4 都是【思考型】模型(deepseek-chat 非思考别名已停用);backend 已为思考预留 token 预算
         # (见 OpenAICompatBackend.complete)。默认 pro(更强);更快更省可选 flash。
         "models": [
@@ -206,11 +210,14 @@ def _budget_tokens(provider: str, max_chars: int | None) -> int:
     易被思考占满 → content 空(deepseek_empty_response 的真因)。给思考留足余量(+4096)+ 底线(6144)、
     封顶 8192(DeepSeek 接受的上限)。8192 token ≈ 1.3 万字空间,所以「章节超长」绝不能靠调小这里治
     ——会拦腰截断 + 复发思考型空响应(2.0.1 的老坑)。其它 OpenAI 兼容供应商维持原样——它们各家
-    模型输出上限不同,贸然抬高 max_tokens 可能被拒。"""
+    模型输出上限不同,贸然抬高 max_tokens 可能被拒。
+
+    按 PROVIDERS 的 thinking_budget 字段分发(S7):openai_compat 接新思考型时只改数据。"""
+    thinking = PROVIDERS.get(provider, {}).get("thinking_budget", False)
     if not max_chars:
-        return 8192 if provider == "deepseek" else 2048
+        return 8192 if thinking else 2048
     base = int(max_chars * 2.2)
-    if provider == "deepseek":
+    if thinking:
         return min(8192, max(6144, base + 4096))
     return base
 
@@ -224,8 +231,9 @@ class OpenAICompatBackend:
         self.model = (config.model or "").strip() or spec["default_model"]
         # base_url:锁死的取注册表,自定义的取 config.base_url
         base_url = spec["base_url"] if spec.get("base_url_locked") else ((config.base_url or "").strip() or spec.get("base_url", ""))
-        self._empty_code = "deepseek_empty_response" if provider == "deepseek" else "model_empty_response"
-        self._map = _deepseek_error if provider == "deepseek" else _openai_compat_error
+        family = spec.get("error_family", "generic")   # 异常映射按注册表字段分发(S7)
+        self._empty_code = "deepseek_empty_response" if family == "deepseek" else "model_empty_response"
+        self._map = _deepseek_error if family == "deepseek" else _openai_compat_error
 
         if provider != "deepseek" and not self.model:
             raise LoomBackendError(render("model_name_missing"), code="model_name_missing")
@@ -316,9 +324,11 @@ class ClaudeCodeBackend:
         except subprocess.TimeoutExpired as e:
             raise LoomBackendError(render("claude_timeout", detail=f"timeout={timeout}s"), code="claude_timeout") from e
         except Exception as e:
-            raise LoomBackendError(f"调用 claude 失败:{e}") from e
+            raise LoomBackendError(render("claude_call_failed", detail=str(e)),
+                                   code="claude_call_failed") from e
         if out.returncode != 0:
-            raise LoomBackendError(f"claude 返回非零:{out.stderr.strip()}")
+            raise LoomBackendError(render("claude_call_failed", detail=out.stderr.strip()[:500]),
+                                   code="claude_call_failed")
         text = out.stdout.strip()
         if not text:  # 跑完却没吐正文 → 报错,别把空往下传
             raise LoomBackendError(render("backend_empty_response", detail=f"model={self.model}"),
@@ -368,7 +378,8 @@ class CodexBackend:
                 raise LoomBackendError(render("codex_timeout", detail=f"timeout={timeout}s"),
                                        code="codex_timeout") from e
             except Exception as e:
-                raise LoomBackendError(f"调用 codex 失败:{e}") from e
+                raise LoomBackendError(render("codex_call_failed", detail=str(e)),
+                                       code="codex_call_failed") from e
             if out.returncode != 0:
                 raise LoomBackendError(render("codex_call_failed", detail=out.stderr.strip()[:500]),
                                        code="codex_call_failed")
