@@ -780,8 +780,8 @@ function showLearnChanges(changes, recap, supp) {
       add.forEach((l) => { const e = document.createElement("div"); e.className = "chg add"; e.textContent = "+ " + l; box.appendChild(e); });
     }
   }
-  // 有删除时,撤掉「保留」的金色强调——让红色「撤销」成为唯一显眼按钮,
-  // 别让作者顺手点金色「保留」把攒下来的嗓音丢了。
+  // 有删除时,撤掉「保留」的墨色强调——让「撤销」成为唯一显眼按钮,
+  // 别让作者顺手点「保留」把攒下来的嗓音丢了。
   $("learn-keep").classList.toggle("primary", rem.length === 0);
   const wrap = $("learn-recap-wrap");
   if (recap) { $("learn-recap").textContent = recap; wrap.classList.remove("hidden"); }
