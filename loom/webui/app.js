@@ -116,6 +116,9 @@ function bind() {
   $("btn-theme").onclick = toggleTheme;
   $("btn-focus").onclick = toggleFocus;
   $("focus-exit").onclick = exitFocus;
+  $("btn-settings").onclick = openSettings;
+  $("settings-close").onclick = () => $("settings-overlay").classList.add("hidden");
+  $("kbd-hint").onclick = openCmdk;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
   $("flow-close").onclick = () => $("flow-overlay").classList.add("hidden");
@@ -162,8 +165,27 @@ function bind() {
   $("learn-revert").onclick = revertLearn;
   $("run-close").onclick = closeRun;
 
-  // 编辑器:实时字数 + 自动保存 + 搜索联动
-  $("editor").addEventListener("input", () => { updateWordCount(); markDirty(); if (_searchOn) runSearch(); });
+  // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
+  $("editor").addEventListener("input", () => { updateWordCount(); markDirty(); if (_searchOn) runSearch(); noteTyping(); });
+  $("editor").addEventListener("blur", () => document.body.classList.remove("typing"));
+
+  // 朱批浮条:选中正文就地浮出「重写这段/复制」
+  const ed = $("editor");
+  ed.addEventListener("mouseup", maybeSealBar);
+  ed.addEventListener("keyup", maybeSealBar);
+  ed.addEventListener("scroll", hideSealBar);
+  $("seal-bar").addEventListener("mousedown", (e) => e.preventDefault());  // 别抢走 textarea 的选区
+  document.addEventListener("mousedown", (e) => {
+    const b = $("seal-bar");
+    if (b.classList.contains("on") && !b.contains(e.target) && e.target !== ed) hideSealBar();
+  });
+  $("seal-rewrite").onclick = () => { hideSealBar(); openRewrite(); };
+  $("seal-copy").onclick = async () => {
+    const t = ed.value.substring(ed.selectionStart, ed.selectionEnd);
+    try { await navigator.clipboard.writeText(t); toast("已复制"); }
+    catch (e) { toast("复制失败:" + e.message, true); }
+    hideSealBar();
+  };
 
   // 章内搜索
   $("btn-search").onclick = openSearch;
@@ -487,8 +509,8 @@ async function draftBrain(idea) {
   // 起草也要后端就绪:顺手保存后端(同写章),deepseek 仍缺 key 才拦
   try { await persistBackend(true); } catch (e) { toast("先配置好后端:" + e.message, true); return; }
   if (DATA.backend.provider === "deepseek" && !DATA.backend.key_set) {
-    toast("先填 DeepSeek key(或把后端切到 Claude / Codex 免 key)再生成初稿", true);
-    const k = $("api-key"); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); }
+    toast("先在设置里填 DeepSeek key(或把供应商切到 Claude / Codex 免 key)再生成初稿", true);
+    flashSetting("api-key");
     return;
   }
   toast("AI 正在起草 世界观 / 人物卡 / 卡章纲…十几秒,稍候");
@@ -926,16 +948,15 @@ let _wroteChapter = null;
 async function writeChapter(n, force) {
   // 写章 = 顺手保存后端:不必先点「保存后端」,点写章就把当前后端表单(provider/model/字数/key)落盘
   try { await persistBackend(true); } catch (e) { toast("保存后端失败:" + e.message, true); return; }
-  // 首跑防空转:没填 key/base_url 就别进面板转半天再报错,直接提示 + 高亮对应输入框
+  // 首跑防空转:没填 key/base_url 就别进面板转半天再报错——自动打开设置并高亮对应输入框
   const be = (DATA && DATA.backend) || {};
-  const flash = (id) => { const k = $(id); if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); } };
   if (be.provider === "deepseek" && !be.key_set) {
-    toast("先在顶栏填 DeepSeek API Key(或把后端切到 Claude / Codex 免 key)再开写", true);
-    flash("api-key"); return;
+    toast("先在设置里填 DeepSeek API Key(或把供应商切到 Claude / Codex 免 key)再开写", true);
+    flashSetting("api-key"); return;
   }
   if (be.provider === "openai_compat" && (!be.base_url || !be.openai_compat_key_set)) {
     toast("自定义供应商要先填 base_url + API Key 再开写", true);
-    flash(!be.base_url ? "base-url" : "api-key"); return;
+    flashSetting(!be.base_url ? "base-url" : "api-key"); return;
   }
   _wroteChapter = null;
   $("run-title").textContent = `正在写第 ${n} 章…`;
@@ -1249,10 +1270,21 @@ function buildCmds() {
     if (CUR && CUR.chapter != null) {
       c.push({ label: `重写本章(覆盖第${CUR.chapter}章)`, run: () => confirmRewriteChapter(CUR.chapter) });
       c.push({ label: "学这章的手改 learn", run: () => learn(CUR.chapter) });
+      c.push({ label: "本章细纲(看/改分镜)", keywords: "outline 大纲", run: () => openOutline(CUR.chapter) });
+      c.push({ label: "本章版本历史", keywords: "回滚 快照 history", run: openHistory });
+      c.push({ label: "违禁词自检(本章)", keywords: "敏感词 审核", run: scanSensitive });
     }
     if (CUR && CUR.editable) c.push({ label: "保存", key: "⌘S", run: saveFile });
-    if (CUR) c.push({ label: "章内搜索", key: "⌘F", run: openSearch });
+    if (CUR) {
+      c.push({ label: "章内搜索", key: "⌘F", run: openSearch });
+      c.push({ label: CUR.preview ? "切到纯文本编辑" : "切到渲染预览", keywords: "preview markdown", run: () => setPreview(!CUR.preview) });
+    }
+    (DATA.chapters || []).forEach((ch) => {
+      c.push({ label: `打开第${ch.n}章${ch.title ? " · " + ch.title : ""}`, keywords: "切换 章节 跳转 goto",
+               run: () => openFile(`正文/第${ch.n}章.md`, true, ch.n) });
+    });
     c.push({ label: "喂样本 / 继承指纹 seed", run: openSeed });
+    c.push({ label: "设置(后端 / 模型 / API Key / 字数)", keywords: "配置 供应商 config settings", run: openSettings });
     c.push({ label: "导出全书", run: exportBook });
     c.push({ label: "备份整本", run: backupBook });
     c.push({ label: "环境自检 doctor", run: runDoctor });
@@ -1290,6 +1322,45 @@ function moveCmdSel(d) {
   if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
 }
 
+// ---------- 设置抽屉 / 输入退场 / 朱批浮条 ----------
+function openSettings() { $("settings-overlay").classList.remove("hidden"); }
+// 引导用户去填 key:先打开设置,再聚焦 + 闪对应输入框
+function flashSetting(id) {
+  openSettings();
+  setTimeout(() => {
+    const k = $(id);
+    if (k) { k.focus(); k.classList.add("flash"); setTimeout(() => k.classList.remove("flash"), 1600); }
+  }, 60);
+}
+
+let _typingTimer = null;
+function noteTyping() {
+  if (!CUR || !CUR.editable) return;
+  document.body.classList.add("typing");
+  clearTimeout(_typingTimer);
+  _typingTimer = setTimeout(() => document.body.classList.remove("typing"), 1500);
+}
+
+function hideSealBar() { $("seal-bar").classList.remove("on"); }
+function maybeSealBar() {
+  const ed = $("editor"), bar = $("seal-bar");
+  // 只在可编辑的正文章节上出;选区太短(<2 字)不值得打扰
+  if (!CUR || CUR.chapter == null || ed.readOnly || ed.classList.contains("hidden")) return hideSealBar();
+  const s = ed.selectionStart, e = ed.selectionEnd;
+  if (e - s < 2) return hideSealBar();
+  // 按行号近似定位选区首行(软换行会有偏差,夹在编辑器内即可——从简,不引库)
+  const lineNo = ed.value.slice(0, s).split("\n").length - 1;
+  const lh = parseFloat(getComputedStyle(ed).lineHeight) || 32;
+  const padTop = parseFloat(getComputedStyle(ed).paddingTop) || 0;
+  const r = ed.getBoundingClientRect();
+  let y = r.top + padTop + lineNo * lh - ed.scrollTop - 44;
+  y = Math.max(r.top + 8, Math.min(y, r.bottom - 52));
+  bar.classList.add("on");                      // 先显示才能量宽度
+  const bw = bar.offsetWidth || 140;            // 显式居中,不用 transform(会跟出场动画打架)
+  bar.style.top = y + "px";
+  bar.style.left = Math.round(r.left + r.width / 2 - bw / 2) + "px";
+}
+
 // ---------- 全局快捷键 ----------
 function anyOverlayOpen() {
   return [...document.querySelectorAll(".overlay")].some((o) => !o.classList.contains("hidden"));
@@ -1297,7 +1368,8 @@ function anyOverlayOpen() {
 function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
-  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "run-overlay"];
+  if ($("seal-bar").classList.contains("on")) { hideSealBar(); return true; }
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) return true; // 写作中,别误关

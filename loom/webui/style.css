@@ -222,15 +222,12 @@ button:disabled { opacity: .55; cursor: default; }
 .brand { display: flex; align-items: center; gap: var(--space-2);
   font-family: var(--font-brand); font-weight: 400; font-size: var(--fs-h2); }
 .brand .weave-mark { width: 20px; height: 20px; }
-.backend { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
-.backend select { width: auto; }
-.backend .model { width: 122px; }
-.backend select.model { width: 178px; }   /* 模型下拉:预设标签较长,给宽点免得截断 */
-.backend .base-url { width: 208px; }   /* base_url 比模型名长,给宽点 */
-.backend .chars { color: var(--text-soft); font-size: var(--fs-xs); display: flex;
-  align-items: center; gap: var(--space-2); white-space: nowrap; }
-.backend .chars input { width: 60px; }
-.topbar .divider { width: 1px; height: 20px; background: var(--line); margin: 0 var(--space-1); }
+.topbar-spacer { margin-left: auto; }
+/* ⌘K 常驻提示:命令面板是一切操作的家 */
+.kbd-hint { font-size: var(--fs-caption); color: var(--text-mute); border: 1px solid var(--line);
+  border-radius: var(--radius-xs); padding: 2px 7px; cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-2), border-color var(--dur-2); }
+.kbd-hint:hover { color: var(--text); border-color: var(--line-strong); }
 /* 后端连接检测状态(claude/codex) */
 .backend-status { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs);
   color: var(--text-soft); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
@@ -447,6 +444,23 @@ button:disabled { opacity: .55; cursor: default; }
 .progress-bar.done { background: var(--accent); }      /* 完成=墨落定 */
 .status-note { margin-left: auto; color: var(--text-mute); font-size: var(--fs-xs); }
 
+/* ---------- 7b. 输入退场:打字时工具让位于纸(专注是默认气质,不是开关) ---------- */
+body.typing:not(.focus-mode) .sidebar,
+body.typing:not(.focus-mode) .topbar { opacity: .35; }
+body.typing:not(.focus-mode) .sidebar:hover,
+body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
+
+/* ---------- 7c. 朱批浮条:选中正文就地浮出(重写这段/复制) ---------- */
+.seal-bar { position: fixed; z-index: 35; display: none; align-items: center; gap: 2px;
+  background: var(--surface-raised); border: 1px solid var(--seal-line);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-3); padding: 3px 4px;
+  animation: rise var(--dur-2) var(--ease-out); }
+.seal-bar.on { display: inline-flex; }
+.seal-bar button { border: none; background: transparent; padding: 4px 10px;
+  font-size: var(--fs-xs); border-radius: var(--radius-xs); color: var(--text-soft); }
+.seal-bar button:hover { background: var(--line-soft); color: var(--text); }
+.seal-bar .sb-rewrite { color: var(--seal-ink); font-weight: 600; }
+
 /* ---------- 8. 专注模式 ---------- */
 body.focus-mode .sidebar { margin-left: -256px; opacity: 0; pointer-events: none; }
 body.focus-mode .topbar { opacity: 0; transform: translateY(-100%); height: 0; padding: 0;
@@ -561,9 +575,19 @@ body.focus-mode .focus-exit { display: block; }
   color: var(--text-soft); line-height: 1.6; max-height: 3.2em; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
-/* 顶栏 key 框「该填了」高亮(首跑没填 key 就写章时闪一下) */
+/* key 框「该填了」高亮(首跑没填 key 就写章时:自动打开设置并闪一下) */
 @keyframes key-flash { 0%,100% { box-shadow: var(--shadow-focus); } 50% { box-shadow: 0 0 0 3px var(--seal-line); } }
-.backend .model.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-inout) 3; }
+input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-inout) 3; }
+
+/* 设置卡(后端配置从顶栏收进来) */
+.settings-card { width: 440px; }
+.settings-card .field-label { display: block; color: var(--text-soft); font-size: var(--fs-xs);
+  margin: var(--space-3) 0 5px; }
+.settings-card .field-row { display: flex; gap: var(--space-2); align-items: center; }
+.settings-card .field-row select, .settings-card .field-row input { flex: 1; width: auto; }
+.settings-card .field-row button { flex: none; }
+.settings-card #model-custom, .settings-card #base-url { margin-top: var(--space-2); }
+.settings-card .settings-status-row { margin-top: var(--space-2); min-height: 20px; }
 
 /* doctor 面板 */
 .doctor-list { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
@@ -624,8 +648,7 @@ body.focus-mode .focus-exit { display: block; }
 /* ---------- 14. 窄窗适配(min 920px 仍舒适) ---------- */
 @media (max-width: 1000px) {
   .sidebar { width: 224px; }
-  .backend .model { width: 96px; }
-  .backend .chars { display: none; }
+  .kbd-hint { display: none; }
 }
 
 /* ---------- 15. 新手引导:T0 就地气泡 + T1 样例首跑聚光 ---------- */

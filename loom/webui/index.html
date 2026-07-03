@@ -51,9 +51,9 @@
           <li>浏览器打开 <b>platform.deepseek.com</b>,注册 + 实名</li>
           <li>充值(按字数计费,几块钱能写很久)</li>
           <li>在「API Keys」里创建一个 key(sk- 开头)</li>
-          <li>新建/打开书后,把 key 粘进顶栏 API Key 框 → 点「保存后端」</li>
+          <li>新建/打开书后,点右上角「设置」,把 key 粘进 API Key 框 → 保存</li>
         </ol>
-        <p class="muted">不想自带 key?顶栏后端切到 <b>Claude Code</b> 或 <b>Codex</b>——它们复用你本机客户端的登录(含订阅),Loom 不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
+        <p class="muted">不想自带 key?在「设置」里把供应商切到 <b>Claude Code</b> 或 <b>Codex</b>——它们复用你本机客户端的登录(含订阅),Loom 不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
       </details>
       <div id="welcome-error" class="error"></div>
     </div>
@@ -69,27 +69,12 @@
         </svg>
         <span id="proj-title">—</span>
       </div>
-      <div class="backend">
-        <select id="provider">
-          <option value="deepseek">DeepSeek</option>
-          <option value="claude">Claude Code</option>
-          <option value="codex">Codex(GPT)</option>
-          <option value="openai_compat">OpenAI 兼容(自定义)</option>
-        </select>
-        <select id="model" class="model" title="选择模型(下拉选;第三方供应商点「拉取可用模型」拉真实列表)"></select>
-        <input id="model-custom" type="text" class="model hidden" autocomplete="off" placeholder="手动输入模型名" title="列表里没有想要的型号时,手动输入一个模型名" />
-        <input id="base-url" type="text" class="model base-url hidden" title="第三方 OpenAI 兼容供应商的接口地址 base_url" placeholder="base_url(自定义供应商)" />
-        <input id="api-key" type="password" class="model" title="DeepSeek / 自定义供应商需填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
-        <button id="btn-fetch-models" class="ghost hidden" title="拉取这个供应商当前真实可用的模型列表(只读、不耗 token)"><span class="ico" data-ico="focus"></span> 拉取可用模型</button>
-        <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
-        <span id="backend-status" class="backend-status"></span>
-        <label class="chars">终稿字数 <input id="chapter-chars" type="number" min="200" step="100" /></label>
-        <button id="btn-save-backend" class="ghost">保存后端</button>
-      </div>
-      <div class="divider"></div>
+      <span class="topbar-spacer"></span>
+      <span id="kbd-hint" class="kbd-hint" title="命令面板:一切操作都在这(⌘K / Ctrl+K)">⌘K</span>
+      <button id="btn-write-next" class="mini primary">写下一章</button>
       <button id="btn-theme" class="ghost icon-btn" title="明暗主题(切换)"></button>
       <button id="btn-focus" class="ghost icon-btn" title="专注模式 ⌘." data-ico="focus"></button>
-      <button id="btn-doctor" class="ghost">自检</button>
+      <button id="btn-settings" class="ghost icon-btn" title="设置:后端 / 模型 / API Key / 字数" data-ico="skills"></button>
       <button id="btn-close-proj" class="ghost" title="退出当前这本书,回首页新建或打开别的书"><span class="ico" data-ico="back"></span> 回首页</button>
     </header>
 
@@ -98,7 +83,6 @@
         <div class="side-section">
           <div class="side-head">
             <span><span class="ico" data-ico="chapters"></span> 正文</span>
-            <button id="btn-write-next" class="mini primary">写下一章 <span class="ico" data-ico="writeNext"></span></button>
           </div>
           <ul id="chapters" class="list"></ul>
           <div class="book-actions">
@@ -242,6 +226,41 @@
     </div>
   </div>
 
+  <!-- 设置:后端配置从顶栏收进来,写作界面只剩纸(工具不抢戏) -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>设置</h3>
+      <p class="hint">后端与写作偏好。配置存在这本书的项目文件夹里;点「写章」时也会自动保存这里的改动。</p>
+      <label class="field-label">供应商</label>
+      <select id="provider">
+        <option value="deepseek">DeepSeek</option>
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex(GPT)</option>
+        <option value="openai_compat">OpenAI 兼容(自定义)</option>
+      </select>
+      <label class="field-label">模型</label>
+      <div class="field-row">
+        <select id="model" class="model" title="选择模型(下拉选;第三方供应商点「拉取可用模型」拉真实列表)"></select>
+        <button id="btn-fetch-models" class="ghost hidden" title="拉取这个供应商当前真实可用的模型列表(只读、不耗 token)"><span class="ico" data-ico="focus"></span> 拉取可用模型</button>
+      </div>
+      <input id="model-custom" type="text" class="hidden" autocomplete="off" placeholder="手动输入模型名" title="列表里没有想要的型号时,手动输入一个模型名" />
+      <input id="base-url" type="text" class="base-url hidden" title="第三方 OpenAI 兼容供应商的接口地址 base_url" placeholder="base_url(自定义供应商)" />
+      <label class="field-label" id="api-key-label">API Key</label>
+      <input id="api-key" type="password" title="DeepSeek / 自定义供应商需填(写进项目 .env);Claude / Codex 复用各自客户端的登录,不用填 key" />
+      <div class="field-row settings-status-row">
+        <button id="btn-probe" class="ghost hidden" title="检测 Claude / Codex 客户端是否就绪"><span class="ico" data-ico="focus"></span> 检测连接</button>
+        <span id="backend-status" class="backend-status"></span>
+      </div>
+      <label class="field-label">终稿目标字数</label>
+      <input id="chapter-chars" type="number" min="200" step="100" />
+      <div class="row-end">
+        <button id="btn-doctor" class="ghost">环境自检</button>
+        <button id="settings-close" class="ghost">关闭</button>
+        <button id="btn-save-backend" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- doctor 自检面板 -->
   <div id="doctor-overlay" class="overlay hidden">
     <div class="run-card">
@@ -298,6 +317,12 @@
       <input id="cmdk-input" type="text" placeholder="输入命令…(写下一章 / 重写 / 主题 / 专注 / 导出…)" />
       <div id="cmdk-list" class="cmdk-list"></div>
     </div>
+  </div>
+
+  <!-- 朱批浮条:选中正文时就地浮出(重写这段/复制) -->
+  <div id="seal-bar" class="seal-bar">
+    <button id="seal-rewrite" class="sb-rewrite"><span class="ico" data-ico="rewrite"></span> 重写这段</button>
+    <button id="seal-copy">复制</button>
   </div>
 
   <div id="toast" class="toast hidden"></div>
