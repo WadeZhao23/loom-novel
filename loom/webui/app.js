@@ -51,12 +51,24 @@ function escHtml(s) {
 }
 
 // ---------- 小工具 ----------
+// 错误 code(loom/errors.py 目录键)→ 可操作提示后缀。最小版只盖 余额/鉴权 两族,其余留空。
+function codeHint(code) {
+  if (!code) return "";
+  if (code === "deepseek_insufficient_balance") return "(下一步:去 platform.deepseek.com 充值后重试)";
+  if (code === "deepseek_auth_failed" || code === "deepseek_key_missing" || code === "openai_compat_key_missing")
+    return "(下一步:检查设置里的 API Key)";
+  return "";
+}
 async function jreq(method, url, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(url, opt);
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `请求失败 (${r.status})`);
+  if (!r.ok) {
+    const e = new Error((data.error || `请求失败 (${r.status})`) + codeHint(data.code));
+    e.code = data.code;   // code 原样带上,调用方可细分处理
+    throw e;
+  }
   return data;
 }
 function toast(msg, isErr) {
@@ -1122,7 +1134,7 @@ function handleEvent(ev) {
     logRun(`第${ev.chapter}章终稿 ${ev.chars} 字`, "ok", "check");
     $("run-title").textContent = `第 ${ev.chapter} 章写完`;
   } else if (ev.type === "error") {
-    logRun(ev.message, "err", "cross");
+    logRun(ev.message + codeHint(ev.code), "err", "cross");
   }
   updateStrip(ev);
 }
@@ -1136,11 +1148,11 @@ function updateStrip(ev) {
   if (ev.type === "agent_start" || ev.type === "gate_revise") _streamChars = 0;
   else if (ev.type === "agent_chunk") _streamChars += (ev.delta || "").length;
   else if (ev.type === "chapter_done") _stripDone = ev.chapter;
-  else if (ev.type === "error") _stripErr = ev.message || "出错";
+  else if (ev.type === "error") _stripErr = (ev.message || "出错") + codeHint(ev.code);
   if (!_runMinimized) return;
   renderStrip();
   if (ev.type === "chapter_done") toast(`第${ev.chapter}章写完 · 墨落定`);
-  else if (ev.type === "error") toast(ev.message, true);
+  else if (ev.type === "error") toast(ev.message + codeHint(ev.code), true);
 }
 function renderStrip() {
   const strip = $("run-strip");

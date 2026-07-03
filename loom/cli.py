@@ -27,6 +27,15 @@ def _die(msg: str) -> None:
     raise typer.Exit(code=1)
 
 
+# 错误 code(errors.py 目录键)→ 一行可操作提示。最小版只盖 余额/鉴权 两族,与 webui codeHint 同口径。
+_CODE_HINTS = {
+    "deepseek_insufficient_balance": "→ 去 platform.deepseek.com 充值后重试",
+    "deepseek_auth_failed": "→ 检查项目 .env 里的 DEEPSEEK_API_KEY",
+    "deepseek_key_missing": "→ 检查项目 .env 里的 DEEPSEEK_API_KEY",
+    "openai_compat_key_missing": "→ 检查项目 .env 里的供应商 API Key",
+}
+
+
 def _render(event: dict) -> None:
     """把引擎进度事件渲染成 Rich 输出。"""
     t = event.get("type")
@@ -75,6 +84,11 @@ def _render(event: dict) -> None:
         console.print(f"[green]✓ 写作指纹已更新:[/green] {event['path']}")
     elif t == "outline_done":
         console.print(f"[green]✓ 第{event['chapter']}章细纲已生成[/green]")
+    elif t == "error":
+        console.print(f"[bold red]✗ {event['message']}[/bold red]")
+        hint = _CODE_HINTS.get(event.get("code", ""))
+        if hint:
+            console.print(f"  [dim]{hint}[/dim]")
 
 
 @app.command(help="离线铺一个写小说项目的骨架。")

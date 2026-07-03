@@ -57,6 +57,14 @@ def _is_project(p: Path) -> bool:
     return (p / "loom.toml").exists()
 
 
+def _err_json(e: Exception, status: int = 400) -> JSONResponse:
+    """非流式端点的错误响应单点:LoomBackendError 带 code(错误目录键)透传给前端附提示。"""
+    body: dict = {"error": str(e)}
+    if isinstance(e, LoomBackendError) and e.code:
+        body["code"] = e.code
+    return JSONResponse(body, status_code=status)
+
+
 # 项目全景响应体单一真相在 usecases.project_state,server 只留薄壳
 _state = usecases.project_state
 
@@ -303,7 +311,7 @@ def seed(b: SeedBody):
     try:
         usecases.seed_fingerprint(root, text=b.text or "", inherit=b.inherit, reference=b.reference or "")
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return _err_json(e)
     return _state(root)
 
 
@@ -320,7 +328,7 @@ def learn(b: ChapterBody):
         rep = usecases.learn_chapter(root, b.chapter, get_backend(cfg),
                                      appraisal_backend=cheap_backend(cfg))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return _err_json(e)
     # LearnReport → 响应字段逐字节兼容(前端 app.js 零改动)
     return {"ok": True,
             "fingerprint": rep.fingerprint,
@@ -343,7 +351,7 @@ def brain_draft(b: DraftBody):
     try:
         res = usecases.draft_brain(root, b.idea)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return _err_json(e)
     return {"ok": True, "written": list(res["written"].keys()),
             "skipped": res["skipped"], "state": _state(root)}
 
@@ -355,7 +363,7 @@ def outline_regen(b: ChapterBody):
     try:
         text = usecases.regen_outline(root, b.chapter)
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return _err_json(e)
     return {"ok": True, "outline": text}
 
 
@@ -384,7 +392,7 @@ def rewrite(b: RewriteBody):
     try:
         out = rewrite_span(root, b.chapter, b.full_text, b.span, b.instruction, get_backend(load_config(root)))
     except (LoomBackendError, ValueError, FileNotFoundError) as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        return _err_json(e)
     return {"rewritten": out}
 
 
@@ -424,7 +432,9 @@ def write(b: WriteBody):
     def worker():
         try:
             usecases.write_chapter(root, b.chapter, q.put, force=b.force, slow=0.25)
-        except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        except LoomBackendError as e:
+            q.put(events.error(str(e), code=e.code))   # code 透传,前端据此附可操作提示
+        except (ValueError, FileNotFoundError) as e:
             q.put(events.error(str(e)))
         except Exception as e:  # 兜底,别让流挂死
             q.put(events.error(f"意外错误:{e}"))

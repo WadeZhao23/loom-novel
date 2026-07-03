@@ -173,6 +173,12 @@ def warn(message: str) -> dict:
 
 
 @_event
-def error(message: str) -> dict:
-    """流式管道里的错误兜底(server 的 /api/write worker 用;引擎内错误走异常)。"""
-    return {"type": "error", "message": message}
+def error(message: str, code: str | None = None) -> dict:
+    """流式管道里的错误兜底(server 的 /api/write worker 用;引擎内错误走异常)。
+
+    code(可选)指向 errors.py 错误目录,前端据此附可操作提示;None 不出键,既有事件字节不变。
+    """
+    ev = {"type": "error", "message": message}
+    if code:
+        ev["code"] = code
+    return ev
