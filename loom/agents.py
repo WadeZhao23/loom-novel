@@ -37,9 +37,34 @@ _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
 }
 
 
-# 流水线顺序(角色名,不是题材名词)
-PIPELINE = ["设定师", "大纲师", "写手", "编辑", "润色师"]
+# ── 工序表(S4:拓扑与工序行为的唯一真相;此前散作 5 处 role== 特判焊死在主循环里) ──
+# 【红线】安全攸关行为(哨兵协议/gate 挂接/WYSIWYG 旁路)只住在这张代码侧表里,
+# 绝不下放到用户可编辑的 agents/*.md frontmatter——用户删一行 yaml 不该能让留痕混进正文。
+@dataclass(frozen=True)
+class StepSpec:
+    role: str
+    short_budget: int | None = None   # None → config.chapter_chars(写手/编辑/润色师)
+    wants_prev: bool = False          # prompt 注入上一章正文(接钩子)
+    wants_hardfacts: bool = False     # prompt 注入硬设定逐字块
+    outline_wysiwyg: bool = False     # 细纲文件存在即旁路模型、首次生成即落盘(大纲师)
+    edit_sentinel: bool = False       # 输出带哨兵留痕:流式过滤 + 切分落 .审稿留痕(编辑)
+    deslop: bool = False              # 该棒 gate 挂确定性预筛(aitell+fatigue,润色师)
+    foreshadow_after: bool = False    # 该棒后扫伏笔悬空(编辑)
 
+
+STEPS: tuple[StepSpec, ...] = (
+    StepSpec("设定师", short_budget=350),
+    StepSpec("大纲师", short_budget=450, wants_prev=True, wants_hardfacts=True, outline_wysiwyg=True),
+    StepSpec("写手", wants_prev=True, wants_hardfacts=True),
+    StepSpec("编辑", edit_sentinel=True, foreshadow_after=True),
+    StepSpec("润色师", deslop=True),
+)
+
+# 派生量(既有消费点:ledger.resume_point 按 PIPELINE 遍历;测试引用 _SHORT)
+PIPELINE = [s.role for s in STEPS]
+_SHORT = {s.role: s.short_budget for s in STEPS if s.short_budget}
+
+# agents/<角色>.md 缺 produces 字段时的兜底文案(角色元数据,非工序行为,不进 StepSpec)
 _PRODUCES = {
     "设定师": "本章设定锚点",
     "大纲师": "本章场景骨头(分镜细纲)",
@@ -47,7 +72,6 @@ _PRODUCES = {
     "编辑": "本章改稿",
     "润色师": "本章终稿",
 }
-_SHORT = {"设定师": 350, "大纲师": 450}  # 其余按 config.chapter_chars
 
 # 编辑产出"改稿 + 《本章改动留痕》",用哨兵分隔。留痕给作者看,绝不进正文/快照/写作指纹。
 EDIT_NOTE_SENTINEL = "<!--LOOM:EDIT-NOTE-->"
@@ -394,14 +418,15 @@ def _length_hint(role: str, target_chars: int) -> str:
 
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
                        prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
-                       target_chars: int = 0) -> str:
+                       target_chars: int = 0, *, wants_prev: bool = False,
+                       wants_hardfacts: bool = False) -> str:
     parts = [f"# 你要写的是第 {chapter_n} 章。"]
     if knowledge:
         parts.append("## 你要遵循的设定/方法论\n" + knowledge)
-    if hardfacts and role in ("大纲师", "写手"):
+    if hardfacts and wants_hardfacts:
         parts.append("## 硬设定(逐字照搬,等级/境界名、专名、金手指代价一字不改、不许新增体系)\n"
                      + hardfacts)
-    if prev and role in ("大纲师", "写手"):
+    if prev and wants_prev:
         parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
     if workspace:
         ctx = "\n\n".join(f"### {label}\n{text}" for label, text in workspace)
@@ -454,13 +479,14 @@ def run_pipeline(
     else:
         start_idx, workspace = 0, []
 
-    for role in PIPELINE[start_idx:]:
+    for spec in STEPS[start_idx:]:
+        role = spec.role
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress(events.agent_start(role))
         up_sha = _sig(knowledge, workspace)  # 记录入此工序时的上游签名(供下次续跑比对)
 
-        max_chars = _SHORT.get(role, config.chapter_chars)
-        outline_path = _outline_path(project_root, chapter_n) if role == "大纲师" else None
+        max_chars = spec.short_budget or config.chapter_chars
+        outline_path = _outline_path(project_root, chapter_n) if spec.outline_wysiwyg else None
         if outline_path and outline_path.is_file() and outline_path.read_text(encoding="utf-8").strip():
             # 已有细纲(多半你手改过)→ 直接用它,不再调大纲师;改它/清空它即重新生成(WYSIWYG)。
             output = outline_path.read_text(encoding="utf-8").strip()
@@ -468,14 +494,15 @@ def run_pipeline(
             progress(events.info(f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"))
         else:
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
-                                             target_chars=max_chars)
-            # 编辑棒的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
-            chunk_cb = (_edit_stream_filter(progress) if role == "编辑"
+                                             target_chars=max_chars,
+                                             wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
+            # 哨兵棒(编辑)的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
+            chunk_cb = (_edit_stream_filter(progress) if spec.edit_sentinel
                         else (lambda d, r=role: progress(events.agent_chunk(r, d))))
             output = backend.complete(agent.system_prompt, user_prompt, max_chars=max_chars, on_chunk=chunk_cb)
             if outline_path:  # 大纲师首次生成 → 落一份可看可改的细纲,之后就读这份
                 atomic_write_text(outline_path, output.strip() + "\n")
-        if role == "编辑":
+        if spec.edit_sentinel:
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:
                 _save_edit_note(project_root, chapter_n, note, progress)
@@ -491,14 +518,14 @@ def run_pipeline(
                 draft=output, knowledge=gk, produces=agent.produces,
                 rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
                 critic_backend=critic_backend,
-                detector=_deslop_detector(project_root, chapter_n) if role == "润色师" else None,
+                detector=_deslop_detector(project_root, chapter_n) if spec.deslop else None,
             )
             output = gres.text
             if gres.remaining:
                 _save_gate_remaining(project_root, chapter_n, label, gres.remaining, progress)
 
         # 伏笔悬空提醒:编辑棒后扫卡章纲,埋了很久仍没还的伏笔进留痕(纯提示,独立于上面的 gate、绝不回炉)
-        if role == "编辑":
+        if spec.foreshadow_after:
             _flag_stale_foreshadow(project_root, chapter_n, config, progress)
 
         # 每棒非空闸:任一棒返回空/拒答都不该静默落盘、再被下游与 learn 二次污染——直接报错刹住,
@@ -593,12 +620,14 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     hardfacts = _hardfacts_for(project_root, progress)
     workspace: list[tuple[str, str]] = []
     outline = ""
-    for role in ("设定师", "大纲师"):
+    for spec in STEPS[:2]:   # 设定师→大纲师:与主线同一张工序表,不再手抄角色元组
+        role = spec.role
         agent, knowledge = _knowledge_for(project_root, chapter_n, role)
         progress(events.agent_start(role))
-        max_chars = _SHORT.get(role, config.chapter_chars)  # 与主线 run_pipeline 同口径
+        max_chars = spec.short_budget or config.chapter_chars  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
-                                         target_chars=max_chars)
+                                         target_chars=max_chars,
+                                         wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
             on_chunk=lambda d, r=role: progress(events.agent_chunk(r, d)),
