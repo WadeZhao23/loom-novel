@@ -34,12 +34,26 @@ def test_pipeline_prompts_carry_length_hints(project):
 
     writer = _user_of(be, "本章初稿")
     assert "正文约 2400 字(±20%)" in writer
-    assert "不为凑字数加铺垫注水" in writer
-    assert "保持原稿篇幅(约 2400 字),只改不扩写" in _user_of(be, "本章改稿")
-    assert "保持原稿篇幅(约 2400 字),只改不扩写" in _user_of(be, "本章终稿")
-    # 设定师/大纲师沿用 _SHORT 的 350/450
+    assert "写满即收、宁短勿长" in writer
+    # 编辑/润色师:压缩授权(超目标压回来,删冗余不删情节,绝不扩写)
+    assert "篇幅目标约 2400 字" in _user_of(be, "本章改稿")
+    assert "绝不扩写" in _user_of(be, "本章改稿")
+    assert "篇幅目标约 2400 字" in _user_of(be, "本章终稿")
+    # 设定师沿用 _SHORT 的 350
     assert "≤350 字" in _user_of(be, "本章设定锚点")
-    assert "≤450 字" in _user_of(be, "本章场景骨头(分镜细纲)")
+    # 大纲师:结构闸——知道章目标、按目标定场次、每场标字数预算(超长的真根因在这)
+    outliner = _user_of(be, "本章场景骨头(分镜细纲)")
+    assert "细纲本身 ≤450 字" in outliner
+    assert "本章正文目标约 2400 字" in outliner
+    assert "拆 3-4 场" in outliner            # 2400 字 → 3-4 场,不再放任 5-6 场撑爆篇幅
+    assert "约X字」的篇幅预算" in outliner
+
+
+def test_scene_budget_scales_with_target(project):
+    be = _capture()
+    cfg = Config(provider="deepseek", model="x", chapter_chars=1200, gate_rounds=0)
+    run_pipeline(project, 1, be, cfg)
+    assert "拆 2-3 场" in _user_of(be, "本章场景骨头(分镜细纲)")   # 短章更少场次
 
 
 def test_regen_outline_prompts_carry_length_hints(project):
@@ -48,7 +62,8 @@ def test_regen_outline_prompts_carry_length_hints(project):
     regen_outline(project, 1, be, cfg)
 
     assert "≤350 字" in _user_of(be, "本章设定锚点")
-    assert "≤450 字" in _user_of(be, "本章场景骨头(分镜细纲)")
+    outliner = _user_of(be, "本章场景骨头(分镜细纲)")
+    assert "本章正文目标约 2400 字" in outliner and "拆 3-4 场" in outliner   # 与主线同口径
 
 
 # ── golden:除任务行新增的字数句外,prompt 逐字节不变 ────────────────
@@ -57,8 +72,8 @@ def test_prompt_unchanged_except_length_sentence():
     agent = Agent(name="写手", produces="本章初稿")
     args = (3, "写手", agent, "知识块", "上一章结尾。", [("本章设定锚点", "锚点内容")], "硬设定块")
     old = _build_user_prompt(*args)
-    new = _build_user_prompt(*args, target_chars=2400)
-    hint = _length_hint("写手", 2400)
+    new = _build_user_prompt(*args, target_chars=2400, chapter_target=2400)
+    hint = _length_hint("写手", 2400, 2400)
     assert hint and hint in new
     assert new.replace(hint, "", 1) == old   # 上下文拼装没被顺手改坏
 

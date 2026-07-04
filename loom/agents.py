@@ -417,22 +417,39 @@ def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Age
     return a, _read_file_items(project_root, rels, _noop)
 
 
-def _length_hint(role: str, target_chars: int) -> str:
-    """任务行里的字数软指令(按角色措辞)。篇幅只靠说,绝不靠调小 max_tokens 截断——
-    那会拦腰斩章 + 复发思考型空响应(见 backends._budget_tokens,2.0.1 踩过)。"""
-    if not target_chars:
+def _scene_budget(chapter_target: int) -> str:
+    """章目标字数 → 细纲场次预算。超长的真根因:大纲师不知道章目标,按惯例拆 3-6 场,
+    写手照多场细纲每场写透 → 2000 字目标干出 6000+。场次跟着篇幅走,结构上先锁死。"""
+    if chapter_target <= 1500:
+        return "拆 2-3 场"
+    if chapter_target <= 3000:
+        return "拆 3-4 场"
+    return "拆 4-6 场"
+
+
+def _length_hint(role: str, step_budget: int, chapter_target: int) -> str:
+    """任务行里的字数指令(按角色措辞)。篇幅只靠说,绝不靠调小 max_tokens 截断——
+    那会拦腰斩章 + 复发思考型空响应(见 backends._budget_tokens,2.0.1 踩过)。
+    三管齐下:大纲师按章目标定场次并给每场标字数(结构闸)、写手照场预算写满即收、
+    编辑/润色师有压缩授权(超了压回来)——单靠给写手一句软话,实测被多场细纲的结构压力碾过。"""
+    if not step_budget:
         return ""
+    if role == "大纲师":
+        return (f"细纲本身 ≤{step_budget} 字。本章正文目标约 {chapter_target} 字——"
+                f"按目标定场次:{_scene_budget(chapter_target)},并给每场标注「约X字」的篇幅预算、"
+                f"总和≈{chapter_target}。场次宁少勿多,别用多场细纲把写手的篇幅撑爆。")
     if role == "写手":
-        return (f"正文约 {target_chars} 字(±20%):写到目标篇幅就收章、结尾留钩,"
-                "不为凑字数加铺垫注水。")
+        return (f"正文约 {chapter_target} 字(±20%),这是发布的硬性篇幅要求:细纲各场标了字数就照它写,"
+                "写满即收、宁短勿长;不为凑字加铺垫,也不因写顺了就超篇。结尾留钩。")
     if role in ("编辑", "润色师"):
-        return f"保持原稿篇幅(约 {target_chars} 字),只改不扩写。"
-    return f"≤{target_chars} 字。"  # 设定师/大纲师(_SHORT 的 350/450)
+        return (f"篇幅目标约 {chapter_target} 字:原稿明显超目标就顺手压回来——"
+                "删冗余描写、重复信息与注水铺垫,不动情节骨架;绝不扩写。")
+    return f"≤{step_budget} 字。"  # 设定师
 
 
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
                        prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
-                       target_chars: int = 0, *, wants_prev: bool = False,
+                       target_chars: int = 0, *, chapter_target: int = 0, wants_prev: bool = False,
                        wants_hardfacts: bool = False) -> str:
     parts = [f"# 你要写的是第 {chapter_n} 章。"]
     if knowledge:
@@ -447,7 +464,8 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
         ws = budget.drop_superseded(workspace)   # 被改稿取代的旧全文稿不下传;锚点/细纲逐字保留
         ctx = "\n\n".join(f"### {label}\n{text}" for label, text in ws)
         parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
-    parts.append(f"## 你的任务\n产出【{agent.produces}】。{_length_hint(role, target_chars)}"
+    parts.append(f"## 你的任务\n产出【{agent.produces}】。"
+                 f"{_length_hint(role, target_chars, chapter_target or target_chars)}"
                  "只输出这一项,不要解释你在做什么。")
     return "\n\n".join(parts)
 
@@ -513,7 +531,7 @@ def run_pipeline(
             progress(events.info(f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"))
         else:
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
-                                             target_chars=max_chars,
+                                             target_chars=max_chars, chapter_target=config.chapter_chars,
                                              wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
             # 哨兵棒(编辑)的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if spec.edit_sentinel
@@ -666,7 +684,7 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         progress(events.agent_start(role))
         max_chars = spec.short_budget or config.chapter_chars  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
-                                         target_chars=max_chars,
+                                         target_chars=max_chars, chapter_target=config.chapter_chars,
                                          wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
