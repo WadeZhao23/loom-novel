@@ -149,9 +149,7 @@ function bind() {
   $("cn-probe").onclick = cnProbe;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
-  $("nav-timeline").onclick = () => openStudio("timeline");     // 脉络三入口,同一弹层各开各 tab
-  $("nav-foreshadow").onclick = () => openStudio("foreshadow");
-  $("nav-names").onclick = () => openStudio("names");
+  $("nav-threads").onclick = () => openStudio("timeline");   // 脉络单入口:弹层自带三 tab,侧栏不占三行
   $("studio-tab-timeline").onclick = () => renderStudio("timeline");
   $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
   $("studio-tab-names").onclick = () => renderStudio("names");
