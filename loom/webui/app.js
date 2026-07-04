@@ -149,7 +149,9 @@ function bind() {
   $("cn-probe").onclick = cnProbe;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
-  $("nav-studio").onclick = () => openStudio("timeline");   // 书房单入口,弹层内有三 tab
+  $("nav-timeline").onclick = () => openStudio("timeline");     // 脉络三入口,同一弹层各开各 tab
+  $("nav-foreshadow").onclick = () => openStudio("foreshadow");
+  $("nav-names").onclick = () => openStudio("names");
   $("studio-tab-timeline").onclick = () => renderStudio("timeline");
   $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
   $("studio-tab-names").onclick = () => renderStudio("names");
@@ -568,7 +570,9 @@ function render() {
   });
   $("btn-write-next").innerHTML = `写第${DATA.next_chapter}章 ` + icon("writeNext");
 
-  fillList("brain", DATA.brain, true);
+  const VOICE_FILES = ["写作指纹", "文风参考"];   // 「你的声音」栏目:风格类文件与设定分家
+  fillList("brain", DATA.brain.filter((b) => !VOICE_FILES.includes(b.name)), true);
+  fillList("voice", DATA.brain.filter((b) => VOICE_FILES.includes(b.name)), true);
   fillSkills(DATA.skills);
   fillAgents(DATA.agents);
   renderJourney();
@@ -1654,9 +1658,9 @@ function buildCmds() {
                run: () => openFile(`正文/第${ch.n}章.md`, true, ch.n) });
     });
     c.push({ label: "喂样本 / 继承指纹 seed", run: openSeed });
-    c.push({ label: "书房 · 时间轴(故事到哪了)", keywords: "编年史 回顾 studio", run: () => openStudio("timeline") });
-    c.push({ label: "书房 · 伏笔账本", keywords: "埋设 回收 悬空 studio", run: () => openStudio("foreshadow") });
-    c.push({ label: "书房 · 专名册", keywords: "人名 境界 地名 studio", run: () => openStudio("names") });
+    c.push({ label: "脉络 · 时间轴(故事到哪了)", keywords: "编年史 回顾 studio 书房", run: () => openStudio("timeline") });
+    c.push({ label: "脉络 · 伏笔账本", keywords: "埋设 回收 悬空 studio 书房", run: () => openStudio("foreshadow") });
+    c.push({ label: "脉络 · 专名册", keywords: "人名 境界 地名 studio 书房", run: () => openStudio("names") });
     c.push({ label: "设置(后端 / 模型 / API Key / 字数)", keywords: "配置 供应商 config settings", run: openSettings });
     c.push({ label: "导出全书", run: exportBook });
     c.push({ label: "备份整本", run: backupBook });
@@ -1695,7 +1699,7 @@ function moveCmdSel(d) {
   if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
 }
 
-// ---------- 书房:时间轴 / 伏笔账本 / 专名册(只读投影) ----------
+// ---------- 脉络:时间轴 / 伏笔账本 / 专名册(只读投影) ----------
 let _studio = null;
 async function openStudio(tab) {
   $("studio-body").innerHTML = `<div class="hint">读取中…</div>`;
@@ -1874,8 +1878,8 @@ function startSampleTour() {
   if ($("app").classList.contains("hidden")) return;  // 没进项目就不引导
   _markOnce("loom_tour_sample_v2");
   _tourSteps = [
-    { sel: "#brain-section", title: "外置大脑:它的记忆",
-      body: "世界观 / 人物卡 / 卡章纲 / 写作指纹——5 个 Agent 读着这些写。每本书独有、会随你成长。样例已替你填好了。" },
+    { sel: "#brain-section", title: "设定(外置大脑):它的记忆",
+      body: "世界观 / 人物 / 卡章纲——5 个 Agent 读着这些写。每本书独有、会随你成长。样例已替你填好了。" },
     { sel: "#btn-write-next", title: "写下一章",
       body: "点这里:设定→大纲→写手→编辑→润色 五道工序依次接力,一章正文就织出来。样例已有第 1、2 章,你可以直接写第 3 章试试。" },
     { sel: "#fp-card", title: "越写越像你(灵魂)",

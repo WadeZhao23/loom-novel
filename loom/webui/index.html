@@ -81,13 +81,23 @@
         </div>
 
         <div class="side-section" id="brain-section">
-          <div class="side-head"><span><span class="ico" data-ico="brain"></span> 外置大脑</span></div>
+          <div class="side-head"><span><span class="ico" data-ico="brain"></span> 设定 <span class="side-sub">外置大脑</span></span></div>
           <ul id="brain" class="list"></ul>
+        </div>
+
+        <div class="side-section" id="threads-section">
+          <div class="side-head"><span><span class="ico" data-ico="history"></span> 脉络 <span class="side-sub">写到哪 · 埋了什么</span></span></div>
           <ul id="studio-nav" class="list">
-            <li id="nav-studio"><span class="ico" data-ico="history"></span> 书房 <span class="side-sub">时间轴 · 伏笔 · 专名</span></li>
+            <li id="nav-timeline">时间轴</li>
+            <li id="nav-foreshadow">伏笔账本</li>
+            <li id="nav-names">专名册</li>
           </ul>
+        </div>
+
+        <div class="side-section" id="voice-section">
+          <div class="side-head"><span><span class="ico" data-ico="fingerprint"></span> 你的声音</span></div>
+          <ul id="voice" class="list"></ul>
           <div class="voice-card" id="fp-card">
-            <div class="vc-head"><span class="ico" data-ico="fingerprint"></span> 写作指纹</div>
             <div id="fp-source" class="vc-body"></div>
             <button id="btn-seed" class="mini"><span class="ico" data-ico="seed"></span> 喂样本,让它懂你</button>
           </div>
@@ -319,10 +329,10 @@
     </div>
   </div>
 
-  <!-- 书房:外置大脑的三个只读投影(时间轴/伏笔账本/专名册) -->
+  <!-- 脉络:全书的三个只读投影(时间轴/伏笔账本/专名册) -->
   <div id="studio-overlay" class="overlay hidden">
     <div class="run-card studio-card">
-      <h3>书房</h3>
+      <h3>脉络</h3>
       <div class="seg">
         <button id="studio-tab-timeline" class="seg-btn on">时间轴</button>
         <button id="studio-tab-foreshadow" class="seg-btn">伏笔账本</button>

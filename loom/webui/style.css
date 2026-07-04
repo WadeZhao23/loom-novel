@@ -302,7 +302,7 @@ button:disabled { opacity: .55; cursor: default; }
   letter-spacing: .02em; margin-bottom: var(--space-2);
 }
 .side-section > summary { cursor: pointer; list-style: none; }
-/* 分组标题里的弱说明(书房/幕后条目的副词) */
+/* 分组标题里的弱说明(设定/脉络/幕后标题的副词) */
 .side-sub { font-weight: 400; color: var(--text-mute); font-size: var(--fs-caption); margin-left: 4px; }
 
 /* 外置大脑目录分组(世界观/、人物/):可折叠,一节(人)一行 */
@@ -413,9 +413,7 @@ button:disabled { opacity: .55; cursor: default; }
     var(--bg-sunken);
   background-blend-mode: normal;
 }
-.voice-card .vc-head { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs);
-  font-weight: 700; color: var(--seal-ink); }
-.voice-card .vc-body { margin-top: 5px; font-size: var(--fs-sm); color: var(--text-soft);
+.voice-card .vc-body { font-size: var(--fs-sm); color: var(--text-soft);
   font-family: var(--font-read); line-height: 1.6; }
 #btn-seed { margin-top: var(--space-2); width: 100%; }
 
@@ -574,7 +572,7 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 .journey-card .jc-step.done .jc-mark { color: var(--success); }
 .journey-card .jc-step.next { color: var(--text); font-weight: 600; }
 
-/* ---------- 7g. 书房:三个只读投影(时间轴/伏笔账本/专名册) ---------- */
+/* ---------- 7g. 脉络:三个只读投影(时间轴/伏笔账本/专名册) ---------- */
 .studio-card { width: 560px; }
 .studio-body { margin-top: var(--space-3); max-height: 56vh; overflow-y: auto;
   display: flex; flex-direction: column; gap: 6px; }
