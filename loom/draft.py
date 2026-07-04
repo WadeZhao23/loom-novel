@@ -8,10 +8,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable
 
-from . import events
+from . import events, paths
 from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
@@ -104,6 +105,15 @@ def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progr
         body = parts.get(key, "")
         if not body or validate_output(body, DRAFT_SECTION):  # 缺这段/这段太短 → 跳过(逐段非空,不强求三段齐全)
             continue
+        # 目录形态(世界观/、人物/):按 H2 拆节,一节(人)一文件;只写「不存在或仍是占位」的文件
+        dir_rel = {"世界观": paths.WORLD_DIR_REL, "人物卡": paths.CHARS_DIR_REL}.get(key)
+        if dir_rel and paths.brain_form(project_root, rel, dir_rel) == "dir":
+            files = _write_sections_into_dir(project_root, dir_rel, body, drop_unnamed=(key == "人物卡"))
+            if files:
+                written[key] = body
+            else:
+                skipped.append(key)
+            continue
         path = project_root / rel
         if not _is_blank_or_template(path):     # 你已经填了真内容 → 不覆盖,跳过
             skipped.append(key)
@@ -113,3 +123,29 @@ def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progr
         written[key] = body
     progress(events.draft_done(list(written.keys()), skipped))
     return {"written": written, "skipped": skipped}
+
+
+_H2_SPLIT = re.compile(r"^## +", re.M)
+_FN_BAD = re.compile(r'[\\/:*?"<>|]')
+
+
+def _write_sections_into_dir(project_root: Path, dir_rel: str, body: str, *, drop_unnamed: bool) -> list[str]:
+    """AI 起草的整份文本按 H2 拆进目录:文件名=节名(人物即「类型·名字」)。
+    只写「不存在或仍是占位」的文件——作者写过真内容的一律不碰;
+    人物起草成功后,顺手清掉仍是占位的「·未命名」模板卡(免得占位混着真人卡)。"""
+    wrote: list[str] = []
+    for seg in _H2_SPLIT.split(body)[1:]:
+        title, _, sec = seg.partition("\n")
+        name = _FN_BAD.sub("·", title.strip().replace(" ", ""))
+        if not name:
+            continue
+        f = project_root / dir_rel / f"{name}.md"
+        if not _is_blank_or_template(f):
+            continue
+        atomic_write_text(f, f"# {title.strip()}\n\n> AI 起草的初稿——改成你自己的。\n\n{sec.strip()}\n")
+        wrote.append(name)
+    if wrote and drop_unnamed:
+        for f in (project_root / dir_rel).glob("*·未命名.md"):
+            if _is_blank_or_template(f):
+                f.unlink()
+    return wrote

@@ -136,15 +136,20 @@ def learn_chapter(root: Path | str, chapter: int, backend: Backend, *,
         fp_learn(root, chapter, backend, tee, appraisal_backend=appraisal_backend)
         new_fp = fp_file.read_text(encoding="utf-8")
         card_p = root / paths.CARD_REL
-        world_p, chars_p = root / paths.WORLD_REL, root / paths.CHARS_REL
+        # 双形态:[AI补充] 老书在单文件文末,目录形态在各自的 成长档案.md
+        from .enrich import _supp_target
+        world_p, _, _ = _supp_target(root, paths.WORLD_REL, paths.WORLD_DIR_REL)
+        chars_p, _, _ = _supp_target(root, paths.CHARS_REL, paths.CHARS_DIR_REL)
         done = next((e for e in evs if e.get("type") == "learn_done"), {})
         return LearnReport(
             fingerprint=new_fp,
             card=card_p.read_text(encoding="utf-8") if card_p.exists() else "",
             changes=changed_rules(old_fp, new_fp),
             recap=_recap_block(root, chapter),
-            world_supp=extract_supplement(world_p.read_text(encoding="utf-8"), chapter) if world_p.exists() else "",
-            chars_supp=extract_supplement(chars_p.read_text(encoding="utf-8"), chapter) if chars_p.exists() else "",
+            world_supp=extract_supplement(world_p.read_text(encoding="utf-8"), chapter)
+                       if world_p is not None and world_p.exists() else "",
+            chars_supp=extract_supplement(chars_p.read_text(encoding="utf-8"), chapter)
+                       if chars_p is not None and chars_p.exists() else "",
             warn=done.get("shrink_warning") or "",
         )
 
@@ -223,6 +228,22 @@ def history_restore(root: Path | str, rel: str, snap_id: str) -> str:
 _SKILLS = ["世界观引擎.md", "故事引擎.md", "网文大神.md", "黄金开篇.md", "评估自检.md", "去AI味.md", "金手指.md"]
 
 
+def _brain_entries(root: Path) -> list[dict]:
+    """外置大脑侧栏清单(双形态):世界观/人物卡在目录形态时给 children 分组,其余单行。"""
+    _dirs = {"世界观": paths.WORLD_DIR_REL, "人物卡": paths.CHARS_DIR_REL}
+    out: list[dict] = []
+    for n in BRAIN_FILES:
+        if n in _dirs and paths.brain_form(root, paths.brain_rel(n), _dirs[n]) == "dir":
+            kids = [{"rel": f"{_dirs[n]}/{f.name}", "name": f.stem}
+                    for f in paths.brain_dir_files(root, _dirs[n])]
+            out.append({"name": "人物" if n == "人物卡" else n, "children": kids})
+        else:
+            out.append({"rel": paths.brain_rel(n), "name": n})
+    out += [{"rel": paths.brain_rel(n), "name": n} for n in OPTIONAL_BRAIN
+            if (root / paths.brain_rel(n)).is_file()]
+    return out
+
+
 def project_state(root: Path | str) -> dict:
     """项目全景(后端配置/章节/外置大脑清单):server 各端点的统一响应体。"""
     root = Path(root)
@@ -249,9 +270,7 @@ def project_state(root: Path | str) -> dict:
                                  for pid, spec in PROVIDERS.items()},
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
-        "brain": [{"rel": paths.brain_rel(n), "name": n} for n in BRAIN_FILES]
-                 + [{"rel": paths.brain_rel(n), "name": n} for n in OPTIONAL_BRAIN
-                    if (root / paths.brain_rel(n)).is_file()],
+        "brain": _brain_entries(root),   # 双形态:单文件=一行;目录=分组(children 子文件)
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
         "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
         "chapters": chs,

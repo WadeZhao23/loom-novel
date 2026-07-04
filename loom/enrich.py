@@ -21,7 +21,14 @@ from . import events
 from .backends import Backend
 from .fsutil import atomic_write_text
 from .parse import parse_enrich_sections as _parse_sections  # 读侧解析共置 parse.py(S7)
+from . import paths
 from .paths import CHARS_REL, WORLD_REL, chapter_path
+
+# [AI补充] 可能住的全部文件(重映射/删章清理都扫这一份清单;缺失的自动跳过):
+# 老书=世界观.md/人物卡.md 文末;目录形态=各目录的 成长档案.md(AI 自留地,物理隔离)
+_SUPP_RELS = (WORLD_REL, CHARS_REL,
+              f"{paths.WORLD_DIR_REL}/{paths.GROWTH_NAME}",
+              f"{paths.CHARS_DIR_REL}/{paths.GROWTH_NAME}")
 
 Progress = Callable[[dict], None]
 
@@ -64,30 +71,46 @@ def _append_supplement(text: str, n: int, body: str) -> str | None:
     return out
 
 
+def _supp_target(project_root: Path, file_rel: str, dir_rel: str) -> tuple[Path | None, str, str]:
+    """AI 补充的落点与上下文:(写入文件, write-once 检查文本, 喂 LLM 的现有内容)。
+
+    老书单文件 → 追加到该文件文末(既有行为);目录形态 → 落 成长档案.md(AI 自留地,
+    物理隔离,永不碰人写的文件),上下文=整个目录拼起来(模型要知道已有设定才不重复补)。"""
+    form = paths.brain_form(project_root, file_rel, dir_rel)
+    if form == "file":
+        p = project_root / file_rel
+        text = p.read_text(encoding="utf-8")
+        return p, text, text
+    if form == "dir":
+        ctx = "\n\n".join(f.read_text(encoding="utf-8")
+                          for f in paths.brain_dir_files(project_root, dir_rel))
+        g = project_root / dir_rel / paths.GROWTH_NAME
+        return g, (g.read_text(encoding="utf-8") if g.is_file() else ""), ctx
+    return None, "", ""
+
+
 def enrich_chapter(project_root: Path, chapter_n: int,
                    backend: Backend, progress: Progress = _noop) -> dict | None:
-    """从第 N 章定稿蒸馏新设定/新人物,追加进世界观/人物卡。返回本次追加的 {世界观, 人物卡}。"""
+    """从第 N 章定稿蒸馏新设定/新人物,追加进世界观/人物卡(目录形态落成长档案)。"""
     final_path = chapter_path(project_root, chapter_n)
     if not final_path.exists():
         return None  # 没正文不报错(enrich 是附赠,绝不阻断 learn)
-    world_path = project_root / WORLD_REL
-    chars_path = project_root / CHARS_REL
-    if not world_path.exists() and not chars_path.exists():
+    world_path, world_target, world_ctx = _supp_target(project_root, WORLD_REL, paths.WORLD_DIR_REL)
+    chars_path, chars_target, chars_ctx = _supp_target(project_root, CHARS_REL, paths.CHARS_DIR_REL)
+    if world_path is None and chars_path is None:
         return None
 
-    world = world_path.read_text(encoding="utf-8") if world_path.exists() else ""
-    chars = chars_path.read_text(encoding="utf-8") if chars_path.exists() else ""
-    w_done = bool(world) and _already_supplemented(world, chapter_n)
-    c_done = bool(chars) and _already_supplemented(chars, chapter_n)
-    # 两边都没处可补(文件缺失)或都已补过这章 → 跳过,连一次 LLM 都不浪费
-    if (not world_path.exists() or w_done) and (not chars_path.exists() or c_done):
+    w_done = bool(world_target) and _already_supplemented(world_target, chapter_n)
+    c_done = bool(chars_target) and _already_supplemented(chars_target, chapter_n)
+    # 两边都没处可补或都已补过这章 → 跳过,连一次 LLM 都不浪费
+    if (world_path is None or w_done) and (chars_path is None or c_done):
         progress(events.enrich_skip(chapter_n))
         return None
 
     final = final_path.read_text(encoding="utf-8").strip()
     progress(events.info(f"正在看第 {chapter_n} 章给世界观/人物卡补设定…"))
-    user = (f"## 现有世界观\n{world.strip() or '(还没有)'}\n\n"
-            f"## 现有人物卡\n{chars.strip() or '(还没有)'}\n\n"
+    user = (f"## 现有世界观\n{world_ctx.strip() or '(还没有)'}\n\n"
+            f"## 现有人物卡\n{chars_ctx.strip() or '(还没有)'}\n\n"
             f"## 第 {chapter_n} 章定稿正文\n{final}")
     raw = backend.complete(_ENRICH_SYSTEM, user, max_chars=700)
     if not raw.strip():  # 模型没产出 → 干净跳过(附赠功能,绝不阻断、也不吓人)
@@ -96,13 +119,13 @@ def enrich_chapter(project_root: Path, chapter_n: int,
     world_body, chars_body = _parse_sections(raw)
 
     result = {"chapter": chapter_n, "世界观": "", "人物卡": ""}
-    if world_path.exists() and not w_done and world_body:
-        new = _append_supplement(world, chapter_n, world_body)
+    if world_path is not None and not w_done and world_body:
+        new = _append_supplement(world_target, chapter_n, world_body)
         if new is not None:
             atomic_write_text(world_path, new)
             result["世界观"] = world_body
-    if chars_path.exists() and not c_done and chars_body:
-        new = _append_supplement(chars, chapter_n, chars_body)
+    if chars_path is not None and not c_done and chars_body:
+        new = _append_supplement(chars_target, chapter_n, chars_body)
         if new is not None:
             atomic_write_text(chars_path, new)
             result["人物卡"] = chars_body
@@ -166,7 +189,7 @@ def strip_supplement(project_root: Path, chapter_n: int) -> str | None:
     """删章时:清掉第 N 章在世界观/人物卡里的 [AI补充] 块(只删 loom 写的,留作者手写)。
     返回被删内容拼合(供回收站留底),没有则 None。"""
     parts: list[str] = []
-    for rel in (WORLD_REL, CHARS_REL):
+    for rel in _SUPP_RELS:
         removed = _strip_one(project_root / rel, chapter_n)
         if removed:
             parts.append(f"【{rel}】\n{removed}")
@@ -183,7 +206,7 @@ def remap_supplement_keys(project_root: Path, mapping: dict[int, int]) -> None:
     mapping = {o: n for o, n in mapping.items() if o != n}
     if not mapping:
         return
-    for rel in (WORLD_REL, CHARS_REL):
+    for rel in _SUPP_RELS:
         path = project_root / rel
         if not path.exists():
             continue

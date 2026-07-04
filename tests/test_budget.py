@@ -66,8 +66,8 @@ def test_long_book_prompt_replay(project):
     paths.chapter_path(project, 30).write_text("# 三十\n\n前章结尾留了倒计时钩。\n", encoding="utf-8")
     fp = project / paths.FINGERPRINT_REL
     fp.write_text(fp.read_text(encoding="utf-8") + "\n> 这是我的anchor签名句ANCHORX。\n", encoding="utf-8")
-    wv = project / paths.WORLD_REL
-    wv.write_text(wv.read_text(encoding="utf-8") + "\n\n## 力量体系\n- 凡境→蜕凡HARDFACTX\n", encoding="utf-8")
+    wv = project / paths.WORLD_DIR_REL / "力量体系.md"   # 脚手架已是目录形态:硬设定按文件名直送
+    wv.write_text(wv.read_text(encoding="utf-8") + "\n- 凡境→蜕凡HARDFACTX\n", encoding="utf-8")
 
     seq = {"i": 0}
 

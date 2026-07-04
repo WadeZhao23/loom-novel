@@ -37,6 +37,33 @@ CARD_REL = brain_rel("卡章纲")
 BANNED_REL = brain_rel("违禁词")
 PROJECT_CARD_REL = brain_rel("立项卡")
 
+# ── 外置大脑目录形态(3.2):世界观/人物 一节(人)一文件,AI 补充物理分离进 成长档案.md ──
+# 双形态兼容:单文件存在 → 单文件优先(老书零迁移/手工建档者);否则目录存在 → 目录(新书)。
+# 卡章纲(线性表)/写作指纹(整文件重蒸馏红线)/违禁词/立项卡/文风参考 刻意保持单文件。
+WORLD_DIR_REL = f"{BRAIN_DIR}/世界观"
+CHARS_DIR_REL = f"{BRAIN_DIR}/人物"
+GROWTH_NAME = "成长档案.md"   # learn 的 [AI补充·第N章] 都进它:AI 有自己的文件,永不碰人写的文件
+
+
+def brain_form(root: Path | str, file_rel: str, dir_rel: str) -> str:
+    """外置大脑某部位的形态:"file" | "dir" | "none"(单文件优先)。"""
+    root = Path(root)
+    if (root / file_rel).is_file():
+        return "file"
+    if (root / dir_rel).is_dir():
+        return "dir"
+    return "none"
+
+
+def brain_dir_files(root: Path | str, dir_rel: str) -> list[Path]:
+    """目录形态的成员文件(名字排序稳定;成长档案固定排最后——先读人写的,再读 AI 补的)。"""
+    d = Path(root) / dir_rel
+    if not d.is_dir():
+        return []
+    files = sorted(p for p in d.glob("*.md") if p.name != GROWTH_NAME)
+    growth = d / GROWTH_NAME
+    return files + ([growth] if growth.is_file() else [])
+
 
 # ── 每章产物 ──────────────────────────────────────────────────────────────
 def chapter_rel(n: int) -> str:

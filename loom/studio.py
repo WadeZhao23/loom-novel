@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agents import _HARDFACT_KW, _SPOILER_KW, _md_h2_sections, _name_roster
+from . import paths
+from .agents import _HARDFACT_KW, _SPOILER_KW, _md_h2_sections, _name_roster_for
 from .config import load_config
 from .hooks import _CH, parse_hooks, stale
 from .paths import CARD_REL, CHARS_REL, WORLD_REL
@@ -63,19 +64,27 @@ def foreshadow(root: Path | str) -> dict:
 
 
 def names(root: Path | str) -> dict:
-    """专名册:人物卡的「类型 · 名字」名册 + 世界观里命中硬设定关键词的小节(标题+原文)。"""
+    """专名册:人物名册 + 世界观硬设定小节(标题+原文)。双形态与硬设定直送同口径。"""
     root = Path(root)
     roster = [ln.lstrip("- ").strip()
-              for ln in _name_roster(root / CHARS_REL).splitlines() if ln.strip()]
+              for ln in _name_roster_for(root).splitlines() if ln.strip()]
     sections: list[dict] = []
-    wv = root / WORLD_REL
-    if wv.is_file():
-        for head, body in _md_h2_sections(wv.read_text(encoding="utf-8")):
+    form = paths.brain_form(root, WORLD_REL, paths.WORLD_DIR_REL)
+    if form == "file":
+        for head, body in _md_h2_sections((root / WORLD_REL).read_text(encoding="utf-8")):
             if any(s in head for s in _SPOILER_KW):
                 continue   # 反转段不进任何展示面(同硬设定直送的 deny 口径)
             if any(kw in head for kw in _HARDFACT_KW):
                 lines = body.splitlines()
                 sections.append({"title": head, "body": "\n".join(lines[1:]).strip()})
+    elif form == "dir":
+        for f in paths.brain_dir_files(root, paths.WORLD_DIR_REL):
+            stem = f.stem
+            if f.name == paths.GROWTH_NAME or any(s in stem for s in _SPOILER_KW):
+                continue
+            if any(kw in stem for kw in _HARDFACT_KW):
+                body = "\n".join(f.read_text(encoding="utf-8").splitlines()[1:]).strip()
+                sections.append({"title": stem, "body": body})
     return {"roster": roster, "sections": sections}
 
 

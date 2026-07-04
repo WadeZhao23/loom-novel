@@ -35,8 +35,10 @@ def _noop(event: dict) -> None:
 # 质检/去AI味 关卡:挂在某一棒产出之后。挑硬伤→回炉,不打分、不硬阻断(见 ADR-0006)。
 # role -> (人看的名字, 复审提示词, 回炉提示词, 复审要读的设定/方法论, 是否带上一章看钩子)
 _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
+    # 世界观/人物 双形态都列上:_read_files 对缺失路径静默跳过(_noop),单文件老书/目录新书各取其一
     "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
-            ["skills/评估自检.md", paths.CHARS_REL, paths.WORLD_REL, paths.CARD_REL], True),
+            ["skills/评估自检.md", paths.CHARS_REL, paths.CHARS_DIR_REL,
+             paths.WORLD_REL, paths.WORLD_DIR_REL, paths.CARD_REL], True),
     "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
              ["skills/去AI味.md", paths.FINGERPRINT_REL], False),
 }
@@ -321,6 +323,20 @@ def _name_roster(card_path: Path) -> str:
     return "\n".join(f"- {n}" for n in names)
 
 
+def _name_roster_for(project_root: Path) -> str:
+    """专名册双形态:老书读 人物卡.md 的 H2;目录形态读 人物/ 的【文件名】(一人一文件,
+    文件名即「类型·名字」)。占位「未命名」与成长档案不进名册——绝不把占位喂写手。"""
+    form = paths.brain_form(project_root, paths.CHARS_REL, paths.CHARS_DIR_REL)
+    if form == "file":
+        return _name_roster(project_root / paths.CHARS_REL)
+    if form == "dir":
+        names = [f.stem for f in paths.brain_dir_files(project_root, paths.CHARS_DIR_REL)
+                 if f.name != paths.GROWTH_NAME
+                 and any(s in f.stem for s in _NAME_SEP) and "未命名" not in f.stem]
+        return "\n".join(f"- {n}" for n in names)
+    return ""
+
+
 def _pick_hardfacts(md: str) -> list[str]:
     """世界观里命中 _HARDFACT_KW 的小节。H2 优先;H2 没命中再看其内的 H3(用户把硬设定写在
     三级标题下);整份没用 ## 时按 H3 顶层切。deny(_SPOILER_KW)一律压过 allow。"""
@@ -353,16 +369,30 @@ def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
     且自动追加块不该被当真相喂写手);要让它们逐字护身,把它们手并进 ## 力量体系 / ## 地理 等正式段。
     """
     blocks: list[str] = []
-    wv = project_root / paths.WORLD_REL
-    if wv.is_file():
-        picked = _pick_hardfacts(wv.read_text(encoding="utf-8"))
+    form = paths.brain_form(project_root, paths.WORLD_REL, paths.WORLD_DIR_REL)
+    if form == "file":   # 老书单文件:H2 标题关键词切片(既有路径,零迁移)
+        picked = _pick_hardfacts((project_root / paths.WORLD_REL).read_text(encoding="utf-8"))
         if picked:
             blocks.append("\n\n".join(picked))
         else:
             progress(events.warn(
                 "世界观里没识别到硬设定小节(如「## 力量体系」「## 地理 / 势力」),"
                 "等级/专名这次没有逐字保护——请检查标题写法"))
-    roster = _name_roster(project_root / paths.CHARS_REL)
+    elif form == "dir":  # 目录形态:按【文件名】选(比标题匹配稳),deny 压过 allow,整文件逐字
+        picked = []
+        for f in paths.brain_dir_files(project_root, paths.WORLD_DIR_REL):
+            stem = f.stem
+            if any(s in stem for s in _SPOILER_KW) or f.name == paths.GROWTH_NAME:
+                continue   # 冰山真相/成长档案 绝不逐字喂写手
+            if any(kw in stem for kw in _HARDFACT_KW):
+                picked.append(_drop_spoiler_subsections(f.read_text(encoding="utf-8").strip()))
+        if picked:
+            blocks.append("\n\n".join(p for p in picked if p.strip()))
+        else:
+            progress(events.warn(
+                "世界观目录里没识别到硬设定文件(如「力量体系.md」「地理与势力.md」),"
+                "等级/专名这次没有逐字保护——请检查文件名"))
+    roster = _name_roster_for(project_root)
     if roster:
         blocks.append("【人物专名册(照此写,别改名/别另造名)】\n" + roster)
     return "\n\n".join(b for b in blocks if b.strip())

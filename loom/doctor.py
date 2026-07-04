@@ -74,8 +74,16 @@ def run_checks(root: Path) -> list[Check]:
         p = root / "agents" / f"{n}.md"
         checks.append(_c(f"agent · {n}", p.is_file(),
                          f"缺 agents/{n}.md", f"补回 agents/{n}.md(可对照 loom init 模板)"))
-    # e. 外置大脑四件套在
+    # e. 外置大脑四件套在(世界观/人物卡认双形态:单文件或目录皆可)
+    from .paths import CHARS_DIR_REL, WORLD_DIR_REL, brain_form
+    _dirs = {"世界观": WORLD_DIR_REL, "人物卡": CHARS_DIR_REL}
     for n in BRAIN_FILES:
+        if n in _dirs:
+            ok = brain_form(root, brain_rel(n), _dirs[n]) != "none"
+            checks.append(_c(f"外置大脑 · {n}", ok,
+                             f"缺 外置大脑/{n}.md(或对应目录)",
+                             f"手动补回 外置大脑/{n}.md,或建 {_dirs[n]}/ 目录(一节/一人一文件)"))
+            continue
         p = root / brain_rel(n)
         fix = ("loom seed 重新生成,或从备份恢复" if n == "写作指纹"
                else f"外置大脑是人维护文件,手动补回 外置大脑/{n}.md")

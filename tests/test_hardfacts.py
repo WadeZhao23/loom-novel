@@ -147,6 +147,11 @@ def test_hardfacts_strips_nested_spoiler_subsection(project):
 
 def test_hardfacts_no_crash_on_directory_paths(project):
     # 红线:外置大脑路径被人误建成目录,也只返回空串、绝不 IsADirectoryError 崩、绝不阻断出稿
+    import shutil
+
+    from loom import paths as _paths
+    for rel in (_paths.WORLD_DIR_REL, _paths.CHARS_DIR_REL):
+        shutil.rmtree(project / rel, ignore_errors=True)   # 先清掉脚手架自带的目录形态
     for name in ("世界观.md", "人物卡.md"):
         p = project / "外置大脑" / name
         if p.exists():
