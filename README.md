@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="packaging/loom-1024.png" alt="Loom" width="116" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/design/loom-logo-dark.png" />
+  <img src="docs/design/loom-logo.png" alt="Loom" width="120" />
+</picture>
 
 # loom · 织布机
 
