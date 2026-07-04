@@ -85,6 +85,13 @@ def genres():
     return {"genres": available_genres()}
 
 
+def _shelve(root: Path, state: dict) -> dict:
+    """开书成功 → 记上书架(新建/导入/样例统一入架,欢迎页点选,不再输路径)。"""
+    from . import userconf
+    userconf.record_project(root, state.get("title", ""))
+    return state
+
+
 @app.post("/api/project/create")
 def create_project(b: CreateBody):
     try:
@@ -93,7 +100,33 @@ def create_project(b: CreateBody):
         return JSONResponse({"error": str(e)}, status_code=400)
     from . import userconf
     userconf.apply_default_to_new_book(root)   # 新书继承用户级默认后端(连一次全局记住,不用每本重填)
-    return _state(root)
+    return _shelve(root, _state(root))
+
+
+@app.get("/api/projects")
+def projects_list():
+    """书架:注册过的书 + 是否还在磁盘上 + 章数(欢迎页点选用)。"""
+    from . import paths as _paths
+    from . import userconf
+    out = []
+    for p in userconf.list_projects():
+        root = Path(p.get("root", ""))
+        ok = (root / "loom.toml").is_file()
+        chapters = 0
+        if ok:
+            try:
+                chapters = len(_paths.chapter_numbers(root))
+            except Exception:
+                pass
+        out.append({**p, "exists": ok, "chapters": chapters})
+    return {"projects": out}
+
+
+@app.post("/api/projects/forget")
+def projects_forget(b: RootBody):
+    from . import userconf
+    userconf.forget_project(b.root)
+    return {"ok": True}
 
 
 class ParentBody(BaseModel):
@@ -104,7 +137,8 @@ class ParentBody(BaseModel):
 def sample_open(b: ParentBody):
     """拷一份内置样例书到 parent 并打开,让陌生作者先看一本跑通的书。"""
     from .scaffold import open_sample
-    return _state(open_sample(Path(b.parent).expanduser()))
+    root = open_sample(Path(b.parent).expanduser())
+    return _shelve(root, _state(root))
 
 
 @app.post("/api/project/open")
@@ -113,7 +147,7 @@ def open_project(b: RootBody):
     if not _is_project(root):
         return JSONResponse({"error": f"{root} 不是 loom 项目(没有 loom.toml)。"}, status_code=400)
     try:
-        return _state(root)
+        return _shelve(root, _state(root))
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 

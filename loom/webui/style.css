@@ -215,9 +215,12 @@ button:disabled { opacity: .55; cursor: default; }
 .cb-dot.ok { background: var(--success); }
 .connect-block button { flex: none; }
 
-/* 最近打开列表 */
+/* 我的书架 */
 #recent-list li { flex-wrap: wrap; }
+#recent-list li.rc-gone { opacity: .55; }
 #recent-list .rc-name { font-weight: 600; color: var(--text); }
+#recent-list .rc-meta { font-size: var(--fs-caption); color: var(--text-mute);
+  border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 0 7px; }
 #recent-list .rc-path { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--text-mute);
   font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #recent-list .rc-x { border: none; background: transparent; color: var(--text-mute); cursor: pointer;

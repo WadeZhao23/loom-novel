@@ -104,10 +104,9 @@ window.addEventListener("DOMContentLoaded", () => {
   initTheme();
   bind();
   loadGenres();
-  renderRecent();       // 欢迎页的最近书列表(本地记住)
+  renderRecent();       // 欢迎页的书架(用户级注册表)
   loadConnectStatus();  // 欢迎页的接入状态
-  const saved = localStorage.getItem("loom_root");
-  if (saved) openProject(saved, true);   // 端口固定后 localStorage 留得住,自动重开上一本
+  autoReopen();         // 自动回到上一本(localStorage 没有就用书架最近一本)
 });
 
 async function loadGenres() {
@@ -282,32 +281,43 @@ function enterProject(d) {
   render();
 }
 
-// ---------- 最近打开(本地 localStorage 记住,固定端口后跨启动留得住) ----------
-function _recent() {
-  try { return JSON.parse(localStorage.getItem("loom_recent") || "[]"); } catch (e) { return []; }
-}
-function recordRecent(root, title) {
-  if (!root) return;
-  let list = _recent().filter((r) => r.root !== root);
-  list.unshift({ root, title: title || root.split("/").pop(), ts: Date.now() });
-  localStorage.setItem("loom_recent", JSON.stringify(list.slice(0, 8)));
-}
-function renderRecent() {
-  const list = _recent(), ul = $("recent-list"), block = $("recent-block");
+// ---------- 我的书架(用户级注册表 ~/.loom/projects.json,server 维护) ----------
+// 新建/导入/样例统一自动入架:路径只在「导入」时输一次,以后永远点选。
+// 比 localStorage 稳:换浏览器/清缓存/桌面端都还在。
+function recordRecent(_root, _title) { /* 入架已由 server 在开书端点完成,前端无事可做 */ }
+async function renderRecent() {
+  const ul = $("recent-list"), block = $("recent-block");
+  let list = [];
+  try { list = (await jreq("GET", "/api/projects")).projects || []; } catch (e) { /* 书架读不到不拦欢迎页 */ }
   ul.innerHTML = "";
   if (!list.length) { block.classList.add("hidden"); return; }
   list.forEach((r) => {
     const li = document.createElement("li");
-    const name = document.createElement("span"); name.className = "rc-name"; name.textContent = r.title || r.root.split("/").pop();
+    if (!r.exists) li.classList.add("rc-gone");
+    const name = document.createElement("span"); name.className = "rc-name";
+    name.textContent = r.title || r.root.split("/").pop();
+    const meta = document.createElement("span"); meta.className = "rc-meta";
+    meta.textContent = r.exists ? `${r.chapters} 章` : "文件夹不在了";
     const path = document.createElement("span"); path.className = "rc-path"; path.textContent = r.root;
-    li.appendChild(name); li.appendChild(path);
-    li.onclick = () => openProject(r.root, false);
-    const x = document.createElement("button"); x.className = "rc-x"; x.title = "从列表移除"; x.textContent = "×";
-    x.onclick = (e) => { e.stopPropagation(); localStorage.setItem("loom_recent", JSON.stringify(_recent().filter((v) => v.root !== r.root))); renderRecent(); };
+    li.appendChild(name); li.appendChild(meta); li.appendChild(path);
+    li.onclick = () => { if (r.exists) openProject(r.root, false); else toast("这本书的文件夹不在原处了(移动或删除过);点 × 可从书架移除", true); };
+    const x = document.createElement("button"); x.className = "rc-x"; x.title = "从书架移除(不删文件)"; x.textContent = "×";
+    x.onclick = async (e) => { e.stopPropagation(); try { await jreq("POST", "/api/projects/forget", { root: r.root }); } catch (err) {} renderRecent(); };
     li.appendChild(x);
     ul.appendChild(li);
   });
   block.classList.remove("hidden");
+}
+
+// 启动自动回书:localStorage 有上一本就开它;没有(换浏览器/清过缓存)→ 书架最近一本
+async function autoReopen() {
+  const saved = localStorage.getItem("loom_root");
+  if (saved) { openProject(saved, true); return; }
+  try {
+    const list = (await jreq("GET", "/api/projects")).projects || [];
+    const first = list.find((r) => r.exists);
+    if (first) openProject(first.root, true);
+  } catch (e) { /* 打不开就留在欢迎页 */ }
 }
 
 // ---------- 接入模型(用户级默认后端)----------

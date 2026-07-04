@@ -55,6 +55,48 @@ def default_key_is_set(provider: str) -> bool:
     return bool(key_env) and _cfg._env_var_set(user_config_dir(), key_env)
 
 
+# ---------- 项目书架(用户级注册表:新建/导入/打开过的书都记着,欢迎页点选,不再输路径) ----------
+
+_PROJECTS_JSON = "projects.json"
+
+
+def _projects_path() -> Path:
+    return user_config_dir() / _PROJECTS_JSON
+
+
+def list_projects() -> list[dict]:
+    """书架清单(最近打开在前):[{root, title, last_opened}]。没有/坏 JSON → 空。"""
+    p = _projects_path()
+    if not p.is_file():
+        return []
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, list) else []
+    except Exception:
+        return []
+
+
+def record_project(root: Path | str, title: str) -> None:
+    """把这本书记上书架(upsert + 提到最前),容量 50。任何异常吞掉——书架是便利,绝不拖累开书。"""
+    try:
+        import time
+        root = str(Path(root).resolve())
+        rest = [x for x in list_projects() if x.get("root") != root]
+        rest.insert(0, {"root": root, "title": title or Path(root).name,
+                        "last_opened": int(time.time())})
+        atomic_write_text(_projects_path(), json.dumps(rest[:50], ensure_ascii=False, indent=1))
+    except Exception:
+        pass
+
+
+def forget_project(root: str) -> None:
+    try:
+        rest = [x for x in list_projects() if x.get("root") != str(Path(root).resolve())]
+        atomic_write_text(_projects_path(), json.dumps(rest, ensure_ascii=False, indent=1))
+    except Exception:
+        pass
+
+
 def apply_default_to_new_book(root: Path) -> None:
     """新书创建后铺上用户级默认后端:把 provider/model/base_url 写进该书 loom.toml。
     key 不拷(靠 load_config 的用户级回退继承),privacy 不变。没设默认则什么都不做。"""
