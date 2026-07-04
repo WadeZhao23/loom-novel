@@ -35,45 +35,18 @@
         <button id="btn-connect" class="primary">接入模型</button>
       </div>
 
-      <!-- 我的书架:新建/导入/样例过的书都在这,点一下继续写(路径只在导入时输一次) -->
+      <!-- 板块②:我的书架(主体)——新建/导入/样例过的书都在这,点一下继续写 -->
       <div id="recent-block" class="welcome-block hidden">
         <h3>我的书架</h3>
         <ul id="recent-list" class="list"></ul>
       </div>
 
-      <div class="welcome-intro">
-        <p>第一次用?三步:① 备好<b>外置大脑</b>(世界观/人物/卡章纲——可一键起草初稿,再改)② 喂段你写的字,让它学你的<b>文风</b> ③ <b>写一章 → 手改 → learn</b>,越写越像你。</p>
-        <button id="btn-sample"><span class="ico" data-ico="sample"></span> 先看看样例(一本跑通的书)</button>
+      <!-- 板块③:开一本书(表单收进弹层,一屏一事) -->
+      <div class="welcome-actions">
+        <button id="btn-new-book" class="primary"><span class="ico" data-ico="plus"></span> 新建一本书</button>
+        <button id="btn-import-book"><span class="ico" data-ico="export"></span> 导入已有的书</button>
+        <button id="btn-sample" class="ghost"><span class="ico" data-ico="sample"></span> 看看样例</button>
       </div>
-
-      <div class="welcome-block">
-        <h3>新建一本书</h3>
-        <label>放在哪个文件夹</label>
-        <input id="new-parent" type="text" value="~/Desktop" />
-        <label>书名</label>
-        <input id="new-name" type="text" placeholder="我的小说" />
-        <label>题材(可选,只拷一份对应速查给设定师)</label>
-        <select id="new-genre"><option value="">不选题材</option></select>
-        <button id="btn-create" class="primary">新建项目</button>
-      </div>
-
-      <div class="welcome-block">
-        <h3>导入已有的书</h3>
-        <label>项目文件夹完整路径(只需导入这一次,以后它就在上面的书架里)</label>
-        <input id="open-path" type="text" placeholder="/Users/你/Desktop/我的小说" />
-        <button id="btn-open">导入并打开</button>
-      </div>
-      <details class="welcome-help">
-        <summary><span class="ico" data-ico="key"></span> 怎么接入模型(自带 key,稿子不离开你的电脑)</summary>
-        <p>开书后点右上角「设置」选供应商。国产直连(不用梯子)四步:</p>
-        <ol>
-          <li>去供应商官网注册:<b>DeepSeek</b>(platform.deepseek.com,默认推荐)/ 智谱 / Kimi / 通义 / 豆包 / 硅基流动</li>
-          <li>充值(按字数计费,几块钱能写很久)</li>
-          <li>在它的「API Keys」页创建一个 key</li>
-          <li>粘进 Loom 设置的 API Key 框 → 保存(key 只存你电脑的项目文件夹里)</li>
-        </ol>
-        <p class="muted">不想自带 key?供应商切到 <b>Claude Code</b> 或 <b>Codex</b>——复用你本机客户端的登录(含订阅),不用填 key,只需装好 <code>claude</code> / <code>codex</code> 命令并登录过。</p>
-      </details>
       <div id="welcome-error" class="error"></div>
     </div>
   </div>
@@ -281,6 +254,44 @@
         <button id="settings-close" class="ghost">关闭</button>
         <button id="btn-save-backend" class="primary">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 新建一本书(从欢迎页收进弹层:一屏一事) -->
+  <div id="create-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>新建一本书</h3>
+      <label class="field-label">书名</label>
+      <input id="new-name" type="text" placeholder="我的小说" />
+      <label class="field-label">放在哪个文件夹</label>
+      <div class="field-row">
+        <input id="new-parent" type="text" value="~/Desktop" />
+        <button id="new-parent-pick" class="ghost hidden">浏览…</button>
+      </div>
+      <label class="field-label">题材(可选,只拷一份对应速查给设定师)</label>
+      <select id="new-genre"><option value="">不选题材</option></select>
+      <div class="row-end">
+        <button id="create-cancel" class="ghost">取消</button>
+        <button id="btn-create" class="primary">新建</button>
+      </div>
+      <div id="create-error" class="error"></div>
+    </div>
+  </div>
+
+  <!-- 导入已有的书(只需一次,之后在书架点选) -->
+  <div id="import-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>导入已有的书</h3>
+      <p class="hint">选中那本书的项目文件夹(里面有 loom.toml)。只需导入这一次,以后它就在书架里。</p>
+      <div class="field-row">
+        <input id="open-path" type="text" placeholder="/Users/你/Desktop/我的小说" />
+        <button id="open-path-pick" class="ghost hidden">浏览…</button>
+      </div>
+      <div class="row-end">
+        <button id="import-cancel" class="ghost">取消</button>
+        <button id="btn-open" class="primary">导入并打开</button>
+      </div>
+      <div id="import-error" class="error"></div>
     </div>
   </div>
 

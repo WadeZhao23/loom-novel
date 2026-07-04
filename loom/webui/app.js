@@ -122,9 +122,16 @@ async function loadGenres() {
 }
 
 function bind() {
+  // 开一本书:表单在弹层里(一屏一事);「浏览…」走桌面端原生文件夹对话框(浏览器兜底才手输)
+  $("btn-new-book").onclick = () => { $("create-error").textContent = ""; _togglePickButtons(); $("create-overlay").classList.remove("hidden"); $("new-name").focus(); };
+  $("btn-import-book").onclick = () => { $("import-error").textContent = ""; _togglePickButtons(); $("import-overlay").classList.remove("hidden"); };
+  $("create-cancel").onclick = () => $("create-overlay").classList.add("hidden");
+  $("import-cancel").onclick = () => $("import-overlay").classList.add("hidden");
+  $("new-parent-pick").onclick = () => pickFolderInto("new-parent");
+  $("open-path-pick").onclick = () => pickFolderInto("open-path");
   $("btn-create").onclick = createProject;
   $("btn-sample").onclick = openSample;
-  $("btn-open").onclick = () => openProject($("open-path").value.trim(), false);
+  $("btn-open").onclick = importBook;
   $("btn-close-proj").onclick = () => { localStorage.removeItem("loom_root"); showWelcome(); };
   $("btn-theme").onclick = toggleTheme;
   $("btn-focus").onclick = toggleFocus;
@@ -241,13 +248,45 @@ function bind() {
 }
 
 // ---------- 项目 ----------
+// 原生文件夹对话框:桌面端(pywebview)有桥就走系统选择器;浏览器兜底保持手输
+function _hasNativePicker() { return !!(window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder); }
+function _togglePickButtons() {
+  const on = _hasNativePicker();
+  $("new-parent-pick").classList.toggle("hidden", !on);
+  $("open-path-pick").classList.toggle("hidden", !on);
+}
+async function pickFolderInto(inputId) {
+  try {
+    const p = await window.pywebview.api.pick_folder();
+    if (p) $(inputId).value = p;   // 取消选择 → 保持原值
+  } catch (e) { toast("打开文件夹选择器失败:" + e.message, true); }
+}
+
 async function createProject() {
-  $("welcome-error").textContent = "";
+  $("create-error").textContent = "";
+  const name = $("new-name").value.trim();
+  if (!name) { $("create-error").textContent = "先给这本书起个名字。"; $("new-name").focus(); return; }
   try {
     const d = await jreq("POST", "/api/project/create",
-      { name: $("new-name").value.trim(), parent: $("new-parent").value.trim(), genre: $("new-genre").value || null });
+      { name, parent: $("new-parent").value.trim(), genre: $("new-genre").value || null });
+    $("create-overlay").classList.add("hidden");
     enterProject(d);
-  } catch (e) { $("welcome-error").textContent = e.message; }
+  } catch (e) { $("create-error").textContent = e.message; }
+}
+
+async function importBook() {
+  $("import-error").textContent = "";
+  const p = $("open-path").value.trim();
+  if (!p) {
+    $("import-error").textContent = _hasNativePicker()
+      ? "先点「浏览…」选中那本书的文件夹。" : "先填那本书的项目文件夹路径。";
+    return;
+  }
+  try {
+    const d = await jreq("POST", "/api/project/open", { root: p });
+    $("import-overlay").classList.add("hidden");
+    enterProject(d);
+  } catch (e) { $("import-error").textContent = e.message; }
 }
 async function openSample() {
   $("welcome-error").textContent = "";
@@ -1744,7 +1783,7 @@ function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
   if ($("seal-bar").classList.contains("on")) { hideSealBar(); return true; }
-  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "run-overlay"];
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "create-overlay", "import-overlay", "connect-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) { minimizeRun(); return true; } // 写作中 Esc=收起后台织,不误关

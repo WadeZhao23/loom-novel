@@ -120,10 +120,22 @@ def run() -> None:
     try:
         import webview
 
+        class _JsApi:
+            """暴露给 webui 的原生能力桥(window.pywebview.api.*)。
+            C端用户不该手输文件路径——导入书/选文件夹走系统对话框。"""
+
+            def pick_folder(self):
+                w = webview.windows[0] if webview.windows else None
+                if w is None:
+                    return None
+                res = w.create_file_dialog(webview.FOLDER_DIALOG)
+                return res[0] if res else None   # 取消选择 → None,前端保持原值
+
         webview.create_window(
             "Loom · 织布机",
             f"http://127.0.0.1:{port}",
             width=1180, height=780, min_size=(920, 600),
+            js_api=_JsApi(),
         )
         _set_dock_icon()
         webview.start()

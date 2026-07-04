@@ -228,6 +228,11 @@ button:disabled { opacity: .55; cursor: default; }
 #recent-list li:hover .rc-x { opacity: 1; }
 #recent-list .rc-x:hover { color: var(--danger); }
 
+/* 板块③:开一本书(三个动作按钮,表单在弹层里) */
+.welcome-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5);
+  padding-top: var(--space-5); border-top: 1px solid var(--line-soft); flex-wrap: wrap; }
+.welcome-actions button { flex: 1 1 auto; }
+
 .welcome-block { margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--line-soft); }
 .welcome-block h3 { margin: 0 0 var(--space-3); font-size: var(--fs-h2); font-weight: 700; }
 .welcome-block label { display: block; color: var(--text-soft); font-size: var(--fs-xs); margin: 10px 0 5px; }
