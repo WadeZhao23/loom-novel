@@ -23,7 +23,7 @@ from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
 from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
 from .chaptertext import body_changed, parse_title
-from .config import key_is_set, load_config, openai_compat_key_is_set, provider_key_is_set
+from .config import key_available, key_is_set, load_config, openai_compat_key_is_set
 from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN
 from .draft import draft_brain as _draft_brain
 from .enrich import extract_supplement
@@ -243,9 +243,9 @@ def project_state(root: Path | str) -> dict:
         "backend": {"provider": cfg.provider, "model": cfg.model, "base_url": cfg.base_url,
                     "chapter_chars": cfg.chapter_chars, "key_set": key_is_set(root),
                     "openai_compat_key_set": openai_compat_key_is_set(root),
-                    # 每个供应商各自的 key 是否已设置(cli 类免 key,恒 True):前端守卫/旅程卡统一读它
+                    # 每个供应商的 key 是否可用(本书 .env 或继承的用户级默认 .env;cli 类免 key 恒 True)
                     "keys_set": {pid: (spec["kind"] == "cli" or
-                                       provider_key_is_set(root, spec.get("key_env", "")))
+                                       key_available(root, spec.get("key_env", "")))
                                  for pid, spec in PROVIDERS.items()},
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),

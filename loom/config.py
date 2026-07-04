@@ -34,8 +34,20 @@ def find_project_root(start: Path | None = None) -> Path:
     raise FileNotFoundError(render("project_root_not_found"))
 
 
+def user_config_dir() -> Path:
+    """用户级配置目录(默认后端 backend.json + 默认 key 的 .env)。本地文件、非服务器,守「稿子不离机」。
+    LOOM_HOME 可覆盖(测试/自定义)。"""
+    return Path(os.environ.get("LOOM_HOME") or (Path.home() / ".loom"))
+
+
+def user_env_path() -> Path:
+    return user_config_dir() / ".env"
+
+
 def load_config(project_root: Path) -> Config:
-    # .env 从项目根读(里面放 DEEPSEEK_API_KEY);override=True 保证切换项目时当前项目的 key 生效
+    # 先加载用户级默认 key(~/.loom/.env)作回退,再加载项目 .env——两次 override=True,项目在后=项目赢。
+    # 于是:新书没填 key 也能用用户级默认 key(继承);某本单独填了就覆盖(该本 .env 里那行赢)。
+    load_dotenv(user_env_path(), override=True)
     load_dotenv(project_root / ".env", override=True)
     try:
         data = tomllib.loads((project_root / "loom.toml").read_text(encoding="utf-8"))
@@ -86,6 +98,22 @@ def set_provider_key(project_root: Path, key_env: str, key: str) -> None:
 
 def provider_key_is_set(project_root: Path, key_env: str) -> bool:
     return _env_var_set(project_root, key_env)
+
+
+def key_available(project_root: Path, key_env: str) -> bool:
+    """这本书能不能拿到这个 key:本书 .env 有 → 有;否则看用户级默认 .env(继承)。"""
+    return _env_var_set(project_root, key_env) or _env_var_set(user_config_dir(), key_env)
+
+
+def read_env_value(env_dir: Path, name: str) -> str:
+    """从某目录的 .env 读一个变量的原值(没有返回空)。用户级默认后端读 key 值用。"""
+    env = env_dir / ".env"
+    if not env.exists():
+        return ""
+    for line in env.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith(f"{name}="):
+            return line.split("=", 1)[1].strip()
+    return ""
 
 
 def set_env_key(project_root: Path, key: str) -> None:

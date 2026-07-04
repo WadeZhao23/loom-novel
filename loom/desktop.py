@@ -15,8 +15,27 @@ import uvicorn
 from .server import app
 
 
+# 固定默认端口:localStorage(记住上次的书 / 最近书 / 主题)按 origin=127.0.0.1:端口 存,
+# 端口每次变 origin 就变、存的全丢——这正是「每次进来都要重开书」的真根因。固定端口=稳定 origin,
+# 本地记忆才留得住。端口被别的程序占了才回退随机(此时那次记忆丢失可接受,极少发生)。
+DEFAULT_PORT = 8473  # 冷门端口,撞车概率低;LOOM_PORT 可覆盖
+
+
+def _port_free(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
 def _free_port() -> int:
-    s = socket.socket()
+    import os
+    want = int(os.environ.get("LOOM_PORT", DEFAULT_PORT))
+    if _port_free(want):
+        return want
+    s = socket.socket()          # 固定端口被占 → 回退随机(记忆这次留不住,但至少能起来)
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()

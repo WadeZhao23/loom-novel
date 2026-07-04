@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from . import events, usecases
 from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
-                       probe as probe_backend, validate_model)
+                       probe as probe_backend, provider_catalog, validate_model)
 from .config import Config, load_config, save_config, set_provider_key
 from .doctor import report, run_checks
 from .fsutil import atomic_write_text, list_history, safe_join, snapshot_chapter
@@ -91,6 +91,8 @@ def create_project(b: CreateBody):
         root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    from . import userconf
+    userconf.apply_default_to_new_book(root)   # 新书继承用户级默认后端(连一次全局记住,不用每本重填)
     return _state(root)
 
 
@@ -207,6 +209,36 @@ class ConfigBody(BaseModel):
 @app.get("/api/backend/probe")
 def backend_probe(provider: str):
     return probe_backend(provider)
+
+
+# ---- 用户级默认后端(接入模型:连一次全局记住,新书自动继承)----
+class DefaultBackendBody(BaseModel):
+    provider: str
+    model: str
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+@app.get("/api/backend/default")
+def get_default_backend():
+    """欢迎页「接入模型」回显:当前用户级默认后端 + 各家 key 是否已设 + 供应商目录。"""
+    from . import userconf
+    d = userconf.load_default_backend()
+    keys_set = {pid: (spec["kind"] == "cli" or userconf.default_key_is_set(pid))
+                for pid, spec in PROVIDERS.items()}
+    return {"provider": d.get("provider", "deepseek"), "model": d.get("model", ""),
+            "base_url": d.get("base_url", ""), "has_default": userconf.has_default(),
+            "keys_set": keys_set, "providers": provider_catalog()}
+
+
+@app.put("/api/backend/default")
+def put_default_backend(b: DefaultBackendBody):
+    from . import userconf
+    if b.provider == "openai_compat" and not (b.base_url or "").strip():
+        return JSONResponse({"error": "选了「OpenAI 兼容(自定义)」要先填 base_url 再保存。"}, status_code=400)
+    userconf.save_default_backend(b.provider, b.model, (b.base_url or "").strip(), b.api_key)
+    warn = validate_model(b.provider, b.model)
+    return {"ok": True, "model_warning": warn}
 
 
 class ModelsBody(BaseModel):

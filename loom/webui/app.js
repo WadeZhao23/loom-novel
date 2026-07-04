@@ -104,8 +104,10 @@ window.addEventListener("DOMContentLoaded", () => {
   initTheme();
   bind();
   loadGenres();
+  renderRecent();       // 欢迎页的最近书列表(本地记住)
+  loadConnectStatus();  // 欢迎页的接入状态
   const saved = localStorage.getItem("loom_root");
-  if (saved) openProject(saved, true);
+  if (saved) openProject(saved, true);   // 端口固定后 localStorage 留得住,自动重开上一本
 });
 
 async function loadGenres() {
@@ -131,6 +133,14 @@ function bind() {
   $("btn-settings").onclick = openSettings;
   $("settings-close").onclick = () => $("settings-overlay").classList.add("hidden");
   $("kbd-hint").onclick = openCmdk;
+  // 接入模型(用户级默认后端)
+  $("btn-connect").onclick = openConnect;
+  $("cn-cancel").onclick = () => $("connect-overlay").classList.add("hidden");
+  $("cn-save").onclick = saveConnect;
+  $("cn-provider").onchange = cnApplyProvider;
+  $("cn-model").onchange = () => cnOnModelSelect();
+  $("cn-fetch-models").onclick = cnFetchModels;
+  $("cn-probe").onclick = cnProbe;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
   $("nav-timeline").onclick = () => openStudio("timeline");
@@ -260,13 +270,159 @@ async function openProject(root, silent) {
 function showWelcome() {
   $("app").classList.add("hidden");
   $("welcome").classList.remove("hidden");
+  renderRecent();
+  loadConnectStatus();
 }
 function enterProject(d) {
   DATA = d;
   localStorage.setItem("loom_root", d.root);
+  recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
   $("app").classList.remove("hidden");
   render();
+}
+
+// ---------- 最近打开(本地 localStorage 记住,固定端口后跨启动留得住) ----------
+function _recent() {
+  try { return JSON.parse(localStorage.getItem("loom_recent") || "[]"); } catch (e) { return []; }
+}
+function recordRecent(root, title) {
+  if (!root) return;
+  let list = _recent().filter((r) => r.root !== root);
+  list.unshift({ root, title: title || root.split("/").pop(), ts: Date.now() });
+  localStorage.setItem("loom_recent", JSON.stringify(list.slice(0, 8)));
+}
+function renderRecent() {
+  const list = _recent(), ul = $("recent-list"), block = $("recent-block");
+  ul.innerHTML = "";
+  if (!list.length) { block.classList.add("hidden"); return; }
+  list.forEach((r) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span"); name.className = "rc-name"; name.textContent = r.title || r.root.split("/").pop();
+    const path = document.createElement("span"); path.className = "rc-path"; path.textContent = r.root;
+    li.appendChild(name); li.appendChild(path);
+    li.onclick = () => openProject(r.root, false);
+    const x = document.createElement("button"); x.className = "rc-x"; x.title = "从列表移除"; x.textContent = "×";
+    x.onclick = (e) => { e.stopPropagation(); localStorage.setItem("loom_recent", JSON.stringify(_recent().filter((v) => v.root !== r.root))); renderRecent(); };
+    li.appendChild(x);
+    ul.appendChild(li);
+  });
+  block.classList.remove("hidden");
+}
+
+// ---------- 接入模型(用户级默认后端)----------
+let _conn = null;   // GET /api/backend/default 的响应(providers/keys_set/当前默认)
+async function loadConnectStatus() {
+  const dot = $("cb-dot"), text = $("cb-text"), btn = $("btn-connect");
+  try { _conn = await jreq("GET", "/api/backend/default"); }
+  catch (e) { text.textContent = "接入状态读取失败"; return; }
+  const spec = (_conn.providers || []).find((p) => p.id === _conn.provider);
+  const label = spec ? spec.label : _conn.provider;
+  const keyed = spec && (spec.kind === "cli" || (_conn.keys_set || {})[_conn.provider]);
+  if (_conn.has_default && keyed) {
+    dot.className = "cb-dot ok";
+    text.innerHTML = `已接入 <b>${escHtml(label)}</b>${_conn.model ? " · " + escHtml(_conn.model) : ""} —— 新书会自动用它`;
+    btn.textContent = "换一个";
+    btn.classList.remove("primary");
+  } else {
+    dot.className = "cb-dot";
+    text.textContent = "还没接入模型 —— 连一次,以后每本书都用得上";
+    btn.textContent = "接入模型";
+    btn.classList.add("primary");
+  }
+}
+function cnSpec(pid) { return (_conn && _conn.providers || []).find((p) => p.id === pid) || null; }
+function cnKeyed(pid) {
+  const s = cnSpec(pid);
+  if (s && s.kind === "cli") return true;
+  return !!(_conn && _conn.keys_set && _conn.keys_set[pid]);
+}
+async function openConnect() {
+  $("cn-error").textContent = ""; $("cn-status").textContent = ""; $("cn-status").className = "backend-status";
+  if (!_conn) { try { _conn = await jreq("GET", "/api/backend/default"); } catch (e) { toast(e.message, true); return; } }
+  const sel = $("cn-provider"); sel.innerHTML = "";
+  (_conn.providers || []).forEach((p) => { const o = document.createElement("option"); o.value = p.id; o.textContent = p.label; sel.appendChild(o); });
+  sel.value = _conn.provider || "deepseek";
+  $("cn-api-key").value = "";
+  cnApplyProvider();
+  cnFillModels(cnSpec(sel.value) ? cnSpec(sel.value).models : []);
+  cnSetModel(_conn.model || (cnSpec(sel.value) ? cnSpec(sel.value).default_model : ""));
+  $("connect-overlay").classList.remove("hidden");
+}
+function cnApplyProvider() {
+  const p = $("cn-provider").value, spec = cnSpec(p);
+  const needsKey = spec ? spec.needs_key : true;
+  const isCustom = p === "openai_compat";
+  const isCli = spec && spec.kind === "cli";
+  $("cn-api-key").classList.toggle("hidden", !needsKey);
+  $("cn-key-label").classList.toggle("hidden", !needsKey);
+  $("cn-base-url").classList.toggle("hidden", !isCustom);
+  $("cn-fetch-models").classList.toggle("hidden", !(spec && spec.can_list_models));
+  $("cn-probe").classList.toggle("hidden", !isCli);
+  $("cn-key-hint").textContent = (spec && spec.hint) || "";
+  if (needsKey) $("cn-api-key").placeholder = cnKeyed(p) ? "已设置(留空=不改)" : `填 ${spec ? spec.label : p} 的 API Key`;
+  if (isCustom && spec && !$("cn-base-url").value) $("cn-base-url").value = spec.base_url || "";
+  cnFillModels(spec ? spec.models : []);
+  cnSetModel(spec ? spec.default_model : "");
+}
+function cnFillModels(models) {
+  const sel = $("cn-model"); sel.innerHTML = "";
+  (models || []).forEach((m) => { const o = document.createElement("option"); o.value = m.id; o.textContent = m.label || m.id || "(默认)"; sel.appendChild(o); });
+  const c = document.createElement("option"); c.value = "__custom__"; c.textContent = "✎ 手动输入…"; sel.appendChild(c);
+}
+function cnSetModel(model) {
+  const sel = $("cn-model"), custom = $("cn-model-custom"); model = model || "";
+  if (model && ![...sel.options].some((o) => o.value === model)) {
+    const o = document.createElement("option"); o.value = model; o.textContent = model;
+    sel.insertBefore(o, sel.querySelector('option[value="__custom__"]'));
+  }
+  sel.value = model;
+  if (sel.selectedIndex < 0) sel.selectedIndex = 0;
+  if (sel.value === "__custom__") { custom.classList.remove("hidden"); custom.value = model !== "__custom__" ? model : ""; }
+  else { custom.classList.add("hidden"); custom.value = ""; }
+}
+function cnOnModelSelect() {
+  const custom = $("cn-model-custom");
+  if ($("cn-model").value === "__custom__") { custom.classList.remove("hidden"); custom.focus(); }
+  else custom.classList.add("hidden");
+}
+function cnCurrentModel() {
+  const sel = $("cn-model");
+  return sel.value === "__custom__" ? $("cn-model-custom").value.trim() : sel.value;
+}
+async function cnFetchModels() {
+  const p = $("cn-provider").value, btn = $("cn-fetch-models"), old = btn.innerHTML;
+  btn.disabled = true; btn.textContent = "拉取中…";
+  try {
+    const d = await jreq("POST", "/api/backend/models", { provider: p, base_url: $("cn-base-url").value.trim() || null, api_key: $("cn-api-key").value.trim() || null });
+    if (d.ok && (d.models || []).length) { cnFillModels(d.models); $("cn-model").selectedIndex = 0; $("cn-model-custom").classList.add("hidden"); toast(d.message || `拉到 ${d.models.length} 个模型`); }
+    else toast(d.message || "没拉到模型(检查 base_url / key)", true);
+  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; btn.innerHTML = old; }
+}
+async function cnProbe() {
+  const s = $("cn-status"); s.className = "backend-status"; s.textContent = "检测中…";
+  try {
+    const d = await jreq("GET", `/api/backend/probe?provider=${encodeURIComponent($("cn-provider").value)}`);
+    s.className = "backend-status " + (d.ok ? "ok" : "bad");
+    s.innerHTML = icon(d.ok ? "check" : "cross", "stat-ico") + " " + escHtml(d.message || "");
+    if (!d.ok && d.hint) toast(d.hint, true);
+  } catch (e) { s.className = "backend-status bad"; s.textContent = e.message; }
+}
+async function saveConnect() {
+  $("cn-error").textContent = "";
+  const p = $("cn-provider").value;
+  try {
+    const d = await jreq("PUT", "/api/backend/default", {
+      provider: p, model: cnCurrentModel(),
+      base_url: $("cn-base-url").value.trim() || null,
+      api_key: $("cn-api-key").value.trim() || null,
+    });
+    if (d.model_warning) toast(d.model_warning, true);
+    _conn = null;   // 强制重拉状态
+    $("connect-overlay").classList.add("hidden");
+    await loadConnectStatus();
+    toast("已接入,记住了 —— 新建的书会自动用它");
+  } catch (e) { $("cn-error").textContent = e.message; }
 }
 
 async function refresh() {

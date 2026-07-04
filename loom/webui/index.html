@@ -23,12 +23,27 @@
       </div>
 
       <div class="journey-strip" aria-hidden="true">
-        <span class="js-on">① 开一本书</span><i>—</i><span>② 接入模型</span><i>—</i><span>③ 外置大脑</span><i>—</i><span>④ 你的声音</span><i>—</i><span>⑤ 织第一章</span>
+        <span class="js-on">① 接入模型</span><i>—</i><span>② 开一本书</span><i>—</i><span>③ 外置大脑</span><i>—</i><span>④ 你的声音</span><i>—</i><span>⑤ 织第一章</span>
+      </div>
+
+      <!-- 第一步:接入模型(连一次全局记住,新书自动继承) -->
+      <div id="connect-block" class="connect-block">
+        <div class="cb-status">
+          <span id="cb-dot" class="cb-dot"></span>
+          <span id="cb-text">正在检查接入状态…</span>
+        </div>
+        <button id="btn-connect" class="primary">接入模型</button>
+      </div>
+
+      <!-- 最近打开(本地记住,点一下继续写) -->
+      <div id="recent-block" class="welcome-block hidden">
+        <h3>最近打开</h3>
+        <ul id="recent-list" class="list"></ul>
       </div>
 
       <div class="welcome-intro">
         <p>第一次用?三步:① 备好<b>外置大脑</b>(世界观/人物/卡章纲——可一键起草初稿,再改)② 喂段你写的字,让它学你的<b>文风</b> ③ <b>写一章 → 手改 → learn</b>,越写越像你。</p>
-        <button id="btn-sample" class="primary"><span class="ico" data-ico="sample"></span> 先看看样例(一本跑通的书)</button>
+        <button id="btn-sample"><span class="ico" data-ico="sample"></span> 先看看样例(一本跑通的书)</button>
       </div>
 
       <div class="welcome-block">
@@ -266,6 +281,35 @@
         <button id="settings-close" class="ghost">关闭</button>
         <button id="btn-save-backend" class="primary">保存</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 接入模型(用户级默认后端:连一次全局记住,新建的每本书自动继承) -->
+  <div id="connect-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>接入模型</h3>
+      <p class="hint">连一次就好——填进去的会成为默认后端,以后<b>新建的每本书自动用它</b>,不用每本重填。key 只存你电脑本地,Loom 没有服务器。</p>
+      <label class="field-label">供应商</label>
+      <select id="cn-provider"></select>
+      <div id="cn-key-hint" class="hint"></div>
+      <label class="field-label" id="cn-key-label">API Key</label>
+      <input id="cn-api-key" type="password" title="国产直连供应商需填;Claude / Codex 复用本机客户端登录,不用填 key" />
+      <input id="cn-base-url" type="text" class="base-url hidden" placeholder="base_url(自定义供应商)" />
+      <label class="field-label">模型</label>
+      <div class="field-row">
+        <select id="cn-model" class="model"></select>
+        <button id="cn-fetch-models" class="ghost hidden"><span class="ico" data-ico="focus"></span> 拉取可用模型</button>
+      </div>
+      <input id="cn-model-custom" type="text" class="hidden" autocomplete="off" placeholder="手动输入模型名" />
+      <div class="field-row settings-status-row">
+        <button id="cn-probe" class="ghost hidden"><span class="ico" data-ico="focus"></span> 检测连接</button>
+        <span id="cn-status" class="backend-status"></span>
+      </div>
+      <div class="row-end">
+        <button id="cn-cancel" class="ghost">以后再说</button>
+        <button id="cn-save" class="primary">接入,记住它</button>
+      </div>
+      <div id="cn-error" class="error"></div>
     </div>
   </div>
 

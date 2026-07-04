@@ -204,6 +204,27 @@ button:disabled { opacity: .55; cursor: default; }
 .journey-strip i { font-style: normal; color: var(--line-strong); }
 .journey-strip .js-on { color: var(--text); font-weight: 600; }
 
+/* 接入模型:欢迎页第一步(连一次全局记住) */
+.connect-block { display: flex; align-items: center; gap: var(--space-3);
+  margin-top: var(--space-4); padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-sunken); }
+.connect-block .cb-status { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  font-size: var(--fs-sm); color: var(--text-soft); }
+.connect-block .cb-status b { color: var(--text); font-weight: 600; }
+.cb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-mute); flex: none; }
+.cb-dot.ok { background: var(--success); }
+.connect-block button { flex: none; }
+
+/* 最近打开列表 */
+#recent-list li { flex-wrap: wrap; }
+#recent-list .rc-name { font-weight: 600; color: var(--text); }
+#recent-list .rc-path { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--text-mute);
+  font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#recent-list .rc-x { border: none; background: transparent; color: var(--text-mute); cursor: pointer;
+  padding: 0 4px; font-size: var(--fs-body); line-height: 1; margin-left: auto; opacity: 0; }
+#recent-list li:hover .rc-x { opacity: 1; }
+#recent-list .rc-x:hover { color: var(--danger); }
+
 .welcome-block { margin-top: var(--space-5); padding-top: var(--space-5); border-top: 1px solid var(--line-soft); }
 .welcome-block h3 { margin: 0 0 var(--space-3); font-size: var(--fs-h2); font-weight: 700; }
 .welcome-block label { display: block; color: var(--text-soft); font-size: var(--fs-xs); margin: 10px 0 5px; }
