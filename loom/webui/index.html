@@ -38,7 +38,7 @@
       <!-- 板块②:我的书架(主体)——新建/导入/样例过的书都在这,点一下继续写 -->
       <div id="recent-block" class="welcome-block hidden">
         <h3>我的书架</h3>
-        <ul id="recent-list" class="list"></ul>
+        <ul id="recent-list" class="shelf"></ul>
       </div>
 
       <!-- 板块③:开一本书(表单收进弹层,一屏一事) -->
@@ -78,35 +78,25 @@
             <span><span class="ico" data-ico="chapters"></span> 正文</span>
           </div>
           <ul id="chapters" class="list"></ul>
-          <div class="book-actions">
-            <button id="btn-export" class="mini"><span class="ico" data-ico="export"></span> 导出全书</button>
-            <button id="btn-backup" class="mini"><span class="ico" data-ico="backup"></span> 备份整本</button>
-          </div>
         </div>
 
         <div class="side-section" id="brain-section">
           <div class="side-head"><span><span class="ico" data-ico="brain"></span> 外置大脑</span></div>
           <ul id="brain" class="list"></ul>
           <ul id="studio-nav" class="list">
-            <li id="nav-timeline"><span class="ico" data-ico="history"></span> 时间轴(故事到哪了)</li>
-            <li id="nav-foreshadow"><span class="ico" data-ico="pin"></span> 伏笔账本</li>
-            <li id="nav-names"><span class="ico" data-ico="key"></span> 专名册</li>
+            <li id="nav-studio"><span class="ico" data-ico="history"></span> 书房 <span class="side-sub">时间轴 · 伏笔 · 专名</span></li>
           </ul>
           <div class="voice-card" id="fp-card">
             <div class="vc-head"><span class="ico" data-ico="fingerprint"></span> 写作指纹</div>
             <div id="fp-source" class="vc-body"></div>
+            <button id="btn-seed" class="mini"><span class="ico" data-ico="seed"></span> 喂样本,让它懂你</button>
           </div>
-          <button id="btn-seed" class="mini"><span class="ico" data-ico="seed"></span> 喂样本,让它懂你(seed)</button>
         </div>
 
-        <details class="side-section">
-          <summary><span class="ico disclosure" data-ico="chevron"></span><span class="ico" data-ico="skills"></span> skills(方法论)</summary>
-          <ul id="skills" class="list"></ul>
-        </details>
-
-        <details class="side-section">
-          <summary><span class="ico disclosure" data-ico="chevron"></span><span class="ico" data-ico="agents"></span> agents(5 道工序的提示词)</summary>
+        <details class="side-section side-backstage">
+          <summary><span class="ico disclosure" data-ico="chevron"></span> 幕后 <span class="side-sub">5 道工序 · 方法论</span></summary>
           <ul id="agents" class="list"></ul>
+          <ul id="skills" class="list"></ul>
         </details>
       </aside>
 
@@ -249,6 +239,11 @@
       </div>
       <label class="field-label">终稿目标字数</label>
       <input id="chapter-chars" type="number" min="200" step="100" />
+      <label class="field-label">本书数据(纯本地)</label>
+      <div class="field-row">
+        <button id="btn-export" class="mini"><span class="ico" data-ico="export"></span> 导出全书 txt</button>
+        <button id="btn-backup" class="mini"><span class="ico" data-ico="backup"></span> 备份整本 zip</button>
+      </div>
       <div class="row-end">
         <button id="btn-doctor" class="ghost">环境自检</button>
         <button id="settings-close" class="ghost">关闭</button>

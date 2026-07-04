@@ -215,18 +215,31 @@ button:disabled { opacity: .55; cursor: default; }
 .cb-dot.ok { background: var(--success); }
 .connect-block button { flex: none; }
 
-/* 我的书架 */
-#recent-list li { flex-wrap: wrap; }
-#recent-list li.rc-gone { opacity: .55; }
-#recent-list .rc-name { font-weight: 600; color: var(--text); }
-#recent-list .rc-meta { font-size: var(--fs-caption); color: var(--text-mute);
-  border: 1px solid var(--line); border-radius: var(--radius-pill); padding: 0 7px; }
-#recent-list .rc-path { flex: 1 1 100%; font-size: var(--fs-xs); color: var(--text-mute);
-  font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#recent-list .rc-x { border: none; background: transparent; color: var(--text-mute); cursor: pointer;
-  padding: 0 4px; font-size: var(--fs-body); line-height: 1; margin-left: auto; opacity: 0; }
-#recent-list li:hover .rc-x { opacity: 1; }
-#recent-list .rc-x:hover { color: var(--danger); }
+/* 我的书架:一排立着的书脊(竖排楷体书名),不是通用列表 */
+.shelf { list-style: none; margin: 0; padding: var(--space-2) 0 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px; }
+.shelf .book { position: relative; height: 170px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; padding: 12px 6px 8px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 3px 9px 9px 3px;                    /* 左直右圆=书脊开合面 */
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2), border-color var(--dur-2); }
+.shelf .book::before { content: ""; position: absolute; left: 7px; top: 10px; bottom: 10px;
+  width: 1px; background: var(--line-soft); }        /* 书脊折痕 */
+.shelf .book:hover { transform: translateY(-4px); box-shadow: var(--shadow-3);
+  border-color: var(--line-strong); }
+.shelf .book-title { writing-mode: vertical-rl; font-family: var(--font-brand);
+  font-size: 15px; letter-spacing: 3px; color: var(--text); flex: 1;
+  overflow: hidden; max-height: 118px;
+  white-space: nowrap; text-overflow: ellipsis; }   /* 长书名单列竖排+省略,不折成第二列 */
+.shelf .book-meta { margin-top: 8px; font-size: var(--fs-caption); color: var(--text-mute); }
+.shelf .book-gone { opacity: .5; }
+.shelf .book-gone .book-meta { color: var(--danger); }
+.shelf .book-x { position: absolute; top: 2px; right: 4px; border: none; background: transparent;
+  color: var(--text-mute); cursor: pointer; padding: 2px 4px; line-height: 1; opacity: 0;
+  transition: opacity var(--dur-2); }
+.shelf .book:hover .book-x { opacity: 1; }
+.shelf .book-x:hover { color: var(--danger); }
 
 /* 板块③:开一本书(三个动作按钮,表单在弹层里) */
 .welcome-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5);
@@ -289,6 +302,19 @@ button:disabled { opacity: .55; cursor: default; }
   letter-spacing: .02em; margin-bottom: var(--space-2);
 }
 .side-section > summary { cursor: pointer; list-style: none; }
+/* 分组标题里的弱说明(书房/幕后条目的副词) */
+.side-sub { font-weight: 400; color: var(--text-mute); font-size: var(--fs-caption); margin-left: 4px; }
+
+/* 外置大脑目录分组(世界观/、人物/):可折叠,一节(人)一行 */
+.brain-group { padding: 0 !important; display: block !important; }
+.brain-group:hover { background: transparent !important; }
+.brain-group summary { list-style: none; cursor: pointer; padding: 7px 10px;
+  border-radius: var(--radius-sm); display: flex; align-items: center; gap: var(--space-2); }
+.brain-group summary::-webkit-details-marker { display: none; }
+.brain-group summary:hover { background: var(--line-soft); }
+.brain-group details[open] > summary .disclosure { transform: rotate(90deg); }
+.brain-sub { margin-left: var(--space-4) !important; }
+.brain-sub li { font-size: var(--fs-sm); }
 .side-section > summary::-webkit-details-marker { display: none; }
 /* 折叠箭头:一个 chevron 图标,展开时转 90° 朝下 */
 .disclosure { color: var(--text-mute); margin-right: 2px; transition: transform var(--dur-2) var(--ease-out); }

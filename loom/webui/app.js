@@ -149,9 +149,7 @@ function bind() {
   $("cn-probe").onclick = cnProbe;
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
-  $("nav-timeline").onclick = () => openStudio("timeline");
-  $("nav-foreshadow").onclick = () => openStudio("foreshadow");
-  $("nav-names").onclick = () => openStudio("names");
+  $("nav-studio").onclick = () => openStudio("timeline");   // 书房单入口,弹层内有三 tab
   $("studio-tab-timeline").onclick = () => renderStudio("timeline");
   $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
   $("studio-tab-names").onclick = () => renderStudio("names");
@@ -332,15 +330,15 @@ async function renderRecent() {
   if (!list.length) { block.classList.add("hidden"); return; }
   list.forEach((r) => {
     const li = document.createElement("li");
-    if (!r.exists) li.classList.add("rc-gone");
-    const name = document.createElement("span"); name.className = "rc-name";
-    name.textContent = r.title || r.root.split("/").pop();
-    const meta = document.createElement("span"); meta.className = "rc-meta";
-    meta.textContent = r.exists ? `${r.chapters} 章` : "文件夹不在了";
-    const path = document.createElement("span"); path.className = "rc-path"; path.textContent = r.root;
-    li.appendChild(name); li.appendChild(meta); li.appendChild(path);
+    li.className = "book" + (r.exists ? "" : " book-gone");
+    li.title = r.root + (r.exists ? "" : "\n(文件夹不在原处了,点 × 从书架移除)");
+    const spine = document.createElement("span"); spine.className = "book-title";
+    spine.textContent = r.title || r.root.split("/").pop();
+    const meta = document.createElement("span"); meta.className = "book-meta";
+    meta.textContent = r.exists ? `${r.chapters} 章` : "失踪";
+    li.appendChild(spine); li.appendChild(meta);
     li.onclick = () => { if (r.exists) openProject(r.root, false); else toast("这本书的文件夹不在原处了(移动或删除过);点 × 可从书架移除", true); };
-    const x = document.createElement("button"); x.className = "rc-x"; x.title = "从书架移除(不删文件)"; x.textContent = "×";
+    const x = document.createElement("button"); x.className = "book-x"; x.title = "从书架移除(不删文件)"; x.textContent = "×";
     x.onclick = async (e) => { e.stopPropagation(); try { await jreq("POST", "/api/projects/forget", { root: r.root }); } catch (err) {} renderRecent(); };
     li.appendChild(x);
     ul.appendChild(li);
@@ -824,6 +822,22 @@ async function scanSensitive() {
 function fillList(id, items, editable) {
   const ul = $(id); ul.innerHTML = "";
   items.forEach((it) => {
+    if (it.children) {   // 目录形态(世界观/、人物/):可折叠分组,一节(人)一行
+      const li = document.createElement("li"); li.className = "brain-group";
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.innerHTML = `${icon("chevron", "disclosure")} ${escHtml(it.name)} <span class="side-sub">${it.children.length} 篇</span>`;
+      det.appendChild(sum);
+      const sub = document.createElement("ul"); sub.className = "list brain-sub";
+      it.children.forEach((c) => {
+        const cli = document.createElement("li");
+        cli.textContent = c.name;
+        cli.onclick = (e) => { e.stopPropagation(); openFile(c.rel, editable, null, cli); };
+        sub.appendChild(cli);
+      });
+      det.appendChild(sub); li.appendChild(det); ul.appendChild(li);
+      return;
+    }
     const li = document.createElement("li");
     const isFp = it.rel.endsWith("写作指纹.md");
     if (isFp) li.className = "fp";
