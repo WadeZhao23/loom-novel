@@ -100,8 +100,18 @@ def test_pipeline_golden(project: Path):
 
     record["files"] = _files_snapshot(project)
 
-    # 归一化:事件里的绝对路径(edit_note/chapter_done 的 path 字段)按项目根替换,快照才可复现
-    blob = json.dumps(record, ensure_ascii=False, indent=1, sort_keys=True).replace(str(project), "<ROOT>")
+    # 归一化:事件里的绝对路径(edit_note/chapter_done 的 path 字段)按项目根替换,快照才可复现。
+    # 必须在 dumps 之前做:Windows 根含反斜杠,进了 JSON 会被转义成 \\,dumps 后再 replace 永远对不上;
+    # 只动「含项目根的字符串」,顺手把分隔符归一成 /,正文内容字符串绝不受影响。
+    def _norm(o):
+        if isinstance(o, dict):
+            return {k: _norm(v) for k, v in o.items()}
+        if isinstance(o, list):
+            return [_norm(v) for v in o]
+        if isinstance(o, str) and str(project) in o:
+            return o.replace(str(project), "<ROOT>").replace("\\", "/")
+        return o
+    blob = json.dumps(_norm(record), ensure_ascii=False, indent=1, sort_keys=True)
 
     if os.environ.get("LOOM_GOLDEN_WRITE") == "1":
         GOLDEN.parent.mkdir(parents=True, exist_ok=True)

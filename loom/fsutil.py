@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -38,7 +39,17 @@ def atomic_write_text(path: Path | str, content: str, encoding: str = "utf-8") -
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)  # 原子替换:要么旧的、要么新的,不会有中间态
+        # 原子替换:要么旧的、要么新的,不会有中间态。
+        # Windows 上目标正被另一并发 replace/读取时会瞬时 PermissionError(Access denied),
+        # 短退避重试(POSIX 永远不触发);重试耗尽才抛,绝不吞错假装保存成功。
+        for _attempt in range(200):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if _attempt == 199:
+                    raise
+                time.sleep(0.002)
     finally:
         try:
             if tmp.exists():
