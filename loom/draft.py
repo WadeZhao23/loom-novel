@@ -17,7 +17,7 @@ from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
 from .guard import DRAFT_SECTION, validate_output
-from .parse import split_brain_draft as _split  # 读侧解析共置 parse.py(S7),薄别名保引用面
+from .parse import PLACEHOLDER_MARKS, split_brain_draft as _split  # 读侧解析共置 parse.py(S7),薄别名保引用面
 from .paths import CARD_REL, CHARS_REL, WORLD_REL
 
 Progress = Callable[[dict], None]
@@ -75,13 +75,13 @@ def _genre(project_root: Path) -> str:
 
 
 def _is_blank_or_template(path: Path) -> bool:
-    """文件缺失 / 空 / 还是占位模板(含「占位示例」「待 seed/填充」)→ 可安全覆盖;否则保留作者内容。"""
+    """文件缺失 / 空 / 还是占位模板(含占位标记)→ 可安全覆盖;否则保留作者内容。"""
     if not path.exists():
         return True
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         return True
-    return ("占位示例" in text) or ("待 seed" in text) or ("待填充" in text)
+    return any(m in text for m in PLACEHOLDER_MARKS)
 
 
 def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progress = _noop) -> dict:

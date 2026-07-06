@@ -158,3 +158,31 @@ def split_brain_draft(raw: str) -> dict:
         if m and m.group(1).strip():
             out[key] = m.group(1).strip()
     return out
+
+
+# ── 占位模板判定(立项即铺底):出厂模板里「写给作者的填写说明」──────────────────
+# draft 写侧防覆盖(_is_blank_or_template)与 knowledge 读侧过滤共用这份标记,保证同一语义。
+PLACEHOLDER_MARKS = ("占位示例", "待 seed", "待填充")
+
+# 提示行=整行被（）/() 括起且含占位标记;正文里顺嘴提到标记词的句子不算,不许误剥。
+_HINT_LINE_RE = re.compile(
+    r"^\s*[（(].*(?:" + "|".join(PLACEHOLDER_MARKS) + r").*[)）]\s*$")
+# 空章行:「- 第N章:」冒号后没内容(卡章纲去毒后的骨架行,不算实质内容)
+_EMPTY_ROW_RE = re.compile(r"^-\s*第\S{0,6}章[:：]\s*$")
+
+
+def strip_placeholder_hints(text: str) -> str:
+    """剥掉占位提示行。真内容与提示混排的文件(如立项卡的平台行 + 各格括注)只丢提示、留内容
+    ——不能按「文件含标记」整份误杀。"""
+    return "\n".join(l for l in text.splitlines() if not _HINT_LINE_RE.match(l))
+
+
+def is_substantive(text: str) -> bool:
+    """剥占位提示后还有没有实质内容。标题/引用注释/空章行不算——出厂模板剥完只剩这些,
+    不该冒充设定进 prompt(读侧过滤与 brain_ready 判定共用)。"""
+    for line in strip_placeholder_hints(text).splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith(">") or _EMPTY_ROW_RE.match(s):
+            continue
+        return True
+    return False
