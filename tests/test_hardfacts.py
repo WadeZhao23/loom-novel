@@ -279,3 +279,14 @@ def test_setupper_prompt_has_no_hardfacts_block(project):
 
     setup = _user_of(be, "本章设定锚点")
     assert "## 硬设定" not in setup        # 设定师本就整本读世界观,不再二次塞硬设定块
+
+
+# ── 历史/都市题材:时代格局/主角优势 同级吃到逐字旁路 ─────────────────
+
+def test_hardfacts_cover_era_and_edge_sections(project):
+    d = project / "外置大脑/世界观"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "时代格局.md").write_text("# 时代格局\n\n天启七年,阉党当政,辽东糜烂。", encoding="utf-8")
+    (d / "主角优势.md").write_text("# 主角优势\n\n先知三百年史;代价:改史则记忆漫漶。", encoding="utf-8")
+    facts = _hardfacts_for(project, lambda e: None)
+    assert "天启七年" in facts and "先知三百年史" in facts
