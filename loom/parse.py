@@ -167,8 +167,11 @@ PLACEHOLDER_MARKS = ("占位示例", "待 seed", "待填充")
 # 提示行=整行被（）/() 括起且含占位标记;正文里顺嘴提到标记词的句子不算,不许误剥。
 _HINT_LINE_RE = re.compile(
     r"^\s*[（(].*(?:" + "|".join(PLACEHOLDER_MARKS) + r").*[)）]\s*$")
-# 空章行:「- 第N章:」冒号后没内容(卡章纲去毒后的骨架行,不算实质内容)
-_EMPTY_ROW_RE = re.compile(r"^-\s*第\S{0,6}章[:：]\s*$")
+# 空表单行:「- 第N章:」「- 体系名称:」等冒号后没内容的骨架行(出厂模板的填写格),不算实质内容
+_EMPTY_ROW_RE = re.compile(r"^-\s*[^:：]{0,40}[:：]\s*$")
+# 行内括号注释段(全角/半角):表单行的说明文字,判「空表单行」前先剥掉——
+# 「- 金手指(类型/…;短板:资源):」剥完是「- 金手指:」,和空章行同类
+_PAREN_SPAN_RE = re.compile(r"（[^（）]*）|\([^()]*\)")
 
 
 def strip_placeholder_hints(text: str) -> str:
@@ -182,7 +185,9 @@ def is_substantive(text: str) -> bool:
     不该冒充设定进 prompt(读侧过滤与 brain_ready 判定共用)。"""
     for line in strip_placeholder_hints(text).splitlines():
         s = line.strip()
-        if not s or s.startswith("#") or s.startswith(">") or _EMPTY_ROW_RE.match(s):
+        if not s or s.startswith("#") or s.startswith(">"):
+            continue
+        if _EMPTY_ROW_RE.match(_PAREN_SPAN_RE.sub("", s)):
             continue
         return True
     return False

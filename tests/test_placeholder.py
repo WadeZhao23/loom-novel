@@ -31,6 +31,26 @@ def test_substantive_true_for_plain_line():
     assert is_substantive("平台:起点") is True
 
 
+def test_empty_form_rows_not_substantive():
+    # 世界观/人物 目录模板的空表单行与空章行同类:零书籍内容
+    text = "# 力量体系\n> (占位示例,换成你自己的。)\n- 体系名称:\n- 等级(7-10 级,各级有可见的代价/异化):\n"
+    assert is_substantive(text) is False
+
+
+def test_filled_form_row_is_substantive():
+    assert is_substantive("- 体系名称:玄元九阶") is True
+    assert is_substantive("- 提刀护驾。") is True   # 无冒号的真内容行不受空表单行规则误伤
+
+
+def test_paren_label_empty_row_not_substantive():
+    # 标签括注里带冒号的空表单行(金手指/未命名卡模板):判空前剥括号段
+    assert is_substantive("- 金手指(类型/核心功能;短板:资源):") is False
+
+
+def test_no_colon_paren_row_stays_substantive():
+    assert is_substantive("- 代价(每次折寿三年)") is True   # 无冒号真内容行不受括号剥离误伤
+
+
 def test_marks_cover_draft_side():
     # draft 写侧防覆盖与读侧过滤共用同一份标记
     assert "占位示例" in PLACEHOLDER_MARKS and "待填充" in PLACEHOLDER_MARKS
