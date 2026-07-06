@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
 from .fingerprint import neutral_default
 from .fsutil import atomic_write_text
-from .paths import BODY_DIR, FINGERPRINT_REL, SNAPSHOT_DIR
+from .paths import BODY_DIR, FINGERPRINT_REL, SNAPSHOT_DIR, PROJECT_CARD_REL
 
 # init 靠下面的 copytree 把整份 templates/ 铺进项目。外置大脑里的
 # 立项卡 / 文风参考 / 违禁词 三份都是【人手维护、init 拷一次、loom 从不回写】的可选卡——
@@ -56,10 +57,13 @@ def available_genres() -> list[str]:
     return sorted(p.stem for p in d.glob("*.md") if p.stem != "README")
 
 
-def init(name: str, parent: Path | None = None, genre: str | None = None) -> Path:
+def init(name: str, parent: Path | None = None, genre: str | None = None,
+         idea: str = "", platform: str = "") -> Path:
     """在 parent(默认当前目录)下建一个名为 name 的项目骨架,返回项目根路径。
 
     genre 命中题材库时,只把那一份题材速查拷进项目(没选/拼错则不拷,行为与不选一致)。
+    idea(一句话设定)存 loom.toml 供 AI 铺底稿;platform 写立项卡平台行——都是作者在建书框
+    填的,loom 只代为落盘(立项卡「从不自动写」红线不涉:内容所有权在作者)。
     """
     target = (parent or Path.cwd()) / name
     if target.exists() and any(target.iterdir()):
@@ -80,9 +84,19 @@ def init(name: str, parent: Path | None = None, genre: str | None = None) -> Pat
         dst.mkdir(parents=True, exist_ok=True)
         shutil.copy2(TEMPLATES_DIR / GENRE_DIR / f"{chosen}.md", dst / f"{chosen}.md")
 
-    # loom.toml 填上书名
+    # loom.toml 填上书名;一句话设定紧随 title 落行(净化成单行、双引号转单,守 toml 基本字符串)
     toml = target / "loom.toml"
-    atomic_write_text(toml, toml.read_text(encoding="utf-8").replace("__TITLE__", name))
+    content = toml.read_text(encoding="utf-8").replace("__TITLE__", name)
+    clean = " ".join(idea.split()).replace('"', "'")
+    if clean:
+        content = content.replace(f'title = "{name}"\n', f'title = "{name}"\nidea  = "{clean}"\n', 1)
+    atomic_write_text(toml, content)
+
+    # 平台写进立项卡的可解析行(违禁词自检读它定基线)
+    if platform.strip():
+        card = target / PROJECT_CARD_REL
+        atomic_write_text(card, re.sub(r"^平台:.*$", f"平台:{platform.strip()}",
+                                       card.read_text(encoding="utf-8"), count=1, flags=re.M))
 
     # 写作指纹.md 离线落一份中性默认(不联网、不播种)
     atomic_write_text(target / FINGERPRINT_REL, neutral_default())
