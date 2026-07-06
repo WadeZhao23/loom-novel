@@ -152,3 +152,15 @@ def _write_sections_into_dir(project_root: Path, dir_rel: str, body: str, *, dro
             if _is_blank_or_template(f):
                 f.unlink()
     return wrote
+
+
+def brain_ready(project_root: Path) -> bool:
+    """世界观/人物/卡章纲任一有实质内容 → 铺过底。旅程卡完成判定与织章拦截共用;
+    成长档案(learn 的 AI 自留地)不算——那是写章之后才有的,不代表作者立过项。"""
+    from .parse import is_substantive
+    candidates = [project_root / CARD_REL, project_root / WORLD_REL, project_root / CHARS_REL]
+    for dir_rel in (paths.WORLD_DIR_REL, paths.CHARS_DIR_REL):
+        d = project_root / dir_rel
+        if d.is_dir():
+            candidates += [f for f in sorted(d.glob("*.md")) if f.name != paths.GROWTH_NAME]
+    return any(p.is_file() and is_substantive(p.read_text(encoding="utf-8")) for p in candidates)

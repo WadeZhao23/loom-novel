@@ -74,6 +74,8 @@ class CreateBody(BaseModel):
     name: str
     parent: str
     genre: str | None = None
+    idea: str = ""        # 一句话设定(可空):存 loom.toml,AI 铺设定底稿的种子
+    platform: str = ""    # 目标平台(可空):写立项卡平台行,定违禁词自检基线
 
 
 class RootBody(BaseModel):
@@ -95,7 +97,8 @@ def _shelve(root: Path, state: dict) -> dict:
 @app.post("/api/project/create")
 def create_project(b: CreateBody):
     try:
-        root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre)
+        root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre,
+                             idea=b.idea, platform=b.platform)
     except (FileExistsError, FileNotFoundError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     from . import userconf

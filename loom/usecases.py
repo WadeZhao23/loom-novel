@@ -25,7 +25,7 @@ from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_c
 from .chaptertext import body_changed, parse_title
 from .config import key_available, key_is_set, load_config, openai_compat_key_is_set
 from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN
-from .draft import draft_brain as _draft_brain
+from .draft import brain_ready, draft_brain as _draft_brain
 from .enrich import extract_supplement
 from .fingerprint import changed_rules
 from .fingerprint import learn as fp_learn
@@ -270,6 +270,7 @@ def project_state(root: Path | str) -> dict:
                                  for pid, spec in PROVIDERS.items()},
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
+        "brain_ready": brain_ready(root),   # 世界观/人物/卡章纲任一有实质内容(旅程卡/织章拦截用)
         "brain": _brain_entries(root),   # 双形态:单文件=一行;目录=分组(children 子文件)
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
         "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
