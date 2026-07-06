@@ -222,17 +222,26 @@ def load_agent(project_root: Path, role: str) -> Agent:
 
 
 def _read_file_items(project_root: Path, rels: list[str], progress: Progress) -> list[tuple[str, str]]:
-    """reads 清单 → [(展示名, 原文)]。knowledge 拼装与续跑签名共用这一份,保证同源。"""
+    """reads 清单 → [(展示名, 文本)]。knowledge 拼装与续跑签名共用这一份,保证同源。
+    占位提示行不进 prompt;剥完无实质内容的文件(出厂模板)整份跳过——
+    占位模板是写给作者的填写说明,不是书的设定(docs/design/proposals/立项即铺底.md §1)。"""
+    from .parse import is_substantive, strip_placeholder_hints
     items: list[tuple[str, str]] = []
+
+    def _add(name: str, raw: str) -> None:
+        text = strip_placeholder_hints(raw)
+        if is_substantive(text):
+            items.append((name, text))
+
     for rel in rels:
         p = project_root / rel
         if p.is_dir():
             # 目录型 reads(如 skills/题材):读其中所有 .md(跳过 README,排序保证签名稳定)
             for f in sorted(p.glob("*.md")):
                 if f.stem != "README":
-                    items.append((f"{rel}/{f.name}", f.read_text(encoding="utf-8")))
+                    _add(f"{rel}/{f.name}", f.read_text(encoding="utf-8"))
         elif p.exists():
-            items.append((rel, p.read_text(encoding="utf-8")))
+            _add(rel, p.read_text(encoding="utf-8"))
         else:
             progress(events.warn(f"跳过缺失文件 {rel}"))
     return items
