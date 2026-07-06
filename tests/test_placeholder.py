@@ -34,3 +34,10 @@ def test_substantive_true_for_plain_line():
 def test_marks_cover_draft_side():
     # draft 写侧防覆盖与读侧过滤共用同一份标记
     assert "占位示例" in PLACEHOLDER_MARKS and "待填充" in PLACEHOLDER_MARKS
+
+
+def test_fresh_project_card_is_not_substantive(project):
+    # 卡章纲模板去毒:预填的通用金手指示例行(会被大纲师当真纲执行)必须改空
+    text = (project / "外置大脑/卡章纲.md").read_text(encoding="utf-8")
+    assert is_substantive(text) is False
+    assert "濒死" not in text   # 通用金手指剧本的预填行必须绝迹(写法示范只许住在 > 注释里)
