@@ -590,6 +590,7 @@ function renderJourney() {
   const keyed = providerKeyed(be.provider);
   const steps = [
     { label: "接入模型(填 key 或用订阅)", done: keyed, run: openSettings },
+    { label: "AI 铺设定底稿(世界观/人物/卡章纲)", done: !!DATA.brain_ready, run: () => draftBrain("") },
     { label: "喂样本,让它懂你(seed)", done: DATA.fingerprint_source !== "default", run: openSeed },
     { label: "织第一章", done: (DATA.chapters || []).length > 0,
       run: () => writeChapter(DATA.next_chapter, false) },
@@ -601,7 +602,7 @@ function renderJourney() {
   const n = steps.filter((s) => s.done).length;
   card.innerHTML = "";
   const head = document.createElement("div"); head.className = "jc-head";
-  const t = document.createElement("span"); t.textContent = `起步 · ${n}/4`; head.appendChild(t);
+  const t = document.createElement("span"); t.textContent = `起步 · ${n}/${steps.length}`; head.appendChild(t);
   const x = document.createElement("button"); x.className = "jc-dismiss";
   x.title = "不再显示"; x.textContent = "×";
   x.onclick = () => { localStorage.setItem(dKey, "1"); card.classList.add("hidden"); };
