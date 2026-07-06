@@ -9,6 +9,7 @@ let _rewriteText = "";         // 当前重写候选
 let _dirty = false;            // 编辑器是否有未保存改动
 let _saveTimer = null;         // 自动保存 debounce
 let _seedMode = "sample";      // seed 来源:sample | inherit
+let _brainGateShown = false;   // 织章拦截只弹一次:「就这样写」后本次会话不再唠叨
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -1263,6 +1264,19 @@ async function writeChapter(n, force) {
   if (bspec.needs_key && !providerKeyed(be.provider)) {
     toast(`先在设置里填 ${bspec.label || be.provider} 的 API Key(或把供应商切到 Claude / Codex 免 key)再开写`, true);
     flashSetting("api-key"); return;
+  }
+  // 外置大脑全空(世界观/人物/卡章纲都没实质内容)→ 拦一次:直接写必跑偏,AI 只能瞎编
+  if (!DATA.brain_ready && !_brainGateShown) {
+    _brainGateShown = true;
+    showGuide({
+      title: "设定还是空的",
+      bodyHtml:
+        `<p class="guide-lead">世界观 / 人物 / 卡章纲都还没内容——直接写,AI 只能按题材套路瞎编,容易和你的书名、想法对不上。</p>` +
+        `<p class="hint">推荐先让 AI 按书名起草一版设定底稿(十几秒),你改成自己的再开写。</p>`,
+      primary: { label: "✨ 先让 AI 铺底稿", fn: () => draftBrain("") },
+      ghost: { label: "就这样写", fn: () => writeChapter(n, force) },
+    });
+    return;
   }
   _wroteChapter = null;
   _runMinimized = false; _streamChars = 0; _stripDone = null; _stripErr = null;
