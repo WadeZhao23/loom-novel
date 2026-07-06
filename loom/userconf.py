@@ -104,10 +104,10 @@ def apply_default_to_new_book(root: Path) -> None:
     provider = d.get("provider")
     if not provider:
         return
-    cfg = load_config(root)   # 保留书自己的 title/字数等,只覆盖后端三项
+    cfg = load_config(root)   # 保留书自己的 title/字数/idea 等,只覆盖后端三项
     save_config(root, Config(
         provider=provider, model=d.get("model", ""), base_url=d.get("base_url", ""),
-        cheap_model=cfg.cheap_model, title=cfg.title,
+        cheap_model=cfg.cheap_model, title=cfg.title, idea=cfg.idea,
         chapter_chars=cfg.chapter_chars, gate_rounds=cfg.gate_rounds,
         foreshadow_distance=cfg.foreshadow_distance,
     ))

@@ -3,6 +3,18 @@ from loom.config import Config, load_config, save_config
 from loom.scaffold import init as scaffold_init
 
 
+def test_idea_survives_default_backend_inheritance(tmp_path, monkeypatch):
+    # 用户存过全局默认后端时,apply_default_to_new_book 整写 loom.toml——idea 不许被冲掉
+    from loom import userconf
+    home = tmp_path / "loom_home"
+    monkeypatch.setenv("LOOM_HOME", str(home))
+    root = scaffold_init("默认后端书", parent=tmp_path, idea="重生成崇祯")
+    cfg = load_config(root)
+    userconf.save_default_backend(cfg.provider, cfg.model, cfg.base_url)   # 先存一份用户级默认
+    userconf.apply_default_to_new_book(root)
+    assert load_config(root).idea == "重生成崇祯"
+
+
 def test_idea_and_platform_land(tmp_path):
     root = scaffold_init("崇祯书", parent=tmp_path, idea='重生成崇祯,开局"砍"魏忠贤', platform="番茄")
     assert load_config(root).idea == "重生成崇祯,开局'砍'魏忠贤"   # 双引号净化成单引号,守 toml 单行字符串
