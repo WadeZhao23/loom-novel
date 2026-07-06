@@ -12,6 +12,11 @@ from dotenv import load_dotenv
 from .fsutil import atomic_write_text
 
 
+def _toml_str(s: str) -> str:
+    """TOML 基本字符串字面量:反斜杠/双引号正经转义,别再用「引号换单引号」的糊弄净化。"""
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 @dataclass
 class Config:
     provider: str = "deepseek"        # deepseek | claude | codex | openai_compat
@@ -141,7 +146,7 @@ def save_config(project_root: Path, cfg: Config) -> None:
     base_url_line = (f'base_url = "{cfg.base_url}"\n'
                      if cfg.provider == "openai_compat" and cfg.base_url else "")
     cheap_line = f'cheap_model = "{cfg.cheap_model}"\n' if cfg.cheap_model else ""  # 没设就不写,保持 toml 干净
-    idea_line = f'idea  = "{cfg.idea}"\n' if cfg.idea else ""
+    idea_line = f'idea  = {_toml_str(cfg.idea)}\n' if cfg.idea else ""
     content = (
         "# Loom 项目配置\n\n"
         "[backend]\n"
@@ -151,7 +156,7 @@ def save_config(project_root: Path, cfg: Config) -> None:
         f'{base_url_line}'
         "\n"
         "[novel]\n"
-        f'title = "{cfg.title}"\n'
+        f'title = {_toml_str(cfg.title)}\n'
         f'{idea_line}'
         f'"章节字数" = {int(cfg.chapter_chars)}\n\n'
         "[gate]\n"

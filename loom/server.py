@@ -99,7 +99,7 @@ def create_project(b: CreateBody):
     try:
         root = scaffold_init(b.name, Path(b.parent).expanduser(), b.genre,
                              idea=b.idea, platform=b.platform)
-    except (FileExistsError, FileNotFoundError) as e:
+    except (FileExistsError, FileNotFoundError, ValueError) as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     from . import userconf
     userconf.apply_default_to_new_book(root)   # 新书继承用户级默认后端(连一次全局记住,不用每本重填)

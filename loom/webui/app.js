@@ -581,7 +581,7 @@ function render() {
   renderJourney();
 }
 
-// ---------- 起步旅程卡(五步向导的书内形态):四步闭环,全完成自动收起 ----------
+// ---------- 起步旅程卡(五步向导的书内形态):五步闭环,全完成自动收起 ----------
 function renderJourney() {
   const card = $("journey-card");
   if (!DATA) { card.classList.add("hidden"); return; }

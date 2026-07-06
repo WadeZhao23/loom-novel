@@ -17,7 +17,7 @@ def test_idea_survives_default_backend_inheritance(tmp_path, monkeypatch):
 
 def test_idea_and_platform_land(tmp_path):
     root = scaffold_init("崇祯书", parent=tmp_path, idea='重生成崇祯,开局"砍"魏忠贤', platform="番茄")
-    assert load_config(root).idea == "重生成崇祯,开局'砍'魏忠贤"   # 双引号净化成单引号,守 toml 单行字符串
+    assert load_config(root).idea == '重生成崇祯,开局"砍"魏忠贤'   # 双引号正经转义回读,不再糊弄换单引号
     card = (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")
     assert "平台:番茄" in card and "平台:起点" not in card
 
@@ -36,3 +36,19 @@ def test_idea_survives_save_config_roundtrip(tmp_path):
     cfg2 = load_config(scaffold_init("空书", parent=tmp_path))
     save_config(tmp_path / "空书", cfg2)
     assert "idea" not in (tmp_path / "空书" / "loom.toml").read_text(encoding="utf-8")  # 没填就不写行,toml 干净
+
+
+def test_idea_with_backslash_and_quotes_roundtrips(tmp_path):
+    # TOML 转义:反斜杠/双引号的 idea 不再产坏 toml(终审 Important #1,曾实测 500)
+    root = scaffold_init("转义书", parent=tmp_path, idea='重生成崇祯\\开局"砍"魏忠贤')
+    assert load_config(root).idea == '重生成崇祯\\开局"砍"魏忠贤'
+
+
+def test_title_with_quotes_roundtrips(tmp_path):
+    root = scaffold_init('崇祯"帝"书', parent=tmp_path)
+    assert load_config(root).title == '崇祯"帝"书'
+
+
+def test_platform_with_backref_chars_safe(tmp_path):
+    root = scaffold_init("回引书", parent=tmp_path, platform="番茄\\1")
+    assert "平台:番茄\\1" in (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")

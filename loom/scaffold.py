@@ -9,6 +9,7 @@ import re
 import shutil
 from pathlib import Path
 
+from .config import _toml_str
 from .fingerprint import neutral_default
 from .fsutil import atomic_write_text
 from .paths import BODY_DIR, FINGERPRINT_REL, SNAPSHOT_DIR, PROJECT_CARD_REL
@@ -84,18 +85,19 @@ def init(name: str, parent: Path | None = None, genre: str | None = None,
         dst.mkdir(parents=True, exist_ok=True)
         shutil.copy2(TEMPLATES_DIR / GENRE_DIR / f"{chosen}.md", dst / f"{chosen}.md")
 
-    # loom.toml 填上书名;一句话设定紧随 title 落行(净化成单行、双引号转单,守 toml 基本字符串)
+    # loom.toml 填上书名;一句话设定紧随 title 落行(压单行,引号/反斜杠交给 _toml_str 正经转义)
     toml = target / "loom.toml"
-    content = toml.read_text(encoding="utf-8").replace("__TITLE__", name)
-    clean = " ".join(idea.split()).replace('"', "'")
+    clean = " ".join(idea.split())          # 压单行;引号/反斜杠交给 _toml_str 正经转义
+    content = toml.read_text(encoding="utf-8").replace('title = "__TITLE__"', f"title = {_toml_str(name)}")
     if clean:
-        content = content.replace(f'title = "{name}"\n', f'title = "{name}"\nidea  = "{clean}"\n', 1)
+        content = content.replace(f"title = {_toml_str(name)}\n",
+                                  f"title = {_toml_str(name)}\nidea  = {_toml_str(clean)}\n", 1)
     atomic_write_text(toml, content)
 
     # 平台写进立项卡的可解析行(违禁词自检读它定基线)
     if platform.strip():
         card = target / PROJECT_CARD_REL
-        atomic_write_text(card, re.sub(r"^平台:.*$", f"平台:{platform.strip()}",
+        atomic_write_text(card, re.sub(r"^平台:.*$", lambda m: f"平台:{platform.strip()}",
                                        card.read_text(encoding="utf-8"), count=1, flags=re.M))
 
     # 写作指纹.md 离线落一份中性默认(不联网、不播种)

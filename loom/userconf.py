@@ -10,11 +10,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from . import config as _cfg
 from .backends import PROVIDERS
-from .config import Config, load_config, save_config, set_provider_key, user_config_dir
+from .config import load_config, save_config, set_provider_key, user_config_dir
 from .fsutil import atomic_write_text
 
 _BACKEND_JSON = "backend.json"
@@ -104,10 +105,8 @@ def apply_default_to_new_book(root: Path) -> None:
     provider = d.get("provider")
     if not provider:
         return
-    cfg = load_config(root)   # 保留书自己的 title/字数/idea 等,只覆盖后端三项
-    save_config(root, Config(
-        provider=provider, model=d.get("model", ""), base_url=d.get("base_url", ""),
-        cheap_model=cfg.cheap_model, title=cfg.title, idea=cfg.idea,
-        chapter_chars=cfg.chapter_chars, gate_rounds=cfg.gate_rounds,
-        foreshadow_distance=cfg.foreshadow_distance,
+    cfg = load_config(root)   # 保留书自己的 title/字数/idea 等,只覆盖后端四项
+    save_config(root, replace(
+        cfg, provider=provider, model=d.get("model", ""),
+        cheap_model=cfg.cheap_model, base_url=d.get("base_url", ""),
     ))
