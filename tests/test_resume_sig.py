@@ -30,7 +30,7 @@ def _run_once(project):
 
 def _mk_upstreams(project, cfg):
     prev = _prev_chapter(project, 1)
-    bits = {"chapter_chars": cfg.chapter_chars, "gate_rounds": cfg.gate_rounds}
+    bits = {"chapter_chars": cfg.chapter_chars, "gate_rounds": cfg.gate_rounds, "title": cfg.title}
 
     def v2(role, ws):
         from loom.agents import _knowledge_items

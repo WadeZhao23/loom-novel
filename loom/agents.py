@@ -489,8 +489,11 @@ def _length_hint(role: str, step_budget: int, chapter_target: int) -> str:
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
                        prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
                        target_chars: int = 0, *, chapter_target: int = 0, wants_prev: bool = False,
-                       wants_hardfacts: bool = False) -> str:
-    parts = [f"# 你要写的是第 {chapter_n} 章。"]
+                       wants_hardfacts: bool = False, book_title: str = "") -> str:
+    # 书名必进 prompt:没有它,模型对「这本书是什么」一无所知(第一章漂移的根因一)
+    head = (f"# 你要写的是《{book_title}》第 {chapter_n} 章。" if book_title.strip()
+            else f"# 你要写的是第 {chapter_n} 章。")
+    parts = [head]
     if knowledge:
         parts.append("## 你要遵循的设定/方法论\n" + knowledge)
     if hardfacts and wants_hardfacts:
@@ -538,7 +541,9 @@ def run_pipeline(
     # 大纲师/写手自然吃到新硬设定。再折进签名只会白白冲掉在跑章节的 ledger、触发无谓重计费。
     # 唯一缺口:纯代码改了 _HARDFACT_KW/切片逻辑而世界观文件没动时,半截章续跑会沿用旧切法的
     # 写手稿——属升级期一次性、自愈(--force/--no-resume 或动一下世界观即重算),不值得为它毁 ledger。
-    _cfg_bits = {"chapter_chars": config.chapter_chars, "gate_rounds": config.gate_rounds}
+    # title 进签名:改书名 → 设定师起全量重跑,绝不拿旧书名的半截稿续跑
+    _cfg_bits = {"chapter_chars": config.chapter_chars, "gate_rounds": config.gate_rounds,
+                 "title": config.title}
 
     def _sig(role: str, ws: list[tuple[str, str]]) -> str:
         a, items = _knowledge_items(project_root, chapter_n, role)
@@ -571,7 +576,8 @@ def run_pipeline(
         else:
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                              target_chars=max_chars, chapter_target=config.chapter_chars,
-                                             wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
+                                             wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
+                                             book_title=config.title)
             # 哨兵棒(编辑)的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if spec.edit_sentinel
                         else (lambda d, r=role: progress(events.agent_chunk(r, d))))
@@ -724,7 +730,8 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         max_chars = spec.short_budget or config.chapter_chars  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                          target_chars=max_chars, chapter_target=config.chapter_chars,
-                                         wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts)
+                                         wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
+                                         book_title=config.title)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
             on_chunk=lambda d, r=role: progress(events.agent_chunk(r, d)),
