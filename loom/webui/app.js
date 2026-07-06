@@ -264,11 +264,15 @@ async function createProject() {
   $("create-error").textContent = "";
   const name = $("new-name").value.trim();
   if (!name) { $("create-error").textContent = "先给这本书起个名字。"; $("new-name").focus(); return; }
+  const idea = $("new-idea").value.trim();
   try {
     const d = await jreq("POST", "/api/project/create",
-      { name, parent: $("new-parent").value.trim(), genre: $("new-genre").value || null });
+      { name, parent: $("new-parent").value.trim(), genre: $("new-genre").value || null,
+        idea, platform: $("new-platform").value || "" });
     $("create-overlay").classList.add("hidden");
     enterProject(d);
+    // 填了设定=明确意图:模型就绪就直接铺底稿(仅建书这一次;draftBrain 自带就绪检查与 toast)
+    if (idea && providerKeyed((d.backend || {}).provider)) draftBrain("");
   } catch (e) { $("create-error").textContent = e.message; }
 }
 
