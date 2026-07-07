@@ -109,6 +109,16 @@ def test_note_report_idempotent_rescan(project):
     assert "## 篇幅提醒" in text and "本章超长" in text  # 别的小节原样
 
 
+class ScriptBackend:
+    """测试用后端:固定脚本响应,记录调用。"""
+    def __init__(self, script): self.script = list(script); self.calls = []
+    def complete(self, system, user, *, max_chars=None, on_chunk=None):
+        assert self.script, "脚本耗尽"
+        out = self.script.pop(0); self.calls.append((system, user))
+        if on_chunk and out: on_chunk(out)
+        return out
+
+
 def test_pipeline_auto_scan_and_state_block(project):
     """终稿后自动除虫(事件+留痕+入账);第二章的写手 prompt 收到「当前状态」块;开关可关。"""
     from loom.agents import run_pipeline
@@ -120,14 +130,6 @@ def test_pipeline_auto_scan_and_state_block(project):
             _PROSE, _PROSE + "补一句。", _PROSE + "收束。", "煤山",
             # 第 7 个响应给除虫扫描(终稿后附赠调用)
             "===除虫报告===\n通过\n===状态入账===\n- [物品] 尚方剑:获得 | 证据:「取剑」"]
-
-    class ScriptBackend:
-        def __init__(self, script): self.script = list(script); self.calls = []
-        def complete(self, system, user, *, max_chars=None, on_chunk=None):
-            assert self.script, "脚本耗尽"
-            out = self.script.pop(0); self.calls.append((system, user))
-            if on_chunk and out: on_chunk(out)
-            return out
 
     cfg = load_config(project)
     cfg.gate_rounds = 0
@@ -158,3 +160,20 @@ def test_pipeline_auto_scan_and_state_block(project):
     seen3: list[dict] = []
     run_pipeline(project, 3, ScriptBackend(list(full[:6])), cfg, progress=seen3.append)
     assert not any(e["type"] == "debug_report" for e in seen3)
+
+
+def test_regen_outline_gets_state_block(project):
+    """重生成细纲:大纲师(wants_hardfacts)也要吃「当前状态」块——防细纲让已消耗物品复活。"""
+    from loom.agents import regen_outline
+    from loom.config import load_config, save_config
+    from loom import statebook
+    statebook.append_section(project, 1, ["- [物品] 远古药胚:已吞服消耗 | 证据:「吞入腹中」"])
+    cfg = load_config(project)
+    cfg.gate_rounds = 0
+    save_config(project, cfg)
+    be = ScriptBackend(["锚点:接第1章,阉党反扑。", "分镜一:朝会。分镜二:遇刺。章末钩(危机迫近)。"])
+    regen_outline(project, 2, be, load_config(project))
+    assert len(be.calls) == 2
+    setter_user, outliner_user = be.calls[0][1], be.calls[1][1]
+    assert "当前状态" not in setter_user            # 设定师不吃(非 wants_hardfacts)
+    assert "当前状态" in outliner_user and "远古药胚" in outliner_user   # 大纲师吃到
