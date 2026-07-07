@@ -23,7 +23,7 @@ def test_rewrite_empty_span_raises(project):
 def test_rel_guard_blocks_fingerprint_and_chapters(project):
     be = FakeBackend(const("y"))
     for bad in ("外置大脑/写作指纹.md", "正文/第1章.md", "外置大脑/卡章纲.md",
-                "外置大脑/世界观/成长档案.md", "skills/去AI味.md"):
+                "外置大脑/世界观/成长档案.md", "skills/去AI味.md", "外置大脑/世界观/../../正文/第1章.md"):
         with pytest.raises(ValueError):
             rewrite_section(project, bad, "x", "x", "", be)
         with pytest.raises(ValueError):
@@ -49,3 +49,28 @@ def test_empty_model_output_raises_backend_error(project):
     from loom.backends import LoomBackendError
     with pytest.raises(LoomBackendError):
         rewrite_section(project, "外置大脑/世界观.md", "x", "一段设定文字", "", FakeBackend(const("   ")))
+
+
+def test_brain_rewrite_endpoint(project, monkeypatch):
+    from fastapi.testclient import TestClient
+    from loom import server as srv
+    monkeypatch.setattr(srv, "get_backend", lambda cfg: FakeBackend(const("改写后的设定段落文字")))
+    c = TestClient(srv.app, base_url="http://127.0.0.1")
+    r = c.post("/api/brain/rewrite", json={"root": str(project), "rel": "外置大脑/世界观/时代格局.md",
+                                           "full_text": "# 时代格局\n\n天启七年。", "span": "天启七年。",
+                                           "instruction": "更具体"})
+    assert r.status_code == 200 and r.json()["rewritten"] == "改写后的设定段落文字"
+
+
+def test_brain_continue_endpoint_and_guard(project, monkeypatch):
+    from fastapi.testclient import TestClient
+    from loom import server as srv
+    monkeypatch.setattr(srv, "get_backend", lambda cfg: FakeBackend(const("## 新势力\n- 立场:骑墙。")))
+    c = TestClient(srv.app, base_url="http://127.0.0.1")
+    r = c.post("/api/brain/continue", json={"root": str(project), "rel": "外置大脑/人物/反派·魏忠贤.md",
+                                            "full_text": "# 反派", "instruction": "补动机"})
+    assert r.status_code == 200 and r.json()["continued"].startswith("## 新势力")
+    # rel 守卫走到端点层:写作指纹被拒 → 400 + error 文案
+    r2 = c.post("/api/brain/rewrite", json={"root": str(project), "rel": "外置大脑/写作指纹.md",
+                                            "full_text": "x", "span": "x", "instruction": ""})
+    assert r2.status_code == 400 and "专门通道" in r2.json()["error"]

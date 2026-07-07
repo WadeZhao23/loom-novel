@@ -431,6 +431,40 @@ def brain_draft(b: DraftBody):
             "skipped": res["skipped"], "state": _state(root)}
 
 
+class BrainRWBody(BaseModel):
+    root: str
+    rel: str
+    full_text: str
+    span: str = ""
+    instruction: str = ""
+
+
+@app.post("/api/brain/rewrite")
+def brain_rewrite_section(b: BrainRWBody):
+    """设定文件 AI 改写:只生成候选、不落盘(作者在编辑器确认后走既有保存链路)。"""
+    from .brainedit import check_rel, rewrite_section
+    root = Path(b.root)
+    try:
+        check_rel(b.rel)   # 守卫先行:rel 不合法就别碰 config/backend,报错才是守卫文案而非 key 缺失
+        out = rewrite_section(root, b.rel, b.full_text, b.span, b.instruction, get_backend(load_config(root)))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+    return {"ok": True, "rewritten": out}
+
+
+@app.post("/api/brain/continue")
+def brain_continue_section(b: BrainRWBody):
+    """设定文件 AI 续写:同上,只生成不落盘。"""
+    from .brainedit import check_rel, continue_section
+    root = Path(b.root)
+    try:
+        check_rel(b.rel)
+        out = continue_section(root, b.rel, b.full_text, b.instruction, get_backend(load_config(root)))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+    return {"ok": True, "continued": out}
+
+
 @app.post("/api/outline/regen")
 def outline_regen(b: ChapterBody):
     """重新生成第 N 章细纲(设定师→大纲师),覆盖 正文/.细纲/第N章.md 并返回。不碰正文。"""
