@@ -91,3 +91,19 @@ def test_scan_chapter_llm_failure_still_reports_deterministic(project):
 
     rep = scan_chapter(project, 4, "取出远古药胚。", Boom())
     assert len(rep["issues"]) == 1     # LLM 挂了,确定性结果照出,绝不整体失败
+
+
+def test_note_report_idempotent_rescan(project):
+    from conftest import FakeBackend, const
+    from loom.continuity import scan_chapter
+    # 预置一个别的留痕小节:重扫绝不能动它
+    note = project / ".审稿留痕/第4章.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("## 篇幅提醒(非阻断,供你定夺)\n- 本章超长\n", encoding="utf-8")
+    statebook.append_section(project, 2, ["- [物品] 药胚:已吞服消耗 | 证据:「吞」"])
+    be = FakeBackend(const("===除虫报告===\n通过\n===状态入账===\n- 无"))
+    scan_chapter(project, 4, "取出药胚。", be)
+    scan_chapter(project, 4, "取出药胚。", be)          # 重扫
+    text = note.read_text(encoding="utf-8")
+    assert text.count("## 除虫报告") == 1               # 替换不堆积
+    assert "## 篇幅提醒" in text and "本章超长" in text  # 别的小节原样

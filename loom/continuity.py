@@ -14,6 +14,7 @@ from typing import Callable
 
 from . import events, statebook
 from .backends import Backend
+from .fsutil import atomic_write_text
 
 Progress = Callable[[dict], None]
 
@@ -156,6 +157,7 @@ def parse_scan(raw: str) -> tuple[list[BugItem], list[str]]:
             if seg.startswith("本章证据"):
                 item.evidence = seg.split(":", 1)[-1].split("：", 1)[-1].strip().strip("「」\"")
             elif seg.startswith("前情证据"):
+                # prior 含章号前缀(如「第2章「原句」」),格式本就混合,故不剥引号(与 evidence 不同,有意为之)
                 item.prior = seg.split(":", 1)[-1].split("：", 1)[-1].strip()
             elif seg.startswith("落点"):
                 t = seg.split(":", 1)[-1].split("：", 1)[-1].strip()
@@ -175,20 +177,48 @@ def _prev_tail(project_root: Path, n: int, chars: int = 1200) -> str:
     return strip_title(p.read_text(encoding="utf-8")).strip()[-chars:] if p.exists() else ""
 
 
+_NOTE_HEAD = "## 除虫报告(非阻断,供你定夺)"
+
+
+def _strip_old_report(text: str) -> str:
+    """剥掉旧的除虫报告小节(到下一个 ## 标题或文件尾)——重扫替换,别的留痕小节原样。"""
+    lines = text.splitlines()
+    kept: list[str] = []
+    skipping = False
+    for line in lines:
+        if line.strip() == _NOTE_HEAD:
+            skipping = True
+            continue
+        if skipping and line.startswith("## "):
+            skipping = False
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept).rstrip()
+
+
 def _note_report(project_root: Path, chapter_n: int, items: list[BugItem]) -> Path:
-    """报告追加进 .审稿留痕/第N章.md(非阻断,双证据行格式)。"""
+    """报告替换进 .审稿留痕/第N章.md(非阻断,双证据行格式)。重扫替换旧节,别的留痕小节原样。"""
     from .paths import review_note_path
     path = review_note_path(project_root, chapter_n)
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["\n## 除虫报告(非阻断,供你定夺)"]
+
+    # 读旧文并剥掉旧报告小节
+    old_text = path.read_text(encoding="utf-8") if path.exists() else ""
+    text_without_old_report = _strip_old_report(old_text) if old_text else ""
+
+    lines = []
+    if text_without_old_report:
+        lines.append(text_without_old_report)
+    lines.append(f"\n{_NOTE_HEAD}")
     if not items:
         lines.append("- 未发现跨章矛盾")
     for i in items:
         lines.append(f"- {'⭐' * i.stars} {i.kind}:{i.desc}"
                      f" | 本章证据:「{i.evidence}」 | 前情:{i.prior}"
                      + (f" | 修改示例:{i.fix}" if i.fix else ""))
-    with path.open("a", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+
+    new_content = "\n".join(lines) + "\n"
+    atomic_write_text(path, new_content)
     return path
 
 
