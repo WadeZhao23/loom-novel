@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import paths
+from . import paths, statebook
 from .agents import _HARDFACT_KW, _SPOILER_KW, _md_h2_sections, _name_roster_for
 from .config import load_config
 from .hooks import _CH, parse_hooks, stale
-from .paths import CARD_REL, CHARS_REL, WORLD_REL
+from .paths import CARD_REL, CHARS_REL, WORLD_REL, STATEBOOK_REL
 
 
 def timeline(root: Path | str) -> list[dict]:
@@ -88,5 +88,16 @@ def names(root: Path | str) -> dict:
     return {"roster": roster, "sections": sections}
 
 
+def statebook_view(root: Path | str) -> list[dict]:
+    """账本页签:按章列四类行(只读投影,markdown 仍是唯一真相)。"""
+    p = Path(root) / STATEBOOK_REL
+    if not p.is_file():
+        return []
+    book = statebook.parse_book(p.read_text(encoding="utf-8"))
+    return [{"n": n, "lines": [{"kind": k, "text": t} for k, t in book[n]]}
+            for n in sorted(book)]
+
+
 def studio(root: Path | str) -> dict:
-    return {"timeline": timeline(root), "foreshadow": foreshadow(root), "names": names(root)}
+    return {"timeline": timeline(root), "foreshadow": foreshadow(root), "names": names(root),
+            "statebook": statebook_view(root)}

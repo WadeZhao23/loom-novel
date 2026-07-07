@@ -177,3 +177,40 @@ def test_regen_outline_gets_state_block(project):
     setter_user, outliner_user = be.calls[0][1], be.calls[1][1]
     assert "当前状态" not in setter_user            # 设定师不吃(非 wants_hardfacts)
     assert "当前状态" in outliner_user and "远古药胚" in outliner_user   # 大纲师吃到
+
+
+def test_debug_endpoint_and_studio_tab(project, monkeypatch):
+    from fastapi.testclient import TestClient
+    from conftest import FakeBackend, const
+    from loom import server as srv, usecases
+    from loom.fsutil import atomic_write_text
+
+    atomic_write_text(project / "正文/第1章.md", "# 第1章\n\n江澈取出尚方剑。")
+    be = FakeBackend(const("===除虫报告===\n通过\n===状态入账===\n- [物品] 尚方剑:获得 | 证据:「取出尚方剑」"))
+    monkeypatch.setattr(usecases, "get_backend", lambda cfg: be)
+    monkeypatch.setattr(usecases, "cheap_backend", lambda cfg: None)
+    c = TestClient(srv.app, base_url="http://127.0.0.1")
+    r = c.post("/api/chapter/debug", json={"root": str(project), "chapter": 1})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["issues"] == [] and r.json()["state_lines"]
+
+    st = c.get(f"/api/studio?root={project}").json()
+    assert st["statebook"] and st["statebook"][0]["n"] == 1
+    assert st["statebook"][0]["lines"][0]["kind"] == "物品"
+
+    # 章不存在 → 400
+    r2 = c.post("/api/chapter/debug", json={"root": str(project), "chapter": 99})
+    assert r2.status_code == 400
+
+
+def test_statebook_listed_in_state(project):
+    # scaffold 自带账本模板 → OPTIONAL_BRAIN 命中即列(与 立项卡/文风参考 同款语义)
+    from loom.usecases import project_state
+    state = project_state(project)
+    rels = []
+    for b in state["brain"]:
+        if "rel" in b:
+            rels.append(b["rel"])
+        elif "children" in b:
+            rels.extend(c["rel"] for c in b["children"])
+    assert "外置大脑/状态账本.md" in rels

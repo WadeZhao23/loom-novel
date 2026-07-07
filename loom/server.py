@@ -476,6 +476,16 @@ def outline_regen(b: ChapterBody):
     return {"ok": True, "outline": text}
 
 
+@app.post("/api/chapter/debug")
+def chapter_debug(b: ChapterBody):
+    """手动除虫第 N 章:跨章连续性报告(非阻断)+ 本章状态入账。"""
+    try:
+        rep = usecases.debug_chapter(Path(b.root), b.chapter)
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+    return {"ok": True, **rep}
+
+
 @app.post("/api/learn/revert")
 def learn_revert(b: ChapterBody):
     p = usecases.learn_revert(Path(b.root), b.chapter)

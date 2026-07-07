@@ -22,7 +22,7 @@ from . import ledger, paths
 from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
 from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
-from .chaptertext import body_changed, parse_title
+from .chaptertext import body_changed, parse_title, strip_title
 from .config import key_available, key_is_set, load_config, openai_compat_key_is_set
 from .doctor import AGENT_FILES, BRAIN_FILES, OPTIONAL_BRAIN
 from .draft import brain_ready, draft_brain as _draft_brain
@@ -194,6 +194,21 @@ def regen_outline(root: Path | str, chapter: int) -> str:
     with write_lock(root):
         cfg = load_config(root)
         return _regen_outline(root, chapter, get_backend(cfg), cfg)
+
+
+def debug_chapter(root: Path | str, chapter: int) -> dict:
+    """手动除虫第 N 章(老章节可跑,逐章补建账本)。锁内:写留痕+账本。走便宜模型(评估类)。"""
+    root = Path(root)
+    with write_lock(root):
+        from .agents import _hardfacts_for
+        from .continuity import scan_chapter
+        p = paths.chapter_path(root, chapter)
+        if not p.is_file():
+            raise FileNotFoundError(f"第 {chapter} 章还没写,先写完再除虫。")
+        cfg = load_config(root)
+        backend = cheap_backend(cfg) or get_backend(cfg)
+        body = strip_title(p.read_text(encoding="utf-8")).strip()
+        return scan_chapter(root, chapter, body, backend, hardfacts=_hardfacts_for(root))
 
 
 def rewrite_apply(root: Path | str, chapter: int, content: str, old_span: str, new_span: str) -> None:
