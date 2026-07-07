@@ -57,6 +57,15 @@ def test_snapshot_empty_book_is_empty(project):
     assert statebook.snapshot_for(project, 5) == ""
 
 
+def test_snapshot_ignores_keyword_in_evidence_quote(project):
+    # 第1章:变更描述段是「获得」(未消耗),证据引文里的「耗尽」不该让远章误保留这条物品行
+    statebook.append_section(project, 1, ["- [物品] 铁剑:获得 | 证据:「他耗尽力气拾起铁剑」"])
+    for n in range(2, 11):
+        statebook.append_section(project, n, [f"- [状态] 江澈:炼气{n}层 | 证据:「第{n}」"])
+    snap = statebook.snapshot_for(project, 10)
+    assert "铁剑" not in snap   # 远章非消耗物品行(即便证据引文含「耗尽」)仍应丢弃
+
+
 def test_strip_and_remap(project):
     statebook.append_section(project, 1, ["- [物品] A:获得 | 证据:「a」"])
     statebook.append_section(project, 2, ["- [物品] B:消耗 | 证据:「b」"])

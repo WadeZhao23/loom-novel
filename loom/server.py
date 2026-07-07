@@ -481,7 +481,7 @@ def chapter_debug(b: ChapterBody):
     """手动除虫第 N 章:跨章连续性报告(非阻断)+ 本章状态入账。"""
     try:
         rep = usecases.debug_chapter(Path(b.root), b.chapter)
-    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+    except (LoomBackendError, ValueError, FileNotFoundError, OSError) as e:
         return _err_json(e)
     return {"ok": True, **rep}
 

@@ -781,9 +781,11 @@ const BRAIN_GUIDE = {
   "卡章纲": "整本书的分章规划,每章一句话任务。大纲师照它搭本章骨架;每章 learn 后这里还会自动补一条「AI 回顾」。",
   "写作指纹": "你的文风档案——句式、口头禅、节奏、禁用词。写手照它写,于是越写越像你。",
   "违禁词": "国内平台审核的敏感雷区清单 + 改写指引。写手/润色师参照它绕开红线;编辑器里「违禁词」按钮按它做本地粗筛。",
+  "状态账本": "跨章状态流水账(物品/状态/规则/时钟),每章除虫后自动记一节;你可改可删,AI 只追加。",
 };
 function maybeBrainGuide(rel, content) {
   if (!rel.startsWith("外置大脑/")) return;
+  if (rel.endsWith("状态账本.md")) return;  // 账本由除虫自动填,模板头永远带占位括注,「没填」引导不适用
   const empty = !content || !content.trim();
   const isFp = rel.endsWith("写作指纹.md");
   const neutralFp = isFp && /中性默认|还没.{0,4}懂你|还没学到你/.test(content);
@@ -1368,6 +1370,7 @@ async function writeChapter(n, force) {
     return;
   }
   _wroteChapter = null;
+  _lastDebugReport = null;
   _runMinimized = false; _streamChars = 0; _stripDone = null; _stripErr = null;
   hideStrip(); $("run-strip").classList.remove("err");
   $("run-title").textContent = `正在写第 ${n} 章…`;
@@ -1401,15 +1404,18 @@ async function writeChapter(n, force) {
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n");
-    buf = lines.pop();
-    for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+    }
+  } finally {
+    showRunClose();   // 流中断(网络断/解析炸)也得关窗,不卡死在织章弹层
   }
-  showRunClose();
 }
 
 function handleEvent(ev) {
@@ -1455,6 +1461,10 @@ function handleEvent(ev) {
     _lastDebugReport = { chapter: ev.chapter, issues: ev.issues || [] };
     logRun(`除虫:${(ev.issues || []).length ? ev.issues.length + " 条跨章矛盾(见报告)" : "未发现跨章矛盾"}`,
            (ev.issues || []).length ? "warn" : "");
+    if (CUR && CUR.rel === "外置大脑/状态账本.md") {
+      if (_dirty) toast("除虫刚给状态账本记了一笔,但你正在改它——保存前先复制你的改动,或稍后手动合并", true);
+      else openFile("外置大脑/状态账本.md", true, null);   // 无脏稿:静默重拉,防 autosave 拿旧全文覆盖新节
+    }
   } else if (ev.type === "sensitive") {
     const ws = (ev.hits || []).slice(0, 6).map((h) => h.word).join("、");
     logRun(`违禁词粗筛:命中 ${ev.count} 处(${ws}${(ev.hits || []).length > 6 ? "…" : ""})——只提示,不阻断,可在「违禁词」里改写`, null, "warn");
@@ -1472,6 +1482,7 @@ function handleEvent(ev) {
     } else { _lastDebugReport = null; }
   } else if (ev.type === "error") {
     logRun(ev.message + codeHint(ev.code), "err", "cross");
+    _lastDebugReport = null;
   }
   updateStrip(ev);
 }
@@ -1884,7 +1895,9 @@ async function debugChapter() {
   if (!CUR || CUR.chapter == null) return;
   toast("除虫中:对照前几章与状态账本…十几秒");
   try {
+    if (CUR.chapter != null && _dirty) await autosave();  // 先把手改落盘,别让除虫扫到旧稿
     const d = await jreq("POST", "/api/chapter/debug", { root: DATA.root, chapter: CUR.chapter });
+    if (d.state_lines && d.state_lines.length && d.ledger_written === false) toast("账本已有本章记录,未覆盖——内容有变请打开状态账本删掉该章「## 第N章」节后重扫");
     renderDebugReport(CUR.chapter, d.issues || []);
   } catch (e) { toast(e.message, true); }
 }
@@ -1921,7 +1934,7 @@ async function applyBugFix(chapter, it) {
     const m = (it["修改示例"] || "").match(/[一-龥A-Za-z0-9·]+\.md/);
     const known = (DATA.brain || []).flatMap((b) => b.children ? b.children.map((c) => c.rel) : [b.rel]);
     const rel = m && known.find((r) => r.endsWith("/" + m[0])) || "外置大脑/状态账本.md";
-    await openFile(rel, true, null);
+    try { await openFile(rel, true, null); } catch (e) { toast(e.message, true); }
     return;
   }
   await openFile(`正文/第${chapter}章.md`, true, chapter);

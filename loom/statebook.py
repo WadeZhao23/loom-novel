@@ -79,7 +79,8 @@ def snapshot_for(project_root: Path, upto_n: int) -> str:
     for n in sorted(k for k in book if k <= upto_n):
         recent = n > upto_n - _WINDOW
         for kind, content in book[n]:
-            keep = recent or kind == "规则" or (kind == "物品" and any(k in content for k in _CONSUMED_KW))
+            change = content.split("|", 1)[0]   # 只看变更描述段,别让证据引文里的动词误命中(如「耗尽力气」)
+            keep = recent or kind == "规则" or (kind == "物品" and any(k in change for k in _CONSUMED_KW))
             if keep:
                 out.append(f"- 第{n}章 [{kind}] {content}")
     return "\n".join(out)

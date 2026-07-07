@@ -23,6 +23,12 @@ def test_consumed_reuse_ignores_unconsumed_and_absent():
     assert detect_consumed_reuse(_book(), 2, "远古药胚仍在。") == []      # 只查前章账本(m<n)
 
 
+def test_consumed_reuse_ignores_keyword_in_evidence_quote():
+    # 变更描述段是「获得」(未消耗),证据引文里的「耗尽」不该误判为消耗类
+    book = {2: [("物品", "铁剑:获得 | 证据:「他耗尽力气拾起铁剑」")]}
+    assert detect_consumed_reuse(book, 4, "他挥舞铁剑。") == []
+
+
 def test_rule_drift_hit():
     body = "系统提示:因果锁定触发,未来每突破一个大境界,自动反馈10%修为。"
     items = detect_rule_drift(_book(), 4, body)
@@ -73,6 +79,7 @@ def test_scan_chapter_end_to_end(project):
     assert len(rep["issues"]) == 1 and rep["issues"][0]["类别"] == "物品"
     # 入账 write-once 落盘
     assert "破禁丹" in (project / STATEBOOK_REL).read_text(encoding="utf-8")
+    assert rep["ledger_written"] is True
     # 留痕落盘
     note = (project / ".审稿留痕/第4章.md").read_text(encoding="utf-8")
     assert "除虫报告" in note and "远古药胚" in note
@@ -107,6 +114,17 @@ def test_note_report_idempotent_rescan(project):
     text = note.read_text(encoding="utf-8")
     assert text.count("## 除虫报告") == 1               # 替换不堆积
     assert "## 篇幅提醒" in text and "本章超长" in text  # 别的小节原样
+
+
+def test_scan_chapter_rescan_ledger_not_overwritten(project):
+    """重扫已入账的章:write-once 不覆盖,ledger_written 明示 False(供 webui 提示用户手动合并)。"""
+    from conftest import FakeBackend, const
+    from loom.continuity import scan_chapter
+    be = FakeBackend(const("===除虫报告===\n通过\n===状态入账===\n- [物品] 铁剑:获得 | 证据:「拾起铁剑」"))
+    rep1 = scan_chapter(project, 4, "他拾起铁剑。", be)
+    assert rep1["ledger_written"] is True
+    rep2 = scan_chapter(project, 4, "他拾起铁剑。", be)          # 重扫同一章
+    assert rep2["state_lines"] and rep2["ledger_written"] is False
 
 
 class ScriptBackend:
@@ -201,6 +219,38 @@ def test_debug_endpoint_and_studio_tab(project, monkeypatch):
     # 章不存在 → 400
     r2 = c.post("/api/chapter/debug", json={"root": str(project), "chapter": 99})
     assert r2.status_code == 400
+
+
+def test_gate_critic_receives_statebook_content(project):
+    """质检 gate 的复审 knowledge 里必须含账本内容(paths.STATEBOOK_REL 在 _GATES["编辑"] reads 清单里)。
+    防这份清单被误删而不红:写一条真实账本行,gate_rounds=1 跑一遍,断言 critic 收到的 user 含该行。"""
+    from loom import gates
+    from loom.agents import run_pipeline
+    from loom.config import load_config, save_config
+
+    statebook.append_section(project, 1, ["- [物品] 苍云剑:获得 | 证据:「拾起苍云剑」"])
+
+    _PROSE = ("寅时三刻,铜锣未响。崇祯睁开眼,乾清宫的帐顶陈旧而熟悉。"
+              "他记得煤山那棵歪脖子树,也记得魏忠贤的笑。这一次他要先出手。")
+
+    def responder(system, user):
+        if system == gates.CRITIC_质检 or system == gates.CRITIC_去AI味:
+            return "通过"   # 无硬伤,gate 一轮即过,不触发回炉
+        return _PROSE
+
+    from conftest import FakeBackend
+    be = FakeBackend(responder)
+    cfg = load_config(project)
+    cfg.gate_rounds = 1
+    cfg.chapter_chars = 100
+    save_config(project, cfg)
+    cfg = load_config(project)
+
+    run_pipeline(project, 2, be, cfg)
+
+    critic_calls = [u for s, u in be.calls if s == gates.CRITIC_质检]
+    assert critic_calls, "质检 critic 未被调用——gate_rounds=1 应触发一轮复审"
+    assert any("苍云剑" in u for u in critic_calls)
 
 
 def test_statebook_listed_in_state(project):

@@ -574,7 +574,9 @@ def run_pipeline(
     progress(events.pipeline_start(chapter_n, PIPELINE))
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)  # 硬设定逐字块,进大纲师/写手 prompt
-    # 状态快照:账本随除虫每章追加,若折进签名会每章冲 ledger——与 hardfacts 同豁免(改它不重跑旧步)
+    # 状态快照:不进续跑签名。账本不在任何角色 reads 里,手改/补账不会触发重跑
+    # (与 hardfacts 不同——那个的源文件在设定师 reads 里会自愈)。补账后想让半截章吃到
+    # 新账,用 --force/重写。
     from . import statebook
     state_snap = statebook.snapshot_for(project_root, chapter_n - 1)
 
@@ -780,7 +782,8 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     """
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)
-    # 状态快照:与 run_pipeline 同豁免口径(见该函数内注释),不折进任何签名
+    # 状态快照:不进续跑签名(口径与 run_pipeline 同,见该函数内注释)——账本不在任何
+    # 角色 reads 里,手改/补账不会触发重跑;补账后想让半截章吃到新账,用 --force/重写。
     from . import statebook
     state_snap = statebook.snapshot_for(project_root, chapter_n - 1)
     workspace: list[tuple[str, str]] = []

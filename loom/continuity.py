@@ -60,7 +60,8 @@ def detect_consumed_reuse(book: dict[int, list[tuple[str, str]]], chapter_n: int
     seen: set[str] = set()
     for m in sorted(k for k in book if k < chapter_n):
         for kind, content in book[m]:
-            if kind != "物品" or not any(k in content for k in statebook._CONSUMED_KW):
+            change = content.split("|", 1)[0]   # 只看变更描述段,别让证据引文里的动词误命中(如「耗尽力气」)
+            if kind != "物品" or not any(k in change for k in statebook._CONSUMED_KW):
                 continue
             entity = re.split(r"[:：]", content, 1)[0].strip()
             if len(entity) < 2 or entity in seen or entity not in body:
@@ -258,7 +259,8 @@ def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend
 
     issues = merge_items(det, llm_items)
     note_path = _note_report(project_root, chapter_n, issues)
+    written = False
     if state_lines:
-        statebook.append_section(project_root, chapter_n, state_lines)
+        written = statebook.append_section(project_root, chapter_n, state_lines)
     return {"issues": [i.as_dict() for i in issues], "state_lines": state_lines,
-            "note_path": str(note_path)}
+            "note_path": str(note_path), "ledger_written": written}
