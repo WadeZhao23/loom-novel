@@ -336,6 +336,7 @@ function showWelcome() {
 }
 function enterProject(d) {
   DATA = d;
+  _brainGateShown = false;   // 织章拦截按书粒度:换一本书,空底提醒重新有效(一期终审留档项)
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -816,7 +817,15 @@ async function draftBrain(idea) {
     render();
     const w = d.written || [], s = d.skipped || [];
     toast(`已起草:${w.join(" / ") || "（无）"}${s.length ? `;${s.join("/")}你已填,没动` : ""} —— 打开看看,改成你的`);
-    if (w.includes("世界观")) openFile("外置大脑/世界观.md", true, null);
+    if (w.length) showGuide({
+      title: "设定底稿已就位",
+      bodyHtml:
+        `<p class="guide-lead">世界观 / 人物 / 卡章纲已按书名起草好初稿——它们是你的,三种方式随时维护:</p>` +
+        `<p class="hint">① <b>随时手改</b>:在左栏「设定」里打开直接改,自动保存;<br>` +
+        `② <b>让 AI 改写/续写</b>:打开世界观或人物文件,选中一段点「改写选中」,或点「AI 续写」接着铺;<br>` +
+        `③ <b>越写越准</b>:每章 learn 后 AI 回顾/补充自动追加,你手写的部分永远不被覆盖。</p>`,
+      primary: { label: "知道了" },
+    });
   } catch (e) { toast(e.message, true); }
 }
 
