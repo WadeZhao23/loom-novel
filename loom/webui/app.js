@@ -231,6 +231,16 @@ function bind() {
     hideSealBar();
   };
 
+  // 悬停行级「改」:rAF 节流;移到按钮本身不算离开
+  ed.addEventListener("mousemove", (e) => {
+    if (_lineBtnRaf) return;
+    _lineBtnRaf = requestAnimationFrame(() => { _lineBtnRaf = 0; maybeLineEditBtn(e); });
+  });
+  ed.addEventListener("mouseleave", (e) => { if (e.relatedTarget !== $("line-edit-btn")) hideLineEditBtn(); });
+  ed.addEventListener("scroll", hideLineEditBtn);
+  $("line-edit-btn").addEventListener("mouseleave", hideLineEditBtn);
+  $("line-edit-btn").onclick = lineEditClick;
+
   // 章内搜索
   $("btn-search").onclick = openSearch;
   $("search-close").onclick = closeSearch;
@@ -1894,6 +1904,43 @@ function maybeSealBar() {
   const bw = bar.offsetWidth || 140;            // 显式居中,不用 transform(会跟出场动画打架)
   bar.style.top = y + "px";
   bar.style.left = Math.round(r.left + r.width / 2 - bw / 2) + "px";
+}
+
+// ---------- 悬停行级「改」入口:鼠标移到正文某行,行右缘浮出;点击=选中该逻辑行并就地改 ----------
+let _hoverLine = -1, _lineBtnRaf = 0;
+function lineAtY(clientY) {
+  const ed = $("editor");
+  const y = clientY - ed.getBoundingClientRect().top + ed.scrollTop;
+  const bands = lineBands();
+  for (let i = 0; i < bands.length; i++) if (y >= bands[i].top && y < bands[i].bottom) return i;
+  return -1;
+}
+function maybeLineEditBtn(e) {
+  const ed = $("editor"), btn = $("line-edit-btn");
+  // 只在可编辑正文章节、非预览、面板没开时出;打字中由 body.typing 的 CSS 压住
+  if (!CUR || CUR.chapter == null || ed.readOnly || ed.classList.contains("hidden")
+      || !$("rewrite-inline").classList.contains("hidden")) return hideLineEditBtn();
+  const i = lineAtY(e.clientY);
+  const bands = lineBands();
+  if (i < 0 || bands[i].end - bands[i].start < 2) return hideLineEditBtn();   // 空行不值得改
+  const r = ed.getBoundingClientRect();
+  const y = r.top + bands[i].top - ed.scrollTop;
+  if (y < r.top || y > r.bottom - 24) return hideLineEditBtn();               // 行带滚出视口
+  _hoverLine = i;
+  btn.style.top = Math.round(y) + "px";
+  btn.style.left = Math.round(r.right - 44) + "px";
+  btn.classList.add("on");
+}
+function hideLineEditBtn() { _hoverLine = -1; $("line-edit-btn").classList.remove("on"); }
+function lineEditClick() {
+  if (_hoverLine < 0) return;
+  const b = lineBands()[_hoverLine];
+  if (!b || b.end - b.start < 2) return hideLineEditBtn();
+  const ed = $("editor");
+  ed.setSelectionRange(b.start, b.end);
+  ed.focus();
+  hideLineEditBtn();
+  openRewrite();
 }
 
 // ---------- 全局快捷键 ----------
