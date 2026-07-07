@@ -205,6 +205,12 @@ function bind() {
   $("rewrite-go").onclick = doRewrite;
   $("rewrite-again").onclick = doRewrite;
   $("rewrite-apply").onclick = applyRewrite;
+  $("rewrite-instruction").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const go = $("rewrite-go"), again = $("rewrite-again");
+    (!go.classList.contains("hidden") ? go : again).click();   // Enter=跑这次改写(候选出来后=再来一个)
+  });
   $("learn-keep").onclick = () => { $("learn-overlay").classList.add("hidden"); openFile("外置大脑/写作指纹.md", true, null); };
   $("learn-revert").onclick = revertLearn;
   $("run-close").onclick = closeRun;
@@ -212,7 +218,10 @@ function bind() {
   $("rs-expand").onclick = () => { if (_stripDone != null) { hideStrip(); closeRun(); } else expandRun(); };
 
   // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
-  $("editor").addEventListener("input", () => { updateWordCount(); markDirty(); if (_searchOn) runSearch(); noteTyping(); });
+  $("editor").addEventListener("input", () => {
+    if (!$("rewrite-inline").classList.contains("hidden")) hideInlinePanel();   // 手改了正文,候选的选区偏移已失效
+    updateWordCount(); markDirty(); if (_searchOn) runSearch(); noteTyping();
+  });
   $("editor").addEventListener("blur", () => document.body.classList.remove("typing"));
 
   // 朱批浮条:选中正文就地浮出「重写这段/复制」
@@ -337,6 +346,7 @@ function showWelcome() {
 function enterProject(d) {
   DATA = d;
   _brainGateShown = false;   // 织章拦截按书粒度:换一本书,空底提醒重新有效(一期终审留档项)
+  hideInlinePanel();   // 换书收面板:稳态残留的候选绝不能落进另一本书
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -921,6 +931,7 @@ function setPreview(on) {
 async function openFile(rel, editable, chapter, li) {
   if (_dirty && CUR && CUR.editable) { try { await autosave(); } catch (e) { /* 落盘失败也别拦切换 */ } }  // 切文件前先保住手改
   clearTimeout(_saveTimer); clearDirty(); closeSearch();
+  hideInlinePanel();   // 切文件收面板:稳态残留的候选绝不能落进另一个文件
   document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
   if (li) li.classList.add("active");
   const d = await jreq("GET", `/api/file?root=${encodeURIComponent(DATA.root)}&rel=${encodeURIComponent(rel)}`);
@@ -1306,6 +1317,7 @@ async function chapterOp(url, body) {
   try {
     const d = await jreq("POST", url, body);
     // 章号变了:收掉当前打开的章节视图,避免指向错号
+    hideInlinePanel();
     CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
     ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-brain-rewrite", "btn-brain-continue", "btn-outline", "btn-outline-regen", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
     document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
@@ -1881,7 +1893,7 @@ function lineBands() {
   const lines = ed.value.split("\n");
   const rows = lines.map((line) => {
     const d = document.createElement("div");
-    d.textContent = line || "​";   // 空行塞零宽空格,也占一行高(用转义写法,别粘不可见字符)
+    d.textContent = line || "\u200b";   // 空行塞零宽空格,也占一行高(用转义写法,别粘不可见字符)
     m.appendChild(d);
     return d;
   });
@@ -1913,7 +1925,7 @@ function showInlinePanel({ src, placeholder, goLabel }) {
   positionInlinePanel();
   $("rewrite-instruction").focus();
 }
-function hideInlinePanel() { $("rewrite-inline").classList.add("hidden"); }
+function hideInlinePanel() { $("rewrite-inline").classList.add("hidden"); _rewriteSel = null; _rewriteText = ""; }
 function positionInlinePanel() {
   const ed = $("editor"), panel = $("rewrite-inline");
   const bands = lineBands();
@@ -2018,7 +2030,7 @@ function globalKeys(e) {
   // 以下仅在已进入项目时生效
   if ($("app").classList.contains("hidden")) return;
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); if (CUR && CUR.editable) saveFile(); return; }
-  if (mod && e.key === "Enter") { e.preventDefault(); if (!anyOverlayOpen() && DATA) writeChapter(DATA.next_chapter, false); return; }
+  if (mod && e.key === "Enter") { e.preventDefault(); if (!anyOverlayOpen() && $("rewrite-inline").classList.contains("hidden") && DATA) writeChapter(DATA.next_chapter, false); return; }
   if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); if (CUR) openSearch(); return; }
   if (mod && e.key === ".") { e.preventDefault(); toggleFocus(); return; }
 }
