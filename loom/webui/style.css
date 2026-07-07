@@ -593,6 +593,12 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 .st-chip { font-size: var(--fs-sm); padding: 3px 10px; border-radius: var(--radius-pill);
   background: var(--surface); border: 1px solid var(--line); }
 
+/* 除虫报告条目 */
+.bug-item { padding: var(--space-3); border-bottom: 1px solid var(--line-soft); }
+.bug-item .bug-head { font-weight: 600; margin-bottom: 4px; }
+.bug-item .bug-ev { color: var(--text-soft); font-size: var(--fs-sm); margin: 2px 0; }
+.bug-item .bug-fix { color: var(--seal-ink); font-size: var(--fs-sm); margin-top: 4px; }
+
 /* ---------- 8. 专注模式 ---------- */
 body.focus-mode .sidebar { margin-left: -256px; opacity: 0; pointer-events: none; }
 body.focus-mode .topbar { opacity: 0; transform: translateY(-100%); height: 0; padding: 0;

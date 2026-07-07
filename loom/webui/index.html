@@ -117,6 +117,7 @@
             <button id="btn-sensitive" class="ghost hidden" title="违禁词自检(本地粗筛,只提示不阻断)"><span class="ico" data-ico="warn"></span> 违禁词</button>
             <button id="btn-outline" class="ghost hidden" title="看/改本章细纲(分镜场景骨头)"><span class="ico" data-ico="outline"></span> 本章细纲</button>
             <button id="btn-outline-regen" class="ghost hidden" title="重新生成本章细纲(覆盖当前细纲)"><span class="ico" data-ico="redo"></span> 重新生成细纲</button>
+            <button id="btn-debug" class="ghost hidden" title="除虫:对照前几章与状态账本查跨章矛盾(非阻断,只出报告)"><span class="ico" data-ico="warn"></span> 除虫</button>
             <button id="btn-brain-rewrite" class="ghost hidden" title="选中一段设定,让 AI 按指令改写(候选出来你确认才落盘)"><span class="ico" data-ico="rewrite"></span> 改写选中</button>
             <button id="btn-brain-continue" class="ghost hidden" title="让 AI 顺着这份设定往下续写一节(候选出来你确认才落盘)"><span class="ico" data-ico="edit"></span> AI 续写</button>
             <button id="btn-rewrite" class="hidden"><span class="ico" data-ico="rewrite"></span> 重写选中</button>
@@ -342,10 +343,22 @@
         <button id="studio-tab-timeline" class="seg-btn on">时间轴</button>
         <button id="studio-tab-foreshadow" class="seg-btn">伏笔账本</button>
         <button id="studio-tab-names" class="seg-btn">专名册</button>
+        <button id="studio-tab-statebook" class="seg-btn">账本</button>
       </div>
       <div id="studio-body" class="studio-body"></div>
       <div class="row-end">
         <button id="studio-close" class="primary">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 除虫报告:非阻断,只报告;「按建议改」联动行内改写面板 -->
+  <div id="debug-overlay" class="overlay hidden">
+    <div class="run-card studio-card">
+      <h3 id="debug-title">除虫报告</h3>
+      <div id="debug-body" class="studio-body"></div>
+      <div class="row-end">
+        <button id="debug-close" class="primary">关闭</button>
       </div>
     </div>
   </div>

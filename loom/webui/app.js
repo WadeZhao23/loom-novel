@@ -10,6 +10,7 @@ let _dirty = false;            // 编辑器是否有未保存改动
 let _saveTimer = null;         // 自动保存 debounce
 let _seedMode = "sample";      // seed 来源:sample | inherit
 let _brainGateShown = false;   // 织章拦截只弹一次:「就这样写」后本次会话不再唠叨
+let _lastDebugReport = null;   // 写章流里先到的 debug_report 事件,chapter_done 后延时弹报告
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -162,6 +163,7 @@ function bind() {
   $("studio-tab-timeline").onclick = () => renderStudio("timeline");
   $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
   $("studio-tab-names").onclick = () => renderStudio("names");
+  $("studio-tab-statebook").onclick = () => renderStudio("statebook");
   $("studio-close").onclick = () => $("studio-overlay").classList.add("hidden");
   $("flow-close").onclick = () => $("flow-overlay").classList.add("hidden");
   $("flow-prompt").onclick = () => {
@@ -198,6 +200,8 @@ function bind() {
   $("btn-preview").onclick = () => CUR && setPreview(!CUR.preview);
   $("btn-outline").onclick = () => CUR && CUR.chapter != null && openOutline(CUR.chapter);
   $("btn-outline-regen").onclick = regenOutline;
+  $("btn-debug").onclick = debugChapter;
+  $("debug-close").onclick = () => $("debug-overlay").classList.add("hidden");
   $("btn-rewrite").onclick = openRewrite;
   $("btn-brain-rewrite").onclick = openBrainRewrite;
   $("btn-brain-continue").onclick = openBrainContinue;
@@ -950,6 +954,7 @@ async function openFile(rel, editable, chapter, li) {
   $("btn-brain-continue").classList.toggle("hidden", !brainRW);
   $("btn-outline").classList.toggle("hidden", chapter == null);  // 正文章节才给「本章细纲」入口
   $("btn-outline-regen").classList.add("hidden");                 // 默认藏,只在看细纲时由 openOutline 亮出
+  $("btn-debug").classList.toggle("hidden", chapter == null);
   $("btn-preview").classList.remove("hidden");
   setPreview(!rel.startsWith("正文/"));   // 外置大脑/skills/agents 默认渲染预览;正文/细纲 默认纯文本编辑
   $("status-note").textContent = chapter != null
@@ -1319,7 +1324,7 @@ async function chapterOp(url, body) {
     // 章号变了:收掉当前打开的章节视图,避免指向错号
     hideInlinePanel();
     CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
-    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-brain-rewrite", "btn-brain-continue", "btn-outline", "btn-outline-regen", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
+    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-brain-rewrite", "btn-brain-continue", "btn-outline", "btn-outline-regen", "btn-debug", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
     document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
     updateWordCount();
     if (d.state) { DATA = d.state; render(); } else { await refresh(); }
@@ -1446,6 +1451,10 @@ function handleEvent(ev) {
     logRun(`${ev.label}跑满 ${ev.rounds} 轮仍有 ${ev.issues.length} 处残留 → 记入留痕,不阻断,继续`, null, "warn");
   } else if (ev.type === "edit_note") {
     logRun(`本章改动留痕已存(.审稿留痕/)`, null, "edit");
+  } else if (ev.type === "debug_report") {
+    _lastDebugReport = { chapter: ev.chapter, issues: ev.issues || [] };
+    logRun(`除虫:${(ev.issues || []).length ? ev.issues.length + " 条跨章矛盾(见报告)" : "未发现跨章矛盾"}`,
+           (ev.issues || []).length ? "warn" : "");
   } else if (ev.type === "sensitive") {
     const ws = (ev.hits || []).slice(0, 6).map((h) => h.word).join("、");
     logRun(`违禁词粗筛:命中 ${ev.count} 处(${ws}${(ev.hits || []).length > 6 ? "…" : ""})——只提示,不阻断,可在「违禁词」里改写`, null, "warn");
@@ -1457,6 +1466,10 @@ function handleEvent(ev) {
     _wroteChapter = ev.chapter;
     logRun(`第${ev.chapter}章终稿 ${ev.chars} 字`, "ok", "check");
     $("run-title").textContent = `第 ${ev.chapter} 章写完`;
+    if (_lastDebugReport && _lastDebugReport.issues.length) {
+      const r = _lastDebugReport; _lastDebugReport = null;
+      setTimeout(() => renderDebugReport(r.chapter, r.issues), 400);   // 写完稍候弹报告,不抢完成态
+    } else { _lastDebugReport = null; }
   } else if (ev.type === "error") {
     logRun(ev.message + codeHint(ev.code), "err", "cross");
   }
@@ -1811,7 +1824,7 @@ async function openStudio(tab) {
   renderStudio(tab);
 }
 function renderStudio(tab) {
-  ["timeline", "foreshadow", "names"].forEach((t) =>
+  ["timeline", "foreshadow", "names", "statebook"].forEach((t) =>
     $("studio-tab-" + t).classList.toggle("on", t === tab));
   const box = $("studio-body"); box.innerHTML = "";
   if (!_studio) return;
@@ -1837,7 +1850,7 @@ function renderStudio(tab) {
         `<div class="st-body">${escHtml(r.text)}${isStale ? '<span class="st-stale">悬空</span>' : ""}</div>`;
       box.appendChild(el);
     });
-  } else {
+  } else if (tab === "names") {
     const d = _studio.names || {};
     if ((d.roster || []).length) {
       const h = document.createElement("div"); h.className = "sub-head"; h.textContent = "人物专名册(逐字直送写手的那份)"; box.appendChild(h);
@@ -1852,7 +1865,78 @@ function renderStudio(tab) {
     if (!(d.roster || []).length && !(d.sections || []).length) {
       box.innerHTML = `<div class="hint">世界观里还没识别到硬设定小节(如「## 力量体系」「## 地理」),人物卡也没有「## 类型 · 名字」式的角色。填了之后,这里就是写手照抄的专名册。</div>`;
     }
+  } else if (tab === "statebook") {
+    const rows = _studio.statebook || [];
+    if (!rows.length) { box.innerHTML = `<div class="hint">还没有账本——写完一章自动除虫后,这里会按章记录 物品/状态/规则/时钟。</div>`; return; }
+    rows.forEach((ch) => {
+      const h = document.createElement("div"); h.className = "bug-head"; h.textContent = `第${ch.n}章`;
+      box.appendChild(h);
+      ch.lines.forEach((l) => {
+        const d = document.createElement("div"); d.className = "bug-ev";
+        d.textContent = `[${l.kind}] ${l.text}`; box.appendChild(d);
+      });
+    });
   }
+}
+
+// ---------- 除虫:跨章连续性报告(非阻断);「按建议改」联动行内改写 ----------
+async function debugChapter() {
+  if (!CUR || CUR.chapter == null) return;
+  toast("除虫中:对照前几章与状态账本…十几秒");
+  try {
+    const d = await jreq("POST", "/api/chapter/debug", { root: DATA.root, chapter: CUR.chapter });
+    renderDebugReport(CUR.chapter, d.issues || []);
+  } catch (e) { toast(e.message, true); }
+}
+function renderDebugReport(chapter, issues) {
+  $("debug-title").textContent = `除虫报告 · 第${chapter}章` + (issues.length ? `(${issues.length} 条)` : "");
+  const box = $("debug-body"); box.innerHTML = "";
+  if (!issues.length) {
+    box.innerHTML = `<div class="hint">未发现跨章矛盾。报告已留档 .审稿留痕/。</div>`;
+  }
+  issues.forEach((it) => {
+    const div = document.createElement("div"); div.className = "bug-item";
+    const head = document.createElement("div"); head.className = "bug-head";
+    head.textContent = `${"⭐".repeat(it["星"] || 3)} ${it["类别"]}:${it["问题"]}`;
+    const ev = document.createElement("div"); ev.className = "bug-ev";
+    ev.textContent = `本章:「${it["本章证据"] || ""}」 · 前情:${it["前情证据"] || ""}`;
+    div.appendChild(head); div.appendChild(ev);
+    if (it["修改示例"]) {
+      const fx = document.createElement("div"); fx.className = "bug-fix";
+      fx.textContent = `修改示例:${it["修改示例"]}`; div.appendChild(fx);
+    }
+    const act = document.createElement("div"); act.className = "row-end";
+    const btn = document.createElement("button"); btn.className = "ghost";
+    btn.textContent = it["落点"] === "设定" ? "打开设定" : "按建议改";
+    btn.onclick = () => applyBugFix(chapter, it);
+    act.appendChild(btn); div.appendChild(act);
+    box.appendChild(div);
+  });
+  $("debug-overlay").classList.remove("hidden");
+}
+async function applyBugFix(chapter, it) {
+  $("debug-overlay").classList.add("hidden");
+  if (it["落点"] === "设定") {
+    // 修改示例里点名了 xx.md 且在侧栏设定清单里 → 打开它;否则打开状态账本
+    const m = (it["修改示例"] || "").match(/[一-龥A-Za-z0-9·]+\.md/);
+    const known = (DATA.brain || []).flatMap((b) => b.children ? b.children.map((c) => c.rel) : [b.rel]);
+    const rel = m && known.find((r) => r.endsWith("/" + m[0])) || "外置大脑/状态账本.md";
+    await openFile(rel, true, null);
+    return;
+  }
+  await openFile(`正文/第${chapter}章.md`, true, chapter);
+  const ed = $("editor");
+  const needle = (it["本章证据"] || "").trim();
+  let idx = needle ? ed.value.indexOf(needle) : -1;
+  if (idx < 0) { toast("没定位到证据句——请手动选中要改的段落,再用「重写选中」", true); return; }
+  // 吸附到所在段落(空行为界),预填修改示例进行内改写面板
+  const before = ed.value.lastIndexOf("\n\n", idx);
+  const after = ed.value.indexOf("\n\n", idx + needle.length);
+  const start = before < 0 ? 0 : before + 2;
+  const end = after < 0 ? ed.value.length : after;
+  ed.setSelectionRange(start, end); ed.focus();
+  openRewrite();
+  $("rewrite-instruction").value = it["修改示例"] || `修掉:${it["问题"]}`;
 }
 
 // ---------- 设置抽屉 / 输入退场 / 朱批浮条 ----------
@@ -2009,7 +2093,7 @@ function closeTopOverlay() {
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
   if ($("seal-bar").classList.contains("on")) { hideSealBar(); return true; }
   if (!$("rewrite-inline").classList.contains("hidden")) { hideInlinePanel(); return true; }
-  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "create-overlay", "import-overlay", "connect-overlay", "run-overlay"];
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "debug-overlay", "create-overlay", "import-overlay", "connect-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) { minimizeRun(); return true; } // 写作中 Esc=收起后台织,不误关
