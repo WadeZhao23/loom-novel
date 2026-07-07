@@ -75,8 +75,6 @@ WEBUI_EXEMPT: dict[str, str] = {
     "enrich_skip": "同 enrich_done:跳过与否 webui 不关心",
     "draft_done": "brain_draft 端点以 JSON 返回 written/skipped,不走事件流",
     "outline_done": "webui 有自己的按钮态(outline_regen 端点 JSON 返回),有意不消费(见 events.py 模块头)",
-    "debug_report": "continuity.scan_chapter 尚未接入流水线调用点(Task 4 只落函数本体),"
-                     "接入时由消费方(Task 5/7)决定走事件流还是 JSON 响应",
 }
 
 
