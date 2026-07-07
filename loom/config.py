@@ -28,6 +28,7 @@ class Config:
     chapter_chars: int = 800           # 终稿目标字数;中间工序自然更短
     gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
     foreshadow_distance: int = 8       # 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写第N章时进留痕提醒(纯提示、不回炉、不阻断);0=关
+    continuity_scan: bool = True       # 每章终稿后自动除虫(跨章连续性,非阻断附赠);False=只手动
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -72,6 +73,7 @@ def load_config(project_root: Path) -> Config:
         chapter_chars=int(novel.get("章节字数", novel.get("chapter_chars", 800))),
         gate_rounds=int(gate.get("轮数", gate.get("rounds", 1))),
         foreshadow_distance=int(gate.get("伏笔提醒章距", gate.get("foreshadow_distance", 8))),
+        continuity_scan=bool(gate.get("除虫", gate.get("continuity_scan", True))),
     )
 
 
@@ -164,5 +166,7 @@ def save_config(project_root: Path, cfg: Config) -> None:
         f'"轮数" = {int(cfg.gate_rounds)}\n'
         "# 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写新章时进 .审稿留痕/ 提醒(纯提示,不回炉、不阻断);0=关\n"
         f'"伏笔提醒章距" = {int(cfg.foreshadow_distance)}\n'
+        "# 每章写完自动「除虫」(跨章连续性检查,走便宜模型,非阻断只出报告);false=只在编辑器手动点\n"
+        f'"除虫" = {"true" if cfg.continuity_scan else "false"}\n'
     )
     atomic_write_text(project_root / "loom.toml", content)

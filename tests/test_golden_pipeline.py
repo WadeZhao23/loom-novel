@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 
 from loom.agents import run_pipeline
-from loom.config import load_config
+from loom.config import load_config, save_config
 from loom.parse import EDIT_NOTE_CLOSE, EDIT_NOTE_OPEN
 
 GOLDEN = Path(__file__).parent / "golden" / "pipeline_v1.json"
@@ -75,6 +75,12 @@ def test_pipeline_golden(project: Path):
                     encoding="utf-8")
     cfg = load_config(project)
     assert cfg.chapter_chars == 200, "loom.toml 目标字数替换失败(模板措辞变了?)"
+    # 顺手关掉「除虫」:它是终稿后的附赠调用,会让本测试固定的 RecordingBackend 脚本超量耗尽——
+    # 这是测试口径修正(golden 只钉主线管线的等价面),不影响快照本体的语义。
+    cfg.continuity_scan = False
+    save_config(project, cfg)
+    cfg = load_config(project)
+    assert cfg.continuity_scan is False, "除虫开关没关掉"
     record: dict = {"scenarios": {}}
 
     def run(name: str, chapter: int, script: list[str], *, resume: bool) -> None:

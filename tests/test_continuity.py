@@ -107,3 +107,54 @@ def test_note_report_idempotent_rescan(project):
     text = note.read_text(encoding="utf-8")
     assert text.count("## 除虫报告") == 1               # 替换不堆积
     assert "## 篇幅提醒" in text and "本章超长" in text  # 别的小节原样
+
+
+def test_pipeline_auto_scan_and_state_block(project):
+    """终稿后自动除虫(事件+留痕+入账);第二章的写手 prompt 收到「当前状态」块;开关可关。"""
+    from loom.agents import run_pipeline
+    from loom.config import load_config, save_config
+
+    _PROSE = ("寅时三刻,铜锣未响。崇祯睁开眼,乾清宫的帐顶陈旧而熟悉。"
+              "他记得煤山那棵歪脖子树,也记得魏忠贤的笑。这一次他要先出手。")
+    full = ["锚点:崇祯睁眼,阉党当政。", "分镜一:验身。分镜二:召对。",
+            _PROSE, _PROSE + "补一句。", _PROSE + "收束。", "煤山",
+            # 第 7 个响应给除虫扫描(终稿后附赠调用)
+            "===除虫报告===\n通过\n===状态入账===\n- [物品] 尚方剑:获得 | 证据:「取剑」"]
+
+    class ScriptBackend:
+        def __init__(self, script): self.script = list(script); self.calls = []
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            assert self.script, "脚本耗尽"
+            out = self.script.pop(0); self.calls.append((system, user))
+            if on_chunk and out: on_chunk(out)
+            return out
+
+    cfg = load_config(project)
+    cfg.gate_rounds = 0
+    cfg.chapter_chars = 100
+    save_config(project, cfg)
+    cfg = load_config(project)
+    assert cfg.continuity_scan is True        # 默认开
+
+    seen: list[dict] = []
+    run_pipeline(project, 1, ScriptBackend(list(full)), cfg, progress=seen.append)
+    assert any(e["type"] == "debug_report" for e in seen)
+    assert "尚方剑" in (project / "外置大脑/状态账本.md").read_text(encoding="utf-8")
+    assert "除虫报告" in (project / ".审稿留痕/第1章.md").read_text(encoding="utf-8")
+
+    # 第二章:写手 prompt 带「当前状态」块(账本已有第1章)
+    be2 = ScriptBackend(list(full))
+    run_pipeline(project, 2, be2, cfg)
+    writer_user = be2.calls[2][1]             # 设定师/大纲师/写手 → 第3次
+    assert "当前状态" in writer_user and "尚方剑" in writer_user
+    assert "当前状态" not in be2.calls[0][1]  # 设定师不吃状态块(wants_hardfacts 同批才吃)
+
+    # 关掉开关:不再有除虫调用(脚本 6 个恰好耗尽)+ 无 debug_report
+    cfg.continuity_scan = False
+    save_config(project, cfg)
+    assert "除虫" in (project / "loom.toml").read_text(encoding="utf-8")
+    cfg = load_config(project)
+    assert cfg.continuity_scan is False
+    seen3: list[dict] = []
+    run_pipeline(project, 3, ScriptBackend(list(full[:6])), cfg, progress=seen3.append)
+    assert not any(e["type"] == "debug_report" for e in seen3)

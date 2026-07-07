@@ -490,7 +490,7 @@ def _length_hint(role: str, step_budget: int, chapter_target: int) -> str:
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
                        prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
                        target_chars: int = 0, *, chapter_target: int = 0, wants_prev: bool = False,
-                       wants_hardfacts: bool = False, book_title: str = "") -> str:
+                       wants_hardfacts: bool = False, book_title: str = "", state_snapshot: str = "") -> str:
     # 书名必进 prompt:没有它,模型对「这本书是什么」一无所知(第一章漂移的根因一)
     head = (f"# 你要写的是《{book_title}》第 {chapter_n} 章。" if book_title.strip()
             else f"# 你要写的是第 {chapter_n} 章。")
@@ -500,6 +500,9 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
     if hardfacts and wants_hardfacts:
         parts.append("## 硬设定(逐字照搬,等级/境界名、专名、金手指代价一字不改、不许新增体系)\n"
                      + hardfacts)
+    if state_snapshot and wants_hardfacts:
+        parts.append("## 当前状态(状态账本摘录——物品消耗/规则数值以此为准,"
+                     "不许复活已消耗物品、不许改规则数值)\n" + state_snapshot)
     if prev and wants_prev:
         parts.append("## 上一章正文(接住它的结尾钩子,别重复、别断裂)\n" + prev[-1500:])
     if workspace:
@@ -536,6 +539,9 @@ def run_pipeline(
     progress(events.pipeline_start(chapter_n, PIPELINE))
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)  # 硬设定逐字块,进大纲师/写手 prompt
+    # 状态快照:账本随除虫每章追加,若折进签名会每章冲 ledger——与 hardfacts 同豁免(改它不重跑旧步)
+    from . import statebook
+    state_snap = statebook.snapshot_for(project_root, chapter_n - 1)
 
     # 注:hardfacts 故意不进续跑签名。它只取自 世界观.md / 人物卡.md,而这两份都在设定师
     # (永远是 PIPELINE[0])的 reads 里——改硬设定必先让设定师签名失配、从下标 0 全量重跑,
@@ -578,7 +584,7 @@ def run_pipeline(
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                              target_chars=max_chars, chapter_target=config.chapter_chars,
                                              wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
-                                             book_title=config.title)
+                                             book_title=config.title, state_snapshot=state_snap)
             # 哨兵棒(编辑)的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if spec.edit_sentinel
                         else (lambda d, r=role: progress(events.agent_chunk(r, d))))
@@ -636,6 +642,8 @@ def run_pipeline(
     ledger.record_snapshot(project_root, chapter_n, final)  # 与 正文/.原稿 同口径(都含 H1),不会误判 drifted
     _scan_sensitive(project_root, chapter_n, final_body, progress)  # 违禁词扫正文体即可(标题不必扫)
     _flag_overlong(project_root, chapter_n, final_body, config.chapter_chars, progress)  # 超长只留痕,不拦稿
+    _scan_continuity(project_root, chapter_n, final_body, critic_backend or backend,
+                     config, progress, hardfacts)
     progress(events.chapter_done(chapter=chapter_n, path=path, title=title,
                                   chars=len(final_body), preview=final_body[:300], text=final))
     return path, final
@@ -692,6 +700,21 @@ def _deslop_detector(project_root: Path, chapter_n: int):
     return _run
 
 
+def _scan_continuity(project_root: Path, chapter_n: int, body: str, backend: Backend,
+                     config: Config, progress: Progress, hardfacts: str = "") -> None:
+    """终稿后连续性除虫(附赠:报告进留痕+事件,状态入账进账本)。吞一切异常,绝不阻断出稿。
+    走 critic_backend(便宜模型)——除虫是「评估、管 what」,与质检复审同路由哲学。"""
+    if not config.continuity_scan:
+        return
+    try:
+        from .continuity import scan_chapter
+        rep = scan_chapter(project_root, chapter_n, body, backend,
+                           hardfacts=hardfacts, progress=progress)
+        progress(events.debug_report(chapter_n, rep["issues"], rep["note_path"]))
+    except Exception:
+        pass
+
+
 def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Progress) -> None:
     """本章终稿过一遍违禁词粗筛;命中只发提示事件,绝不阻断(平台审核终归靠人)。"""
     try:
@@ -722,6 +745,9 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     """
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)
+    # 状态快照:与 run_pipeline 同豁免口径(见该函数内注释),不折进任何签名
+    from . import statebook
+    state_snap = statebook.snapshot_for(project_root, chapter_n - 1)
     workspace: list[tuple[str, str]] = []
     outline = ""
     for spec in STEPS[:2]:   # 设定师→大纲师:与主线同一张工序表,不再手抄角色元组
@@ -732,7 +758,7 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                          target_chars=max_chars, chapter_target=config.chapter_chars,
                                          wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
-                                         book_title=config.title)
+                                         book_title=config.title, state_snapshot=state_snap)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
             on_chunk=lambda d, r=role: progress(events.agent_chunk(r, d)),
