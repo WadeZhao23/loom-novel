@@ -32,6 +32,8 @@ CONTRACT: dict[str, tuple[dict, set[str]]] = {
     "agent_done": (dict(role="写手", produces="本章初稿"), {"type", "role", "produces"}),
     "agent_skip": (dict(role="写手", reason="已完成且上游未变"), {"type", "role", "reason"}),
     "edit_note": (dict(chapter=3, path=Path("/tmp/留痕.md")), {"type", "chapter", "path"}),
+    "debug_report": (dict(chapter=3, issues=[_ISSUE], path=Path("/tmp/留痕.md")),
+                      {"type", "chapter", "issues", "path"}),
     "sensitive": (dict(chapter=3, count=2, hits=[{"word": "示例", "count": 2}]),
                   {"type", "chapter", "count", "hits"}),
     "chapter_done": (dict(chapter=3, path=Path("/tmp/第3章.md"), title="标题", chars=2500,
@@ -73,6 +75,8 @@ WEBUI_EXEMPT: dict[str, str] = {
     "enrich_skip": "同 enrich_done:跳过与否 webui 不关心",
     "draft_done": "brain_draft 端点以 JSON 返回 written/skipped,不走事件流",
     "outline_done": "webui 有自己的按钮态(outline_regen 端点 JSON 返回),有意不消费(见 events.py 模块头)",
+    "debug_report": "continuity.scan_chapter 尚未接入流水线调用点(Task 4 只落函数本体),"
+                     "接入时由消费方(Task 5/7)决定走事件流还是 JSON 响应",
 }
 
 

@@ -116,3 +116,119 @@ def merge_items(det: list[BugItem], llm: list[BugItem]) -> list[BugItem]:
         seen.add(key)
         out.append(i)
     return out
+
+
+_SCAN_SYSTEM = """你是**连续性审读员**(除虫),只诊断、不改写。我给你:本章终稿、状态账本摘录、\
+最近两章正文结尾、卡章纲(含AI回顾)、硬设定。逐类检查本章与前情的矛盾:
+物品(已消耗/失去的东西再次出现使用)、人设(行为违背人物底线/身段/与境界差不符的姿态)、\
+规则(金手指/体系的数值条款与账本或前章不一致)、时间(时间词粒度与前情时刻不符,如昨夜的事说成昨日)、\
+衔接(与前几章已定事实冲突)。**宁缺毋滥**:确凿的矛盾才报,每条带两处证据。
+输出(严格,两段,分隔行原样保留):
+===除虫报告===
+无矛盾只写一行「通过」;有则每条一行、按严重度降序、最多 6 条:
+- ⭐⭐⭐⭐⭐ | 物品 | 一句话冲突 | 本章证据:「原文短引」 | 前情证据:第2章「原文短引或账本行」 | 落点:正文 | 修改示例:一句可直接替换的写法
+(⭐1-5=严重度;类别∈物品/人设/规则/时间/衔接/其他;落点∈正文/设定——该改设定文件的写「设定」并在修改示例里点名文件)
+===状态入账===
+本章新发生的状态变更(没有就一行「- 无」):
+- [物品] 实体:变更 | 证据:「原文短引」
+- [状态] 人物:新状态(变化原因) | 证据:「原文短引」
+- [规则] 规则名:数值/条款 | 证据:「原文短引」
+- [时钟] 章末:故事内时间"""
+
+_REPORT_LINE = re.compile(r"^[-·•]\s*(.+)$")
+
+
+def parse_scan(raw: str) -> tuple[list[BugItem], list[str]]:
+    """双段宽容解析。报告段「通过」→ [];入账段只认 statebook 四类行,「- 无」→ []。"""
+    report_part, _, state_part = raw.partition("===状态入账===")
+    report_part = report_part.split("===除虫报告===")[-1]
+    items: list[BugItem] = []
+    for line in report_part.splitlines():
+        m = _REPORT_LINE.match(line.strip())
+        if not m:
+            continue
+        segs = [s.strip() for s in m.group(1).split("|")]
+        if len(segs) < 3:
+            continue
+        stars = min(5, max(1, segs[0].count("⭐") or 3))
+        item = BugItem(stars, segs[1][:8], segs[2])
+        for seg in segs[3:]:
+            if seg.startswith("本章证据"):
+                item.evidence = seg.split(":", 1)[-1].split("：", 1)[-1].strip().strip("「」\"")
+            elif seg.startswith("前情证据"):
+                item.prior = seg.split(":", 1)[-1].split("：", 1)[-1].strip()
+            elif seg.startswith("落点"):
+                t = seg.split(":", 1)[-1].split("：", 1)[-1].strip()
+                item.target = "设定" if "设定" in t else "正文"
+            elif seg.startswith("修改示例"):
+                item.fix = seg.split(":", 1)[-1].split("：", 1)[-1].strip()
+        items.append(item)
+    state_lines = [l.strip() for l in state_part.splitlines()
+                   if statebook._LINE_RE.match(l.strip())]
+    return items, state_lines
+
+
+def _prev_tail(project_root: Path, n: int, chars: int = 1200) -> str:
+    from .chaptertext import strip_title
+    from .paths import chapter_path
+    p = chapter_path(project_root, n)
+    return strip_title(p.read_text(encoding="utf-8")).strip()[-chars:] if p.exists() else ""
+
+
+def _note_report(project_root: Path, chapter_n: int, items: list[BugItem]) -> Path:
+    """报告追加进 .审稿留痕/第N章.md(非阻断,双证据行格式)。"""
+    from .paths import review_note_path
+    path = review_note_path(project_root, chapter_n)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["\n## 除虫报告(非阻断,供你定夺)"]
+    if not items:
+        lines.append("- 未发现跨章矛盾")
+    for i in items:
+        lines.append(f"- {'⭐' * i.stars} {i.kind}:{i.desc}"
+                     f" | 本章证据:「{i.evidence}」 | 前情:{i.prior}"
+                     + (f" | 修改示例:{i.fix}" if i.fix else ""))
+    with path.open("a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend, *,
+                 hardfacts: str = "", progress: Progress = _noop) -> dict:
+    """除虫一章:确定性双检测恒跑;LLM 扫描失败只降级不整体失败。落留痕+入账,返回报告。"""
+    project_root = Path(project_root)
+    from . import budget
+    from .paths import CARD_REL, STATEBOOK_REL
+    p_book = project_root / STATEBOOK_REL
+    book = statebook.parse_book(p_book.read_text(encoding="utf-8")) if p_book.exists() else {}
+    det = merge_items(detect_consumed_reuse(book, chapter_n, body),
+                      detect_rule_drift(book, chapter_n, body))
+
+    llm_items: list[BugItem] = []
+    state_lines: list[str] = []
+    try:
+        progress(events.info(f"除虫第 {chapter_n} 章:对照前情查跨章矛盾…"))
+        snap = statebook.snapshot_for(project_root, chapter_n - 1) or "(账本为空:第一章或还没除过虫)"
+        card_p = project_root / CARD_REL
+        card = budget.fold_recaps(card_p.read_text(encoding="utf-8"), chapter_n) if card_p.exists() else ""
+        parts = [f"## 本章终稿(第{chapter_n}章)\n{body}",
+                 f"## 状态账本摘录(截至第{chapter_n - 1}章)\n{snap}"]
+        for m in (chapter_n - 1, chapter_n - 2):
+            tail = _prev_tail(project_root, m) if m >= 1 else ""
+            if tail:
+                parts.append(f"## 第{m}章结尾\n{tail}")
+        if card.strip():
+            parts.append(f"## 卡章纲(含AI回顾)\n{card}")
+        if hardfacts.strip():
+            parts.append(f"## 硬设定\n{hardfacts}")
+        parts.append("## 你的任务\n按系统要求输出两段:除虫报告 + 状态入账。")
+        raw = backend.complete(_SCAN_SYSTEM, "\n\n".join(parts), max_chars=900)
+        llm_items, state_lines = parse_scan(raw)
+    except Exception:
+        pass   # LLM 侧任何失败都吞:确定性结果照出,附赠动作绝不拖累出稿
+
+    issues = merge_items(det, llm_items)
+    note_path = _note_report(project_root, chapter_n, issues)
+    if state_lines:
+        statebook.append_section(project_root, chapter_n, state_lines)
+    return {"issues": [i.as_dict() for i in issues], "state_lines": state_lines,
+            "note_path": str(note_path)}

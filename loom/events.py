@@ -67,6 +67,12 @@ def edit_note(chapter: int, path) -> dict:
 
 
 @_event
+def debug_report(chapter: int, issues: list, path) -> dict:
+    """除虫报告(非阻断附赠):issues 为 BugItem.as_dict 列表,空列表=未发现矛盾。"""
+    return {"type": "debug_report", "chapter": chapter, "issues": issues, "path": str(path)}
+
+
+@_event
 def sensitive(chapter: int, count: int, hits: list) -> dict:
     """违禁词粗筛命中:只提示、绝不阻断(hits 里每条含 word/count)。"""
     return {"type": "sensitive", "chapter": chapter, "count": count, "hits": hits}
