@@ -290,3 +290,25 @@ def test_hardfacts_cover_era_and_edge_sections(project):
     (d / "主角优势.md").write_text("# 主角优势\n\n先知三百年史;代价:改史则记忆漫漶。", encoding="utf-8")
     facts = _hardfacts_for(project, lambda e: None)
     assert "天启七年" in facts and "先知三百年史" in facts
+
+
+# ── 人物硬约束逐字直送 + 系统/因果关键词 ─────────────────────────────
+
+def test_char_constraints_into_hardfacts(project):
+    from loom.agents import _hardfacts_for
+    d = project / "外置大脑/人物"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "配角·苏清瑶.md").write_text(
+        "# 配角 · 苏清瑶\n\n- 立场:内门金丹天骄\n- 不可退让的底线:尊严高于性命,宁折不跪\n"
+        "- 命格:九尾天狐转世\n- 小目标:解开封印\n", encoding="utf-8")
+    facts = _hardfacts_for(project, lambda e: None)
+    assert "人物硬约束" in facts and "宁折不跪" in facts and "九尾天狐" in facts
+    assert "小目标" not in facts        # 非硬约束行不进(只收 底线/身段/命格/原则/禁忌)
+
+
+def test_system_keywords_hit_hardfacts(project):
+    from loom.agents import _hardfacts_for
+    d = project / "外置大脑/世界观"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "系统与因果.md").write_text("# 系统与因果\n\n因果锁定:满100%触发。", encoding="utf-8")
+    assert "因果锁定" in _hardfacts_for(project, lambda e: None)

@@ -38,7 +38,7 @@ _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
     # 世界观/人物 双形态都列上:_read_files 对缺失路径静默跳过(_noop),单文件老书/目录新书各取其一
     "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
             ["skills/评估自检.md", paths.CHARS_REL, paths.CHARS_DIR_REL,
-             paths.WORLD_REL, paths.WORLD_DIR_REL, paths.CARD_REL], True),
+             paths.WORLD_REL, paths.WORLD_DIR_REL, paths.CARD_REL, paths.STATEBOOK_REL], True),
     "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
              ["skills/去AI味.md", paths.FINGERPRINT_REL], False),
 }
@@ -268,10 +268,10 @@ _H3PLUS_RE = re.compile(r"^\s{0,3}(#{3,6})\s*(.+?)\s*$")
 
 # 世界观里【必须逐字照搬】的硬设定小节——按标题(H2,H2 没命中再看其内 H3)含这些词命中,
 # 整段原文透传给大纲师/写手。只圈"规则 + 专名"(境界阶梯/金手指代价/地名势力;历史/都市题材的
-# 时代格局/主角优势 同级):这些一旦被复述就漂(F~SSS 凭空多出"一阶0级"、"一中"写成"二中")。
-# 故意不圈「一句话定位」(情绪基调、本就该意译)。
+# 时代格局/主角优势 同级;系统流的系统机制/因果法则 同级):这些一旦被复述就漂
+# (F~SSS 凭空多出"一阶0级"、"一中"写成"二中")。故意不圈「一句话定位」(情绪基调、本就该意译)。
 _HARDFACT_KW = ("力量", "体系", "境界", "等级", "修为", "实力", "修炼", "金手指",
-                "地理", "势力", "阵营", "地图", "区域", "时代", "优势")
+                "地理", "势力", "阵营", "地图", "区域", "时代", "优势", "系统", "因果")
 
 # 反转/真相/底牌类小节:即便标题撞上硬设定关键词(如「## 势力背后的真相」),也绝不逐字喂写手
 # ——逐字喂等于提前抖包袱,踩本功能唯一的硬红线。deny 压过 allow,且连嵌进 ### 的反转一并剥掉。
@@ -347,6 +347,38 @@ def _name_roster_for(project_root: Path) -> str:
     return ""
 
 
+_CONSTRAINT_KW = ("底线", "身段", "命格", "原则", "禁忌")
+
+
+def _char_constraints_for(project_root: Path) -> str:
+    """人物卡里标签含 底线/身段/命格/原则/禁忌 的行,逐字直送写手——人设跌份的根治点。
+    纯字符串切片,双形态同口径;成长档案与 [AI补充] 照旧排除;无命中返回空串。"""
+    def pick(name: str, text: str) -> list[str]:
+        out = []
+        for line in text.splitlines():
+            s = line.strip()
+            if not s.startswith("-"):
+                continue
+            label = re.split(r"[:：]", s.lstrip("- ").strip(), 1)[0]
+            if any(kw in label for kw in _CONSTRAINT_KW):
+                out.append(f"- {name}|{s.lstrip('- ').strip()}")
+        return out
+
+    lines: list[str] = []
+    form = paths.brain_form(project_root, paths.CHARS_REL, paths.CHARS_DIR_REL)
+    if form == "file":
+        for head, body in _md_h2_sections((project_root / paths.CHARS_REL).read_text(encoding="utf-8")):
+            if "AI 补充" in head or "AI补充" in head:
+                continue
+            lines += pick(head, body)
+    elif form == "dir":
+        for f in paths.brain_dir_files(project_root, paths.CHARS_DIR_REL):
+            if f.name == paths.GROWTH_NAME:
+                continue
+            lines += pick(f.stem, f.read_text(encoding="utf-8"))
+    return "\n".join(lines)
+
+
 def _pick_hardfacts(md: str) -> list[str]:
     """世界观里命中 _HARDFACT_KW 的小节。H2 优先;H2 没命中再看其内的 H3(用户把硬设定写在
     三级标题下);整份没用 ## 时按 H3 顶层切。deny(_SPOILER_KW)一律压过 allow。"""
@@ -405,6 +437,9 @@ def _hardfacts_for(project_root: Path, progress: Progress = _noop) -> str:
     roster = _name_roster_for(project_root)
     if roster:
         blocks.append("【人物专名册(照此写,别改名/别另造名)】\n" + roster)
+    constraints = _char_constraints_for(project_root)
+    if constraints:
+        blocks.append("【人物硬约束(逐字遵守:身份/底线/身段不许跌份)】\n" + constraints)
     return "\n\n".join(b for b in blocks if b.strip())
 
 
