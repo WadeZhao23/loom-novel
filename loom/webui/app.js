@@ -1922,7 +1922,9 @@ function maybeLineEditBtn(e) {
       || !$("rewrite-inline").classList.contains("hidden")) return hideLineEditBtn();
   const i = lineAtY(e.clientY);
   const bands = lineBands();
-  if (i < 0 || bands[i].end - bands[i].start < 2) return hideLineEditBtn();   // 空行不值得改
+  if (i < 0) return hideLineEditBtn();   // 行号越界
+  const lineText = ed.value.slice(bands[i].start, bands[i].end);
+  if (lineText.trim().length < 2) return hideLineEditBtn();   // 空行/纯空白行不值得改
   const r = ed.getBoundingClientRect();
   const y = r.top + bands[i].top - ed.scrollTop;
   if (y < r.top || y > r.bottom - 24) return hideLineEditBtn();               // 行带滚出视口
@@ -1935,7 +1937,7 @@ function hideLineEditBtn() { _hoverLine = -1; $("line-edit-btn").classList.remov
 function lineEditClick() {
   if (_hoverLine < 0) return;
   const b = lineBands()[_hoverLine];
-  if (!b || b.end - b.start < 2) return hideLineEditBtn();
+  if (!b || $("editor").value.slice(b.start, b.end).trim().length < 2) return hideLineEditBtn();
   const ed = $("editor");
   ed.setSelectionRange(b.start, b.end);
   ed.focus();
