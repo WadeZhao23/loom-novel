@@ -73,3 +73,17 @@ def test_fresh_template_not_substantive(project):
     from loom.scaffold import TEMPLATES_DIR
     text = (TEMPLATES_DIR / "外置大脑/状态账本.md").read_text(encoding="utf-8")
     assert is_substantive(text) is False
+
+
+def test_delete_chapter_strips_statebook_with_trash(project):
+    from loom import chapters
+    from loom.fsutil import atomic_write_text
+    for n in (1, 2, 3):
+        atomic_write_text(project / f"正文/第{n}章.md", f"# 第{n}章\n\n正文{n}。")
+        statebook.append_section(project, n, [f"- [物品] 宝物{n}:获得 | 证据:「{n}」"])
+    chapters.delete_chapter(project, 2)
+    text = _book(project)
+    assert "宝物2" not in text
+    assert "宝物3" in text and "## 第2章" in text     # 第3章顺延成第2章,账本键跟着搬
+    trash = list((project / "正文/.回收站").glob("第2章-*"))
+    assert trash and any("状态账本" in f.name for f in trash[0].rglob("*.md"))   # 留底在回收站的外置大脑/子目录里

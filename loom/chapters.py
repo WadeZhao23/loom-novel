@@ -16,7 +16,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from . import state
+from . import state, statebook
 from .fsutil import atomic_write_text
 from .paths import CHAPTER_ARTIFACTS as _ARTIFACTS  # 每章产物注册表(布局单点在 paths)
 from .paths import BRAIN_DIR, TRASH_DIR, chapter_numbers, chapter_path
@@ -59,6 +59,7 @@ def _renumber(root: Path, mapping: dict[int, int]) -> None:
         from .recap import remap_recap_keys
         remap_supplement_keys(root, mapping)
         remap_recap_keys(root, mapping)
+        statebook.remap_keys(root, mapping)
     # state.learned 跟着重映射(删除的章已在调用方先摘掉)
     st = state.load_state(root)
     st["learned"] = sorted({mapping.get(x, x) for x in st.get("learned", [])})
@@ -87,6 +88,9 @@ def delete_chapter(root: Path | str, n: int) -> dict:
     removed_supp = strip_supplement(root, n)
     if removed_supp:
         atomic_write_text(trash / BRAIN_DIR / f"第{n}章-AI补充.md", removed_supp)
+    removed_state = statebook.strip_section(root, n)
+    if removed_state:
+        atomic_write_text(trash / BRAIN_DIR / f"状态账本-第{n}章.md", removed_state)
     state.unmark_learned(root, n)                   # 2) learned 先摘掉这章
     _renumber(root, {k: k - 1 for k in nums if k > n})  # 3) 高于 n 的整体下移 1
     return {"ok": True, "deleted": n, "trash": str(trash), "note": SYNC_NOTE}
