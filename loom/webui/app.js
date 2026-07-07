@@ -199,7 +199,7 @@ function bind() {
   $("btn-outline").onclick = () => CUR && CUR.chapter != null && openOutline(CUR.chapter);
   $("btn-outline-regen").onclick = regenOutline;
   $("btn-rewrite").onclick = openRewrite;
-  $("rewrite-cancel").onclick = () => $("rewrite-overlay").classList.add("hidden");
+  $("rewrite-cancel").onclick = hideInlinePanel;
   $("rewrite-go").onclick = doRewrite;
   $("rewrite-again").onclick = doRewrite;
   $("rewrite-apply").onclick = applyRewrite;
@@ -1182,53 +1182,64 @@ function openRewrite() {
   const start = ed.selectionStart, end = ed.selectionEnd;
   const span = ed.value.substring(start, end);
   if (!span.trim()) { toast("先在正文里选中要重写的一段", true); return; }
+  _rwMode = "chapter";
   _rewriteSel = { start, end, span };
-  _rewriteText = "";
-  $("rewrite-src").textContent = span;
-  $("rewrite-instruction").value = "";
-  $("rewrite-error").textContent = "";
-  $("rewrite-result").textContent = "";
-  $("rewrite-result").classList.add("hidden");
-  $("rewrite-go").classList.remove("hidden");
-  $("rewrite-again").classList.add("hidden");
-  $("rewrite-apply").classList.add("hidden");
-  $("rewrite-overlay").classList.remove("hidden");
+  showInlinePanel({ src: span, goLabel: "重写",
+    placeholder: "可选指令:太铺张压一压 / 换个更冷的章末钩 / 加一句冲突…(留空就按你的嗓音改顺)" });
 }
 async function doRewrite() {
   if (!_rewriteSel) return;
   $("rewrite-error").textContent = "";
   $("rewrite-go").disabled = $("rewrite-again").disabled = true;
+  const instruction = $("rewrite-instruction").value.trim();
   try {
-    const d = await jreq("POST", "/api/rewrite", {
-      root: DATA.root, chapter: CUR.chapter,
-      full_text: $("editor").value, span: _rewriteSel.span,
-      instruction: $("rewrite-instruction").value.trim(),
-    });
-    _rewriteText = d.rewritten;
-    $("rewrite-result").textContent = d.rewritten;
+    let d;
+    if (_rwMode === "chapter") {
+      d = await jreq("POST", "/api/rewrite", { root: DATA.root, chapter: CUR.chapter,
+        full_text: $("editor").value, span: _rewriteSel.span, instruction });
+      _rewriteText = d.rewritten;
+    } else if (_rwMode === "brain") {
+      d = await jreq("POST", "/api/brain/rewrite", { root: DATA.root, rel: CUR.rel,
+        full_text: $("editor").value, span: _rewriteSel.span, instruction });
+      _rewriteText = d.rewritten;
+    } else {
+      d = await jreq("POST", "/api/brain/continue", { root: DATA.root, rel: CUR.rel,
+        full_text: $("editor").value, instruction });
+      _rewriteText = d.continued;
+    }
+    $("rewrite-result").textContent = _rewriteText;
     $("rewrite-result").classList.remove("hidden");
     $("rewrite-go").classList.add("hidden");
     $("rewrite-again").classList.remove("hidden");
     $("rewrite-apply").classList.remove("hidden");
+    positionInlinePanel();   // 结果撑高面板后重夹一次,别顶出编辑器
   } catch (e) { $("rewrite-error").textContent = e.message; }
   finally { $("rewrite-go").disabled = $("rewrite-again").disabled = false; }
 }
 async function applyRewrite() {
   if (!_rewriteSel || !_rewriteText) return;
   const ed = $("editor");
-  const content = ed.value.substring(0, _rewriteSel.start) + _rewriteText + ed.value.substring(_rewriteSel.end);
-  try {
-    await jreq("POST", "/api/rewrite/apply", {
-      root: DATA.root, chapter: CUR.chapter, content,
-      old_span: _rewriteSel.span, new_span: _rewriteText,
-    });
-    ed.value = content;
-    clearDirty();
-    updateWordCount();
-    $("rewrite-overlay").classList.add("hidden");
-    toast("已替换选中段");
-    await refresh();
-  } catch (e) { $("rewrite-error").textContent = e.message; }
+  if (_rwMode === "chapter") {
+    // 正文铁律:必须走 /api/rewrite/apply,外科式同步 .原稿 快照,learn 只学手改
+    const content = ed.value.substring(0, _rewriteSel.start) + _rewriteText + ed.value.substring(_rewriteSel.end);
+    try {
+      await jreq("POST", "/api/rewrite/apply", { root: DATA.root, chapter: CUR.chapter, content,
+        old_span: _rewriteSel.span, new_span: _rewriteText });
+      ed.value = content;
+      clearDirty(); updateWordCount();
+      hideInlinePanel(); toast("已替换选中段");
+      await refresh();
+    } catch (e) { $("rewrite-error").textContent = e.message; }
+    return;
+  }
+  // 设定文件:客户端替换/追加 → 走编辑器既有保存链路(无快照概念,learn 红线无涉;确认才落盘)
+  const insert = _rwMode === "brain-continue"
+    ? (ed.value.endsWith("\n") ? "\n" : "\n\n") + _rewriteText + "\n" : _rewriteText;
+  ed.value = ed.value.substring(0, _rewriteSel.start) + insert + ed.value.substring(_rewriteSel.end);
+  markDirty(); updateWordCount();
+  hideInlinePanel();
+  try { await saveFile(); } catch (e) { toast("落盘失败:" + e.message, true); return; }
+  toast(_rwMode === "brain-continue" ? "已续写进文末" : "已替换选中段");
 }
 
 // ---------- 重写已存在章节(覆盖逃生门) ----------
@@ -1798,6 +1809,73 @@ function noteTyping() {
   _typingTimer = setTimeout(() => document.body.classList.remove("typing"), 1500);
 }
 
+// ---------- 编辑器行带测量(镜像 div):textarea 软换行下,逻辑行 → 视觉像素带 ----------
+// 一行一个同排版 div(\n 本就强制断行,逐行分块不改变各行的软换行),offsetTop/Height 即视觉带。
+let _bandsCache = null;   // {text, width, bands} 内容与宽度没变就复用,input/resize 自然失效
+function lineBands() {
+  const ed = $("editor");
+  const width = ed.clientWidth;
+  if (_bandsCache && _bandsCache.text === ed.value && _bandsCache.width === width) return _bandsCache.bands;
+  const cs = getComputedStyle(ed);
+  let m = document.getElementById("editor-mirror");
+  if (!m) { m = document.createElement("div"); m.id = "editor-mirror"; document.body.appendChild(m); }
+  ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing",
+   "paddingTop", "paddingBottom", "paddingLeft", "paddingRight", "wordBreak", "overflowWrap"]
+    .forEach((p) => { m.style[p] = cs[p]; });
+  Object.assign(m.style, { position: "absolute", visibility: "hidden", left: "-9999px", top: "0",
+                           boxSizing: "border-box", width: width + "px", whiteSpace: "pre-wrap" });
+  m.innerHTML = "";
+  const lines = ed.value.split("\n");
+  const rows = lines.map((line) => {
+    const d = document.createElement("div");
+    d.textContent = line || "​";   // 空行塞零宽空格,也占一行高(用转义写法,别粘不可见字符)
+    m.appendChild(d);
+    return d;
+  });
+  const bands = []; let pos = 0;
+  lines.forEach((line, i) => {
+    bands.push({ start: pos, end: pos + line.length, top: rows[i].offsetTop, bottom: rows[i].offsetTop + rows[i].offsetHeight });
+    pos += line.length + 1;
+  });
+  _bandsCache = { text: ed.value, width, bands };
+  return bands;
+}
+
+// ---------- 行内改写面板(chapter/brain 两用;中央弹层已退役) ----------
+let _rwMode = "chapter";   // chapter=正文(快照铁律走 /api/rewrite/apply) | brain=设定改写 | brain-continue=设定续写
+function showInlinePanel({ src, placeholder, goLabel }) {
+  _rewriteText = "";
+  $("rewrite-src").textContent = src || "";
+  $("rewrite-src").classList.toggle("hidden", !src);
+  $("rewrite-instruction").value = "";
+  $("rewrite-instruction").placeholder = placeholder;
+  $("rewrite-error").textContent = "";
+  $("rewrite-result").textContent = "";
+  $("rewrite-result").classList.add("hidden");
+  $("rewrite-go").textContent = goLabel || "重写";
+  $("rewrite-go").classList.remove("hidden");
+  $("rewrite-again").classList.add("hidden");
+  $("rewrite-apply").classList.add("hidden");
+  hideSealBar();
+  positionInlinePanel();
+  $("rewrite-instruction").focus();
+}
+function hideInlinePanel() { $("rewrite-inline").classList.add("hidden"); }
+function positionInlinePanel() {
+  const ed = $("editor"), panel = $("rewrite-inline");
+  const bands = lineBands();
+  let li = ed.value.slice(0, ed.selectionEnd).split("\n").length - 1;
+  li = Math.min(li, bands.length - 1);
+  const r = ed.getBoundingClientRect();
+  panel.classList.remove("hidden");                       // 先显示才能量高度
+  let y = r.top + (bands[li] ? bands[li].bottom : 0) - ed.scrollTop + 6;
+  const ph = panel.offsetHeight || 180;
+  y = Math.max(r.top + 8, Math.min(y, r.bottom - ph - 8));
+  panel.style.top = y + "px";
+  panel.style.left = Math.round(r.left + 24) + "px";
+  panel.style.width = Math.max(320, r.width - 48) + "px";
+}
+
 function hideSealBar() { $("seal-bar").classList.remove("on"); }
 function maybeSealBar() {
   const ed = $("editor"), bar = $("seal-bar");
@@ -1826,7 +1904,8 @@ function closeTopOverlay() {
   if (_tourActive()) { endTour(); return true; }  // 引导开着时,Esc 先收引导
   if (!$("cmdk").classList.contains("hidden")) { closeCmdk(); return true; }
   if ($("seal-bar").classList.contains("on")) { hideSealBar(); return true; }
-  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "rewrite-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "create-overlay", "import-overlay", "connect-overlay", "run-overlay"];
+  if (!$("rewrite-inline").classList.contains("hidden")) { hideInlinePanel(); return true; }
+  const overlays = ["guide-overlay", "flow-overlay", "history-overlay", "seed-overlay", "learn-overlay", "doctor-overlay", "settings-overlay", "studio-overlay", "create-overlay", "import-overlay", "connect-overlay", "run-overlay"];
   for (const id of overlays) {
     if (!$(id).classList.contains("hidden")) {
       if (id === "run-overlay" && $("run-close").classList.contains("hidden")) { minimizeRun(); return true; } // 写作中 Esc=收起后台织,不误关

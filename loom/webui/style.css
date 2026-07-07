@@ -669,6 +669,12 @@ body.focus-mode .focus-exit { display: block; }
 .rewrite-src { background: var(--bg-sunken); color: var(--text-soft); }
 .rewrite-result { background: var(--seal-tint); color: var(--text); border: 1px solid var(--seal-line); }
 #rewrite-instruction { width: 100%; margin: 6px 0; }
+
+/* 行内改写面板:fixed 浮层,锚在选区/行下方(token 对照 .seal-bar,以文件内既有变量为准) */
+.rewrite-inline { position: fixed; z-index: 36; background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius-md); box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: var(--space-3) var(--space-4); }
+.rewrite-inline .rewrite-src { max-height: 90px; overflow-y: auto; }
+.rewrite-inline .rewrite-result { max-height: 160px; overflow-y: auto; }
 .seed-text { height: 200px; margin-top: var(--space-3); font-family: var(--font-read); }
 .row-end { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .app-version { margin-top: var(--space-3); text-align: right; color: var(--text-mute); font-size: var(--fs-xs); letter-spacing: .02em; }
