@@ -199,6 +199,8 @@ function bind() {
   $("btn-outline").onclick = () => CUR && CUR.chapter != null && openOutline(CUR.chapter);
   $("btn-outline-regen").onclick = regenOutline;
   $("btn-rewrite").onclick = openRewrite;
+  $("btn-brain-rewrite").onclick = openBrainRewrite;
+  $("btn-brain-continue").onclick = openBrainContinue;
   $("rewrite-cancel").onclick = hideInlinePanel;
   $("rewrite-go").onclick = doRewrite;
   $("rewrite-again").onclick = doRewrite;
@@ -923,6 +925,9 @@ async function openFile(rel, editable, chapter, li) {
   $("btn-sensitive").classList.toggle("hidden", chapter == null);
   $("btn-learn").classList.toggle("hidden", chapter == null);
   $("btn-rewrite").classList.toggle("hidden", chapter == null);
+  const brainRW = editable && chapter == null && isBrainRWFile(rel);
+  $("btn-brain-rewrite").classList.toggle("hidden", !brainRW);
+  $("btn-brain-continue").classList.toggle("hidden", !brainRW);
   $("btn-outline").classList.toggle("hidden", chapter == null);  // 正文章节才给「本章细纲」入口
   $("btn-outline-regen").classList.add("hidden");                 // 默认藏,只在看细纲时由 openOutline 亮出
   $("btn-preview").classList.remove("hidden");
@@ -1197,6 +1202,35 @@ function openRewrite() {
   showInlinePanel({ src: span, goLabel: "重写",
     placeholder: "可选指令:太铺张压一压 / 换个更冷的章末钩 / 加一句冲突…(留空就按你的嗓音改顺)" });
 }
+// 世界观/人物 的设定文件(单文件老书 + 目录新书)才有 AI 改写/续写;
+// 成长档案是 learn 的 AI 自留地、写作指纹是 voice——都不掺和(与 server 端 rel 守卫同口径)
+function isBrainRWFile(rel) {
+  if (rel === "外置大脑/世界观.md" || rel === "外置大脑/人物卡.md") return true;
+  return /^外置大脑\/(世界观|人物)\//.test(rel) && rel.endsWith(".md") && !rel.endsWith("成长档案.md");
+}
+function openBrainRewrite() {
+  if (!CUR || !CUR.editable || !isBrainRWFile(CUR.rel)) return;
+  setPreview(false);                       // 预览态没有选区,切回纯文本编辑
+  const ed = $("editor");
+  const start = ed.selectionStart, end = ed.selectionEnd;
+  const span = ed.value.substring(start, end);
+  if (span.trim().length < 2) { toast("先在设定里选中要改写的一段", true); return; }
+  _rwMode = "brain";
+  _rewriteSel = { start, end, span };
+  showInlinePanel({ src: span, goLabel: "改写",
+    placeholder: "怎么改?例:代价再狠一点 / 等级压到 7 级(留空=改得更具体、能落地)" });
+}
+function openBrainContinue() {
+  if (!CUR || !CUR.editable || !isBrainRWFile(CUR.rel)) return;
+  setPreview(false);
+  const ed = $("editor");
+  const n = ed.value.length;
+  _rwMode = "brain-continue";
+  _rewriteSel = { start: n, end: n, span: "" };
+  ed.setSelectionRange(n, n);
+  showInlinePanel({ src: "", goLabel: "续写",
+    placeholder: "想续写什么?例:补一个反派势力 / 给主角加一段少年往事(留空=顺着现有设定补最缺的)" });
+}
 async function doRewrite() {
   if (!_rewriteSel) return;
   $("rewrite-error").textContent = "";
@@ -1264,7 +1298,7 @@ async function chapterOp(url, body) {
     const d = await jreq("POST", url, body);
     // 章号变了:收掉当前打开的章节视图,避免指向错号
     CUR = null; $("editor").value = ""; $("editor-path").textContent = "选左边一个文件来看/改";
-    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-outline", "btn-outline-regen", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
+    ["btn-save-file", "btn-search", "btn-history", "btn-sensitive", "btn-learn", "btn-rewrite", "btn-brain-rewrite", "btn-brain-continue", "btn-outline", "btn-outline-regen", "btn-preview"].forEach((id) => $(id).classList.add("hidden"));
     document.querySelectorAll(".list li.active").forEach((x) => x.classList.remove("active"));
     updateWordCount();
     if (d.state) { DATA = d.state; render(); } else { await refresh(); }
