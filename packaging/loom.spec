@@ -8,11 +8,23 @@
 """
 
 import os
+import re
 import sys
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 PROJECT_ROOT = os.path.dirname(SPECPATH)  # spec 在 packaging/ 下,上一级就是项目根
+
+
+def _loom_version():
+    """版本号单一真源 = loom/__init__.py 的 __version__;正则读取,不 import(避免冻结期副作用)。"""
+    init = os.path.join(PROJECT_ROOT, "loom", "__init__.py")
+    with open(init, encoding="utf-8") as f:
+        m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', f.read())
+    return m.group(1) if m else "0.0.0"
+
+
+LOOM_VERSION = _loom_version()
 
 # --- 数据文件:保持 loom/ 包内结构 ---
 datas = [
@@ -79,7 +91,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Loom",
             "CFBundleDisplayName": "Loom · 织布机",
-            "CFBundleShortVersionString": "1.0.1",
+            "CFBundleShortVersionString": LOOM_VERSION,  # 跟 loom/__init__.py 同步,别再写死
+            "CFBundleVersion": LOOM_VERSION,
             "NSHighResolutionCapable": True,
         },
     )

@@ -671,6 +671,7 @@ body.focus-mode .focus-exit { display: block; }
 #rewrite-instruction { width: 100%; margin: 6px 0; }
 .seed-text { height: 200px; margin-top: var(--space-3); font-family: var(--font-read); }
 .row-end { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+.app-version { margin-top: var(--space-3); text-align: right; color: var(--text-mute); font-size: var(--fs-xs); letter-spacing: .02em; }
 
 /* seed 来源切换(样本 / 继承另一本书) */
 .seg { display: inline-flex; padding: 3px; background: var(--bg-sunken); border-radius: var(--radius-sm);

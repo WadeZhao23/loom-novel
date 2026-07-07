@@ -82,6 +82,12 @@ class RootBody(BaseModel):
     root: str
 
 
+@app.get("/api/version")
+def version():
+    from . import __version__
+    return {"version": __version__}
+
+
 @app.get("/api/genres")
 def genres():
     return {"genres": available_genres()}

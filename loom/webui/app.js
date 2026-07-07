@@ -107,8 +107,16 @@ window.addEventListener("DOMContentLoaded", () => {
   loadGenres();
   renderRecent();       // 欢迎页的书架(用户级注册表)
   loadConnectStatus();  // 欢迎页的接入状态
+  loadVersion();        // 设置里显示当前版本号
   autoReopen();         // 自动回到上一本(localStorage 没有就用书架最近一本)
 });
+
+async function loadVersion() {
+  try {
+    const d = await jreq("GET", "/api/version");
+    if (d.version) $("app-version").textContent = `Loom v${d.version}`;
+  } catch (e) { /* 版本号是装饰,拉不到就留空 */ }
+}
 
 async function loadGenres() {
   try {
