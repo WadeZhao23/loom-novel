@@ -36,6 +36,7 @@ CHARS_REL = brain_rel("人物卡")
 CARD_REL = brain_rel("卡章纲")
 BANNED_REL = brain_rel("违禁词")
 PROJECT_CARD_REL = brain_rel("立项卡")
+STATEBOOK_REL = brain_rel("状态账本")   # 跨章状态流水账(物品/状态/规则/时钟),除虫自动追加、人可改可删
 
 # ── 外置大脑目录形态(3.2):世界观/人物 一节(人)一文件,AI 补充物理分离进 成长档案.md ──
 # 双形态兼容:单文件存在 → 单文件优先(老书零迁移/手工建档者);否则目录存在 → 目录(新书)。
@@ -43,6 +44,11 @@ PROJECT_CARD_REL = brain_rel("立项卡")
 WORLD_DIR_REL = f"{BRAIN_DIR}/世界观"
 CHARS_DIR_REL = f"{BRAIN_DIR}/人物"
 GROWTH_NAME = "成长档案.md"   # learn 的 [AI补充·第N章] 都进它:AI 有自己的文件,永不碰人写的文件
+
+# [AI补充] 可能住的全部文件(enrich 写入/删章清理/重编号/prompt 折叠都认这一份清单):
+# 老书=世界观.md/人物卡.md 文末;目录形态=各目录的 成长档案.md(AI 自留地,物理隔离)
+SUPP_RELS = (WORLD_REL, CHARS_REL,
+             f"{WORLD_DIR_REL}/{GROWTH_NAME}", f"{CHARS_DIR_REL}/{GROWTH_NAME}")
 
 
 def brain_form(root: Path | str, file_rel: str, dir_rel: str) -> str:
