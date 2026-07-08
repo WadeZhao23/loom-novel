@@ -116,13 +116,16 @@ def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, p
     n = len(re.sub(r"\s+", "", strip_title(body)))
     if target <= 0 or n <= int(target * 1.25):   # 螺丝③:1.5→1.25,与写手 ±20% 对齐,堵静默放行区
         return
-    progress(events.overlong(chapter_n, n, target))   # 独立事件,不只默默写留痕
-    path = paths.review_note_path(project_root, chapter_n)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(f"\n## 篇幅提醒(非阻断,供你定夺)\n"
-                f"- 本章 {n} 字,超出目标 {target} 字较多,可能注水——建议手删或重写\n")
-    progress(events.edit_note(chapter_n, path))
+    try:
+        progress(events.overlong(chapter_n, n, target))   # 独立事件,不只默默写留痕
+        path = paths.review_note_path(project_root, chapter_n)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"\n## 篇幅提醒(非阻断,供你定夺)\n"
+                    f"- 本章 {n} 字,超出目标 {target} 字较多,可能注水——建议手删或重写\n")
+        progress(events.edit_note(chapter_n, path))
+    except Exception:
+        pass
 
 
 _SCENE_BUDGET_RE = re.compile(r"约\s*(\d+)\s*字")
@@ -549,7 +552,7 @@ def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars:
                 "写满即收、宁短勿长;不为凑字加铺垫,也不因写顺了就超篇。结尾留钩。")
     if role in ("编辑", "润色师"):
         # 螺丝①:超标才把实测字数摆上桌给压缩授权装牙(LLM 自己数不准);达标不提,免对合格稿瞎压
-        if actual_chars and actual_chars > chapter_target:
+        if actual_chars and actual_chars > chapter_target * 1.2:
             over = round((actual_chars / chapter_target - 1) * 100)
             return (f"原稿实测 {actual_chars} 字,目标 {chapter_target} 字(超 {over}%)——"
                     "删冗余描写、重复信息与注水铺垫,压回目标量级,不动情节骨架;绝不扩写。")
@@ -854,5 +857,6 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         raise LoomBackendError(render("model_output_invalid", detail="细纲:模型这次返回空"),
                                code="model_output_invalid")
     atomic_write_text(_outline_path(project_root, chapter_n), outline.strip() + "\n")
+    _check_scene_budget(project_root, chapter_n, outline.strip(), config.chapter_chars, reused=False, progress=progress)
     progress(events.outline_done(chapter_n))
     return outline.strip()

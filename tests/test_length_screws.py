@@ -75,3 +75,38 @@ def test_grade_length_strict_tolerance_guards_20pct():
     bad = "字" * 1100      # +37.5%,超 ±25% → 不过
     assert grade_length(ok, target, tol=0.25).passed is True
     assert grade_length(bad, target, tol=0.25).passed is False
+
+
+def test_flag_overlong_swallows_progress_exception(project):
+    from loom.agents import _flag_overlong
+    def boom(ev):
+        raise RuntimeError("SSE broken pipe")
+    # 命中超长(1100/800>1.25x)但 progress 抛错 → 不许上抛(非阻断,与 spec 红线一致)
+    _flag_overlong(project, 1, "# 标题\n\n" + "字" * 1100, 800, boom)  # 不抛=通过
+
+
+def test_regen_outline_runs_scene_budget_check(project):
+    from loom.agents import regen_outline
+    from loom.config import load_config
+    class ScriptBackend:
+        def __init__(self, script): self.script = list(script); self.calls = []
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            out = self.script.pop(0); self.calls.append((system, user))
+            if on_chunk and out: on_chunk(out)
+            return out
+    cfg = load_config(project); cfg.chapter_chars = 800
+    seen = []
+    # 设定师锚点 + 大纲师细纲(整场没标「约X字」)→ 落盘后应触发 ④ 缺标注 warn
+    be = ScriptBackend(["锚点:主角醒来。", "分镜一:验伤。分镜二:遇人。"])
+    regen_outline(project, 1, be, cfg, progress=seen.append)
+    assert any(e["type"] == "warn" and "约X字" in e.get("message", "") for e in seen)
+
+
+def test_length_hint_compress_trigger_at_1p2x():
+    from loom.agents import _length_hint
+    # +12.5%(900/800,在 ±20% 达标带内)→ 不硬压,走 generic
+    h_ok = _length_hint("编辑", 800, 800, actual_chars=900)
+    assert "原稿实测" not in h_ok and "篇幅目标约 800 字" in h_ok
+    # +25%(1000/800,超 20%)→ 硬压,摆实测数
+    h_over = _length_hint("编辑", 800, 800, actual_chars=1000)
+    assert "原稿实测 1000 字" in h_over and "超 25%" in h_over and "绝不扩写" in h_over
