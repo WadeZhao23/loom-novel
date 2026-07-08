@@ -37,3 +37,23 @@ def test_overlong_event_contract():
     from loom import events
     ev = events.overlong(3, 1500, 800)
     assert ev == {"type": "overlong", "chapter": 3, "chars": 1500, "target": 800}
+
+
+def test_parse_scene_budgets():
+    from loom.agents import _parse_scene_budgets
+    assert _parse_scene_budgets("分镜一(约300字):验伤。分镜二(约 500 字):遇敌。") == [300, 500]
+    assert _parse_scene_budgets("分镜一:验伤。分镜二:遇敌。") == []   # 没标 → 空
+
+
+def test_check_scene_budget_flags_missing_and_drift(project):
+    from loom.agents import _check_scene_budget
+    a, b, c = [], [], []
+    # ④ 大纲师产出:一场都没标 → warn
+    _check_scene_budget(project, 1, "分镜一:验伤。分镜二:遇敌。", 2000, False, a.append)
+    assert any(e["type"] == "warn" for e in a)
+    # ④ 标了但总和(2600)与目标(2000)偏差 30% 内 → 不报
+    _check_scene_budget(project, 1, "一(约1200字)。二(约1400字)。", 2000, False, b.append)
+    assert not any(e["type"] == "warn" for e in b)
+    # ⑤ WYSIWYG 沿用:旧细纲总和(约6000)与当前目标(2000)差得多 → info 提示重新生成
+    _check_scene_budget(project, 1, "一(约3000字)。二(约3000字)。", 2000, True, c.append)
+    assert any(e["type"] == "info" and "重新生成" in e["message"] for e in c)

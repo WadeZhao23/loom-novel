@@ -125,6 +125,36 @@ def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, p
     progress(events.edit_note(chapter_n, path))
 
 
+_SCENE_BUDGET_RE = re.compile(r"约\s*(\d+)\s*字")
+
+
+def _parse_scene_budgets(outline: str) -> list[int]:
+    """抓细纲里各场「约X字」标注(螺丝④⑤共用)。没标返回空列表。"""
+    return [int(m) for m in _SCENE_BUDGET_RE.findall(outline)]
+
+
+def _check_scene_budget(project_root: Path, chapter_n: int, outline: str, chapter_target: int,
+                        reused: bool, progress: Progress) -> None:
+    """细纲字数确定性校验(非阻断,只 warn/info)。任何异常吞掉,绝不拖累出稿。
+    reused=True(WYSIWYG 沿用已有细纲)→⑤陈旧提醒;False(大纲师刚产出)→④缺标注/偏差。"""
+    try:
+        budgets = _parse_scene_budgets(outline)
+        total = sum(budgets)
+        if reused:
+            if total > 0 and chapter_target > 0 and abs(total - chapter_target) > chapter_target * 0.3:
+                progress(events.info(
+                    f"这份细纲按旧字数(约{total}字)拆的、当前目标 {chapter_target} 字,"
+                    "建议在「本章细纲」点『重新生成细纲』按新目标重拆。"))
+        else:
+            if not budgets:
+                progress(events.warn("细纲各场没标「约X字」篇幅预算,写手篇幅可能失控——可重新生成细纲。"))
+            elif chapter_target > 0 and abs(total - chapter_target) > chapter_target * 0.3:
+                progress(events.warn(
+                    f"细纲各场字数总和(约{total}字)与本章目标({chapter_target}字)差得多,写手篇幅可能失控。"))
+    except Exception:
+        pass
+
+
 def _flag_stale_foreshadow(project_root: Path, chapter_n: int, config: Config, progress: Progress) -> None:
     """编辑棒后顺手扫一遍卡章纲:埋了很久仍无推进/回收的伏笔 → 进审稿留痕提醒。
 
@@ -626,6 +656,7 @@ def run_pipeline(
             output = outline_path.read_text(encoding="utf-8").strip()
             progress(events.agent_chunk(role, output))
             progress(events.info(f"第 {chapter_n} 章沿用你的细纲(在「本章细纲」里改它 / 重新生成)"))
+            _check_scene_budget(project_root, chapter_n, output, config.chapter_chars, True, progress)
         else:
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                              target_chars=max_chars, chapter_target=config.chapter_chars,
@@ -637,6 +668,7 @@ def run_pipeline(
             output = backend.complete(agent.system_prompt, user_prompt, max_chars=max_chars, on_chunk=chunk_cb)
             if outline_path:  # 大纲师首次生成 → 落一份可看可改的细纲,之后就读这份
                 atomic_write_text(outline_path, output.strip() + "\n")
+                _check_scene_budget(project_root, chapter_n, output, config.chapter_chars, False, progress)
         if spec.edit_sentinel:
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:
