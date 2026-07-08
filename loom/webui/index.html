@@ -45,6 +45,7 @@
       <div class="welcome-actions">
         <button id="btn-new-book" class="primary"><span class="ico" data-ico="plus"></span> 新建一本书</button>
         <button id="btn-import-book"><span class="ico" data-ico="export"></span> 导入已有的书</button>
+        <button id="btn-import-folder"><span class="ico" data-ico="plus"></span> 导入资料夹</button>
         <button id="btn-sample" class="ghost"><span class="ico" data-ico="sample"></span> 看看样例</button>
       </div>
       <div id="welcome-error" class="error"></div>
@@ -303,6 +304,31 @@
         <button id="btn-open" class="primary">导入并打开</button>
       </div>
       <div id="import-error" class="error"></div>
+    </div>
+  </div>
+
+  <!-- 导入资料夹:把已有设定/大纲 md 机械接成一本新书 -->
+  <div id="folder-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>导入资料夹 · 接成一本新书</h3>
+      <p class="hint">选一个装着你已有设定/大纲/章纲 md 的文件夹,Loom 按文件名归位、原样接进来——不改你一个字。</p>
+      <div class="field-row">
+        <input id="folder-path" type="text" placeholder="/Users/你/我的小说设定" />
+        <button id="folder-pick" class="ghost hidden">浏览…</button>
+      </div>
+      <div class="row-end">
+        <button id="folder-cancel" class="ghost">取消</button>
+        <button id="folder-scan" class="primary">扫描</button>
+      </div>
+      <div id="folder-confirm" class="hidden">
+        <label class="field-label">书名</label>
+        <input id="folder-name" type="text" />
+        <div id="folder-routed" class="folder-routed"></div>
+        <div class="row-end">
+          <button id="folder-commit" class="primary">导入并打开</button>
+        </div>
+      </div>
+      <div id="folder-error" class="error"></div>
     </div>
   </div>
 

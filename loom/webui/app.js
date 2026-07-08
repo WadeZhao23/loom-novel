@@ -135,6 +135,17 @@ function bind() {
   // 开一本书:表单在弹层里(一屏一事);「浏览…」走桌面端原生文件夹对话框(浏览器兜底才手输)
   $("btn-new-book").onclick = () => { $("create-error").textContent = ""; _togglePickButtons(); $("create-overlay").classList.remove("hidden"); $("new-name").focus(); };
   $("btn-import-book").onclick = () => { $("import-error").textContent = ""; _togglePickButtons(); $("import-overlay").classList.remove("hidden"); };
+  $("btn-import-folder").onclick = () => {
+    ["folder-error", "folder-path", "folder-name"].forEach((id) => { if ($(id).value !== undefined) $(id).value = $(id).value; });
+    $("folder-confirm").classList.add("hidden");
+    $("folder-error").textContent = "";
+    $("folder-pick").classList.toggle("hidden", !_hasNativePicker());
+    $("folder-overlay").classList.remove("hidden");
+  };
+  $("folder-cancel").onclick = () => $("folder-overlay").classList.add("hidden");
+  $("folder-pick").onclick = async () => { const p = await window.pywebview.api.pick_folder(); if (p) $("folder-path").value = p; };
+  $("folder-scan").onclick = scanFolder;
+  $("folder-commit").onclick = commitFolder;
   $("create-cancel").onclick = () => $("create-overlay").classList.add("hidden");
   $("import-cancel").onclick = () => $("import-overlay").classList.add("hidden");
   $("new-parent-pick").onclick = () => pickFolderInto("new-parent");
@@ -323,6 +334,64 @@ async function importBook() {
     $("import-overlay").classList.add("hidden");
     enterProject(d);
   } catch (e) { $("import-error").textContent = e.message; }
+}
+let _importRouted = null;   // scan 结果:{世界观:[...],...}
+async function scanFolder() {
+  const folder = $("folder-path").value.trim();
+  if (!folder) { $("folder-error").textContent = "先选一个文件夹。"; return; }
+  $("folder-error").textContent = "";
+  try {
+    const d = await jreq("POST", "/api/project/import/scan", { folder });
+    _importRouted = d.routed;
+    $("folder-name").value = d.name_suggest || "";
+    renderRouted(d.routed, d.unknown || []);
+    $("folder-confirm").classList.remove("hidden");
+  } catch (e) { $("folder-error").textContent = e.message; }
+}
+const _BUCKETS = ["世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考"];
+function renderRouted(routed, unknown) {
+  const box = $("folder-routed"); box.innerHTML = "";
+  _BUCKETS.forEach((b) => {
+    const files = routed[b] || [];
+    if (!files.length) return;
+    const h = document.createElement("div"); h.className = "fr-bucket"; h.textContent = `${b}(${files.length})`;
+    box.appendChild(h);
+    files.forEach((f) => { const d = document.createElement("div"); d.className = "fr-file"; d.textContent = f; box.appendChild(d); });
+  });
+  if (unknown.length) {
+    const h = document.createElement("div"); h.className = "fr-bucket"; h.textContent = `没猜出来,你来指认(${unknown.length}):`;
+    box.appendChild(h);
+    unknown.forEach((f) => {
+      const row = document.createElement("div"); row.className = "fr-file fr-unknown"; row.textContent = f;
+      const sel = document.createElement("select"); sel.dataset.file = f;
+      ["跳过", ..._BUCKETS].forEach((opt) => { const o = document.createElement("option"); o.value = opt; o.textContent = opt; sel.appendChild(o); });
+      row.appendChild(sel); box.appendChild(row);
+    });
+  }
+}
+async function commitFolder() {
+  const folder = $("folder-path").value.trim();
+  const name = $("folder-name").value.trim();
+  if (!name) { $("folder-error").textContent = "先给这本书起个名字。"; return; }
+  const routing = {}; _BUCKETS.forEach((b) => { routing[b] = [...(_importRouted[b] || [])]; });
+  document.querySelectorAll("#folder-routed .fr-unknown select").forEach((sel) => {
+    if (sel.value !== "跳过") routing[sel.value].push(sel.dataset.file);
+  });
+  try {
+    const d = await jreq("POST", "/api/project/import/commit",
+      { folder, name, parent: $("new-parent") ? ($("new-parent").value.trim() || "~/Desktop") : "~/Desktop", routing });
+    $("folder-overlay").classList.add("hidden");
+    enterProject(d.state || d);
+    const s = d.summary || { placed: {}, notes: [] };
+    const placed = _BUCKETS.filter((b) => s.placed[b]).map((b) => `${b} ${s.placed[b]} 份`).join("、");
+    showGuide({
+      title: "导入完成",
+      bodyHtml: `<p class="guide-lead">已接进来:${placed || "(空)"}。</p>` +
+        (s.notes.length ? `<p class="hint">${s.notes.map((n) => "· " + n).join("<br>")}</p>` : "") +
+        `<p class="hint">你的设定原样进来了,直接就能织第一章。</p>`,
+      primary: { label: "知道了" },
+    });
+  } catch (e) { $("folder-error").textContent = e.message; }
 }
 async function openSample() {
   $("welcome-error").textContent = "";

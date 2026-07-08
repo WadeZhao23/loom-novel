@@ -739,6 +739,12 @@ input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-ino
 .settings-card #model-custom, .settings-card #base-url { margin-top: var(--space-2); }
 .settings-card .settings-status-row { margin-top: var(--space-2); min-height: 20px; }
 
+/* 导入资料夹:确认屏落位预览 */
+.folder-routed { margin: var(--space-3) 0; max-height: 320px; overflow-y: auto; }
+.folder-routed .fr-bucket { font-weight: 600; margin-top: var(--space-2); }
+.folder-routed .fr-file { color: var(--text-soft); font-size: var(--fs-sm); padding: 2px 0; }
+.folder-routed .fr-unknown select { margin-left: var(--space-2); }
+
 /* doctor 面板 */
 .doctor-list { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 .doctor-item { display: flex; gap: var(--space-3); padding: var(--space-3);
