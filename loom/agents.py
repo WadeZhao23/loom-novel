@@ -109,13 +109,14 @@ def _save_gate_remaining(project_root: Path, chapter_n: int, label: str,
 
 
 def _flag_overlong(project_root: Path, chapter_n: int, body: str, target: int, progress: Progress) -> None:
-    """终稿超长留痕:正文字数(去标题去空白,与 evals grade_length 同口径)超目标 1.5 倍 → 提醒可能注水。
+    """终稿超长留痕:正文字数(去标题去空白,与 evals grade_length 同口径)超目标 1.25 倍 → 提醒可能注水。
 
     字数是软指令(_length_hint),模型偶尔越线交给作者定夺——纯提示、绝不阻断出稿(ADR-0006)。
     """
     n = len(re.sub(r"\s+", "", strip_title(body)))
-    if target <= 0 or n <= int(target * 1.5):
+    if target <= 0 or n <= int(target * 1.25):   # 螺丝③:1.5→1.25,与写手 ±20% 对齐,堵静默放行区
         return
+    progress(events.overlong(chapter_n, n, target))   # 独立事件,不只默默写留痕
     path = paths.review_note_path(project_root, chapter_n)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:

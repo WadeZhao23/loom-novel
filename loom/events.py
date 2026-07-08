@@ -67,6 +67,12 @@ def edit_note(chapter: int, path) -> dict:
 
 
 @_event
+def overlong(chapter: int, chars: int, target: int) -> dict:
+    """终稿超长(超目标 1.25x):独立提醒事件,前端可专门标「可能注水」。非阻断。"""
+    return {"type": "overlong", "chapter": chapter, "chars": chars, "target": target}
+
+
+@_event
 def debug_report(chapter: int, issues: list, path) -> dict:
     """除虫报告(非阻断附赠):issues 为 BugItem.as_dict 列表,空列表=未发现矛盾。"""
     return {"type": "debug_report", "chapter": chapter, "issues": issues, "path": str(path)}

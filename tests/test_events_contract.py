@@ -32,6 +32,7 @@ CONTRACT: dict[str, tuple[dict, set[str]]] = {
     "agent_done": (dict(role="写手", produces="本章初稿"), {"type", "role", "produces"}),
     "agent_skip": (dict(role="写手", reason="已完成且上游未变"), {"type", "role", "reason"}),
     "edit_note": (dict(chapter=3, path=Path("/tmp/留痕.md")), {"type", "chapter", "path"}),
+    "overlong": (dict(chapter=3, chars=1100, target=800), {"type", "chapter", "chars", "target"}),
     "debug_report": (dict(chapter=3, issues=[_ISSUE], path=Path("/tmp/留痕.md")),
                       {"type", "chapter", "issues", "path"}),
     "sensitive": (dict(chapter=3, count=2, hits=[{"word": "示例", "count": 2}]),
@@ -75,6 +76,7 @@ WEBUI_EXEMPT: dict[str, str] = {
     "enrich_skip": "同 enrich_done:跳过与否 webui 不关心",
     "draft_done": "brain_draft 端点以 JSON 返回 written/skipped,不走事件流",
     "outline_done": "webui 有自己的按钮态(outline_regen 端点 JSON 返回),有意不消费(见 events.py 模块头)",
+    "overlong": "0.3.7 新增,前端提示待接",
 }
 
 
