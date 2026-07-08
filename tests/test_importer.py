@@ -112,3 +112,20 @@ def test_import_rolls_back_on_write_failure(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         importer.import_folder(src, "回滚书", routing, tmp_path / "lib")
     assert not (tmp_path / "lib" / "回滚书").exists()   # 半成品已清,不留orphan
+
+
+def test_import_summary_flags_degradations(project, tmp_path):
+    from loom import importer
+    src = tmp_path / "s"; src.mkdir()
+    # 世界观文件名不含硬设定关键词 → _hardfacts_for 零命中;章纲段落式;无正文
+    (src / "背景故事.md").write_text("# 背景\n\n一个架空王朝的故事。", encoding="utf-8")
+    (src / "剧情大纲.md").write_text("主角复仇的三幕故事。", encoding="utf-8")
+    routing = {"世界观": ["背景故事.md"], "人物": [], "卡章纲": ["剧情大纲.md"],
+               "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "降级书", routing, tmp_path / "lib")
+    rep = importer.import_summary(root, routing)
+    assert rep["placed"]["世界观"] == 1 and rep["placed"]["卡章纲"] == 1
+    joined = " ".join(rep["notes"])
+    assert "硬设定" in joined       # 世界观零命中 → 提示专名可能漂
+    assert "时间轴" in joined or "自动记忆" in joined   # 段落式章纲 → 自动记忆暂不挂
+    assert "中性文风" in joined or "写作指纹" in joined  # 无正文 → 中性文风

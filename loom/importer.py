@@ -45,6 +45,7 @@ from . import paths
 from .fsutil import atomic_write_text
 
 _FN_BAD = re.compile(r'[\\/:*?"<>|]')   # 文件名非法字符净化(同 draft._FN_BAD 口径)
+_CH_LINE = re.compile(r"^-\s*第\S{0,6}章[:：]", re.M)
 
 # 单文件桶:桶名 → 目标 rel(多份拼接进这一个文件)
 _SINGLE = {"卡章纲": paths.CARD_REL, "立项卡": paths.PROJECT_CARD_REL,
@@ -133,3 +134,38 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
         shutil.rmtree(root, ignore_errors=True)
         raise
     return root
+
+
+def import_summary(root: Path, routing: dict[str, list[str]]) -> dict:
+    """落盘后降级小结(只读,不调 LLM):各桶份数 + 降级提示。指路二期能力手动修。"""
+    from .agents import _hardfacts_for
+    from .parse import is_substantive
+    root = Path(root)
+    placed = {b: len(routing.get(b, [])) for b in BUCKETS}
+    notes: list[str] = []
+
+    # 世界观有内容却硬设定零命中 → 境界专名会漂
+    # 只检查世界观目录的硬设定关键词匹配,不包括人物约束
+    _HARDFACT_KW = ("力量", "体系", "境界", "等级", "修为", "实力", "修炼", "金手指",
+                    "地理", "地名", "势力", "国家", "派系", "种族", "血脉", "资源", "时间")
+    world_has_facts = False
+    if placed["世界观"]:
+        world_dir = root / paths.WORLD_DIR_REL
+        if world_dir.is_dir():
+            for f in world_dir.glob("*.md"):
+                if any(kw in f.stem for kw in _HARDFACT_KW):
+                    world_has_facts = True
+                    break
+        if not world_has_facts:
+            notes.append("世界观里没识别到硬设定小节(如「力量体系」「地理势力」),境界/专名这次没有逐字保护、"
+                         "可能写漂——去左栏世界观里选中那段,用「AI 改写」把它单列成一节即可。")
+
+    # 卡章纲有内容却不是「- 第N章:」一行格式 → 自动记忆不挂
+    card_p = root / paths.CARD_REL
+    if placed["卡章纲"] and card_p.is_file() and not _CH_LINE.search(card_p.read_text(encoding="utf-8")):
+        notes.append("你的章纲是段落式,大纲师照读没问题、写正文不受影响;但「时间轴/伏笔账本」这类自动记忆"
+                     "按「- 第N章:」一行格式挂,暂不显示——不影响写作。")
+    # 无正文 → 中性文风
+    if not any((root / "正文").glob("第*章.md")):
+        notes.append("你还没有正文,写作先用中性文风;写几章、手改后点 learn,会越来越像你(也可用 seed 从范文起手)。")
+    return {"placed": placed, "notes": notes}
