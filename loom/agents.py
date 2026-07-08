@@ -480,7 +480,7 @@ def _knowledge_prompt(project_root: Path, chapter_n: int, role: str) -> tuple[Ag
     for rel, text in items:
         if rel == paths.CARD_REL:
             text = budget.fold_recaps(text, chapter_n)
-        elif rel in (paths.WORLD_REL, paths.CHARS_REL):
+        elif rel in paths.SUPP_RELS:   # 老书单文件 + 目录形态的 成长档案.md,一份清单
             text = budget.fold_supplements(text, chapter_n)
         blocks.append(f"【{rel}】\n{text.strip()}")
     return a, "\n\n".join(blocks)

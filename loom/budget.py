@@ -22,7 +22,9 @@ LEARN_CEIL = 4096   # 预算封顶:逼近它说明指纹该合并同义项了(wa
 
 _CH_LINE = re.compile(r"^- 第(\d+)章[:：]")           # 卡章纲顶格章行(人写)
 _RECAP = "[AI回顾]"
-_SUPP_HEAD = re.compile(r"^## \[AI补充·第(\d+)章\]\s*$")  # 世界观/人物卡的追加块头
+# 世界观/人物卡的追加块头。enrich 写的是 ### 头(_append_supplement),层级宽容到 H2-H6
+# 与 enrich._supp_span 同口径(手改/旧手写块也认);占位行保留原层级。
+_SUPP_HEAD = re.compile(r"^\s{0,3}(#{2,6})\s*\[AI补充·第(\d+)章\]\s*$")
 
 
 def fold_recaps(card_text: str, current_chapter: int, window: int = WINDOW) -> str:
@@ -66,11 +68,11 @@ def fold_supplements(text: str, current_chapter: int, window: int = WINDOW) -> s
     for line in text.splitlines():
         m = _SUPP_HEAD.match(line)
         if m:
-            skipping = int(m.group(1)) < cutoff
+            skipping = int(m.group(2)) < cutoff
             if skipping:
-                out.append(f"## [AI补充·第{m.group(1)}章](已折叠,详见原文)")
+                out.append(f"{m.group(1)} [AI补充·第{m.group(2)}章](已折叠,详见原文)")
                 continue
-        elif line.startswith("## "):
+        elif line.lstrip().startswith("#"):   # 任意层级标题即出块(与 enrich._supp_span 同口径)
             skipping = False
         if not skipping:
             out.append(line)

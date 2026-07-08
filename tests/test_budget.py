@@ -34,11 +34,33 @@ def test_fold_recaps_window_and_human_lines():
 
 
 def test_fold_supplements_keeps_human_body():
-    text = ("# 世界观\n\n## 力量体系\n- 凡→化神\n\n"
-            "## [AI补充·第1章]\n远章补充SUPP1\n\n## [AI补充·第29章]\n近章补充SUPP29\n")
+    # 块必须用 enrich 真实写盘函数造(### 头 + AI补充区头),防折叠正则与写侧格式漂移
+    from loom.enrich import _append_supplement
+    text = "# 世界观\n\n## 力量体系\n- 凡→化神\n"
+    text = _append_supplement(text, 1, "- 远章补充SUPP1")
+    text = _append_supplement(text, 29, "- 近章补充SUPP29")
     folded = fold_supplements(text, 31)
     assert "SUPP1" not in folded and "(已折叠" in folded
     assert "SUPP29" in folded and "凡→化神" in folded
+    assert fold_supplements(text, 5) == text     # 没超窗口 → 原样
+
+
+def test_fold_supplements_tolerates_hand_written_h2():
+    text = "# 世界观\n\n## [AI补充·第1章]\n远章补充SUPP1\n\n## [AI补充·第29章]\n近章补充SUPP29\n"
+    folded = fold_supplements(text, 31)
+    assert "SUPP1" not in folded and "SUPP29" in folded
+
+
+def test_fold_supplements_dir_form_growth_file(project):
+    # 目录形态:AI 补充住 世界观/成长档案.md(rel 不是 WORLD_REL),进 prompt 也必须折叠
+    from loom.agents import _knowledge_prompt
+    from loom.enrich import _append_supplement
+    text = _append_supplement("", 1, "- 远章补充GROWSUPP1")
+    text = _append_supplement(text, 29, "- 近章补充GROWSUPP29")
+    (project / paths.WORLD_DIR_REL / paths.GROWTH_NAME).write_text(text, encoding="utf-8")
+    _, knowledge = _knowledge_prompt(project, 31, "设定师")
+    assert "GROWSUPP29" in knowledge, "近窗口补充全文在场"
+    assert "GROWSUPP1" not in knowledge, "远章补充必须折叠"
 
 
 def test_drop_superseded_keeps_anchors_and_latest_draft():
