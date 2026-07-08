@@ -57,3 +57,11 @@ def test_check_scene_budget_flags_missing_and_drift(project):
     # ⑤ WYSIWYG 沿用:旧细纲总和(约6000)与当前目标(2000)差得多 → info 提示重新生成
     _check_scene_budget(project, 1, "一(约3000字)。二(约3000字)。", 2000, True, c.append)
     assert any(e["type"] == "info" and "重新生成" in e["message"] for e in c)
+
+
+def test_templates_drop_hardcoded_scene_count():
+    from loom.scaffold import TEMPLATES_DIR
+    outliner = (TEMPLATES_DIR / "agents/大纲师.md").read_text(encoding="utf-8")
+    engine = (TEMPLATES_DIR / "skills/故事引擎.md").read_text(encoding="utf-8")
+    assert "3-6 个场景" not in outliner and "3-6 个场景" not in engine
+    assert "字数预算为准" in outliner   # 改成以任务预算为准
