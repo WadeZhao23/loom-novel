@@ -502,7 +502,7 @@ def _scene_budget(chapter_target: int) -> str:
     return "拆 4-6 场"
 
 
-def _length_hint(role: str, step_budget: int, chapter_target: int) -> str:
+def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars: int = 0) -> str:
     """任务行里的字数指令(按角色措辞)。篇幅只靠说,绝不靠调小 max_tokens 截断——
     那会拦腰斩章 + 复发思考型空响应(见 backends._budget_tokens,2.0.1 踩过)。
     三管齐下:大纲师按章目标定场次并给每场标字数(结构闸)、写手照场预算写满即收、
@@ -517,6 +517,11 @@ def _length_hint(role: str, step_budget: int, chapter_target: int) -> str:
         return (f"正文约 {chapter_target} 字(±20%),这是发布的硬性篇幅要求:细纲各场标了字数就照它写,"
                 "写满即收、宁短勿长;不为凑字加铺垫,也不因写顺了就超篇。结尾留钩。")
     if role in ("编辑", "润色师"):
+        # 螺丝①:超标才把实测字数摆上桌给压缩授权装牙(LLM 自己数不准);达标不提,免对合格稿瞎压
+        if actual_chars and actual_chars > chapter_target:
+            over = round((actual_chars / chapter_target - 1) * 100)
+            return (f"原稿实测 {actual_chars} 字,目标 {chapter_target} 字(超 {over}%)——"
+                    "删冗余描写、重复信息与注水铺垫,压回目标量级,不动情节骨架;绝不扩写。")
         return (f"篇幅目标约 {chapter_target} 字:原稿明显超目标就顺手压回来——"
                 "删冗余描写、重复信息与注水铺垫,不动情节骨架;绝不扩写。")
     return f"≤{step_budget} 字。"  # 设定师
@@ -545,8 +550,11 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
         ws = budget.drop_superseded(workspace)   # 被改稿取代的旧全文稿不下传;锚点/细纲逐字保留
         ctx = "\n\n".join(f"### {label}\n{text}" for label, text in ws)
         parts.append("## 本章工作区(上游工序已产出,基于它继续)\n" + ctx)
+    actual = 0
+    if role in ("编辑", "润色师") and workspace:
+        actual = len(re.sub(r"\s+", "", strip_title(workspace[-1][1])))   # 上游稿(初稿/改稿)实测字数,与 evals/_flag_overlong 同口径
     parts.append(f"## 你的任务\n产出【{agent.produces}】。"
-                 f"{_length_hint(role, target_chars, chapter_target or target_chars)}"
+                 f"{_length_hint(role, target_chars, chapter_target or target_chars, actual)}"
                  "只输出这一项,不要解释你在做什么。")
     return "\n\n".join(parts)
 
