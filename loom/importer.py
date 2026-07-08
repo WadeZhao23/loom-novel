@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 
 # 桶=外置大脑里作者可粘贴内容的文件(写作指纹刻意不在:它是 learn 蒸出的结构化文件,不接受原文)
 BUCKETS = ("世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考")
@@ -73,47 +74,62 @@ def _uniq(dir_path: Path, name: str) -> Path:
     return p
 
 
+def _read_tolerant(p: Path) -> str:
+    """拼接桶用:UTF-8→GBK→replace 兜底,永不崩;剥前导 BOM 免落进拼接中段。"""
+    raw = p.read_bytes()
+    for enc in ("utf-8", "gbk"):
+        try:
+            return raw.decode(enc).lstrip("﻿")
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace").lstrip("﻿")
+
+
 def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent: Path) -> Path:
     """机械落盘:scaffold 建骨架 → 清收了文件的桶的占位 → 原样落他的 md。不改一个字、不调 LLM。"""
     from .scaffold import init as scaffold_init
     folder = Path(folder)
     root = scaffold_init(name, Path(parent))
-    # 源文件按名索引(rglob 兜住他自己的子目录结构;同名以第一份为准,后续靠 _uniq 落不同名)
-    by_name: dict[str, list[Path]] = {}
-    for p in folder.rglob("*.md"):
-        by_name.setdefault(p.name, []).append(p)
+    try:
+        # 源文件按名索引(rglob 兜住他自己的子目录结构;同名以第一份为准,后续靠 _uniq 落不同名)
+        by_name: dict[str, list[Path]] = {}
+        for p in folder.rglob("*.md"):
+            by_name.setdefault(p.name, []).append(p)
 
-    def _take(fname: str, used: dict[str, int]) -> Path | None:
-        pool = by_name.get(fname, [])
-        i = used.get(fname, 0)
-        used[fname] = i + 1
-        return pool[i] if i < len(pool) else None
+        def _take(fname: str, used: dict[str, int]) -> Path | None:
+            pool = by_name.get(fname, [])
+            i = used.get(fname, 0)
+            used[fname] = i + 1
+            return pool[i] if i < len(pool) else None
 
-    used: dict[str, int] = {}
-    # 目录桶
-    for bucket, dir_rel in _DIR.items():
-        files = routing.get(bucket, [])
-        if not files:
-            continue
-        d = root / dir_rel
-        d.mkdir(parents=True, exist_ok=True)
-        _clear_placeholders(d)
-        for fname in files:
-            src = _take(fname, used)
-            if src is None:
+        used: dict[str, int] = {}
+        # 目录桶:字节直拷——保真 CRLF/BOM/任意编码,一字节不改,也绕开解码崩溃
+        for bucket, dir_rel in _DIR.items():
+            files = routing.get(bucket, [])
+            if not files:
                 continue
-            safe = _FN_BAD.sub("·", fname) or "未命名.md"
-            atomic_write_text(_uniq(d, safe), src.read_text(encoding="utf-8"))
-    # 单文件桶:多份拼接 + 溯源头
-    for bucket, rel in _SINGLE.items():
-        files = routing.get(bucket, [])
-        if not files:
-            continue
-        parts = []
-        for fname in files:
-            src = _take(fname, used)
-            if src is not None:
-                parts.append(f"## 来自:{fname}\n\n{src.read_text(encoding='utf-8').strip()}")
-        if parts:
-            atomic_write_text(root / rel, "\n\n".join(parts) + "\n")
+            d = root / dir_rel
+            d.mkdir(parents=True, exist_ok=True)
+            _clear_placeholders(d)
+            for fname in files:
+                src = _take(fname, used)
+                if src is None:
+                    continue
+                safe = _FN_BAD.sub("·", fname) or "未命名.md"
+                shutil.copyfile(src, _uniq(d, safe))
+        # 单文件桶:多份拼接 + 溯源头(拼接天然要 decode,容错读兜底,不崩、不把 BOM 落进中段)
+        for bucket, rel in _SINGLE.items():
+            files = routing.get(bucket, [])
+            if not files:
+                continue
+            parts = []
+            for fname in files:
+                src = _take(fname, used)
+                if src is not None:
+                    parts.append(f"## 来自:{fname}\n\n{_read_tolerant(src).strip()}")
+            if parts:
+                atomic_write_text(root / rel, "\n\n".join(parts) + "\n")
+    except Exception:
+        shutil.rmtree(root, ignore_errors=True)
+        raise
     return root

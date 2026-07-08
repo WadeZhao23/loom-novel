@@ -73,3 +73,42 @@ def test_import_folder_sanitizes_and_dedups_names(project, tmp_path):
     root = importer.import_folder(src, "去重书", routing, tmp_path / "lib")
     world = list((root / WORLD_DIR_REL).glob("设定*.md"))
     assert len(world) == 2   # 两份同名都落盘,第二份自动改名不覆盖
+
+
+def test_import_dir_bucket_is_byte_verbatim(tmp_path):
+    from loom import importer
+    from loom.paths import WORLD_DIR_REL
+    src = tmp_path / "s"; src.mkdir()
+    raw = "# 设定\r\n\r\n凡境→筑基。\r\n".encode("utf-8")   # CRLF
+    (src / "力量.md").write_bytes(b"\xef\xbb\xbf" + raw)      # + BOM
+    routing = {"世界观": ["力量.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "保真书", routing, tmp_path / "lib")
+    assert (root / WORLD_DIR_REL / "力量.md").read_bytes() == b"\xef\xbb\xbf" + raw   # 一字节不改
+
+
+def test_import_single_bucket_tolerates_gbk_and_strips_bom(tmp_path):
+    from loom import importer
+    from loom.paths import CARD_REL
+    src = tmp_path / "s"; src.mkdir()
+    (src / "大纲.md").write_bytes("第一卷:复仇。".encode("gbk"))   # 非 UTF-8,旧版不崩
+    routing = {"卡章纲": ["大纲.md"], "世界观": [], "人物": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "GBK书", routing, tmp_path / "lib")
+    assert "复仇" in (root / CARD_REL).read_text(encoding="utf-8")
+
+
+def test_import_rolls_back_on_write_failure(tmp_path, monkeypatch):
+    from loom import importer
+    src = tmp_path / "s"; (src / "a").mkdir(parents=True)
+    (src / "力量.md").write_text("设定", encoding="utf-8")
+    calls = {"n": 0}
+    real = importer.atomic_write_text
+    def boom(path, text):
+        calls["n"] += 1
+        if calls["n"] >= 1: raise OSError("disk full")
+        return real(path, text)
+    monkeypatch.setattr(importer, "atomic_write_text", boom)
+    routing = {"世界观": [], "人物": [], "卡章纲": ["力量.md"], "立项卡": [], "违禁词": [], "文风参考": []}
+    import pytest
+    with pytest.raises(OSError):
+        importer.import_folder(src, "回滚书", routing, tmp_path / "lib")
+    assert not (tmp_path / "lib" / "回滚书").exists()   # 半成品已清,不留orphan
