@@ -15,7 +15,7 @@ BUCKETS = ("世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风
 
 # 文件名关键词 → 桶。一份文件名撞到 >1 个桶,或一个都不撞 → unknown,交作者指认。
 _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("卡章纲", ("大纲", "章纲", "剧情", "分卷", "卷纲")),
+    ("卡章纲", ("大纲", "章纲", "剧情", "分卷", "卷纲", "纲")),
     ("人物", ("人物", "角色", "主角", "配角", "反派", "小传", "人设")),
     ("世界观", ("设定", "世界", "力量", "体系", "境界", "地理", "势力", "金手指")),
     ("立项卡", ("立项", "定位", "平台")),
@@ -86,6 +86,17 @@ def _read_tolerant(p: Path) -> str:
     return raw.decode("utf-8", errors="replace").lstrip("﻿")
 
 
+def _write_dir_file(src: Path, dst: Path) -> None:
+    """目录桶落盘:UTF-8 源字节直拷(CRLF/BOM 原样保真);非 UTF-8(GBK 旧稿)转码成 UTF-8。
+    ——Loom 全系统读盘按 UTF-8,GBK 字节直拷会让 studio/brain_ready 等严解码崩(发 GBK 稿即坏书)。"""
+    raw = src.read_bytes()
+    try:
+        raw.decode("utf-8")            # UTF-8(含 BOM)可解 → 字节直拷,完全保真(verbatim 测试保绿)
+        shutil.copyfile(src, dst)
+    except UnicodeDecodeError:
+        atomic_write_text(dst, _read_tolerant(src))   # GBK 等 → 转码 UTF-8(字符不变、字节变、可被 Loom 读)
+
+
 def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent: Path) -> Path:
     """机械落盘:scaffold 建骨架 → 清收了文件的桶的占位 → 原样落他的 md。不改一个字、不调 LLM。"""
     from .scaffold import init as scaffold_init
@@ -104,7 +115,8 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
             return pool[i] if i < len(pool) else None
 
         used: dict[str, int] = {}
-        # 目录桶:字节直拷——保真 CRLF/BOM/任意编码,一字节不改,也绕开解码崩溃
+        # 目录桶:UTF-8 源字节直拷(CRLF/BOM 原样保真);非 UTF-8(GBK)转码 UTF-8——
+        # 全系统读盘按 UTF-8 严解码,字节直拷 GBK 会让下游 studio/brain_ready 崩(见 _write_dir_file)
         for bucket, dir_rel in _DIR.items():
             files = routing.get(bucket, [])
             if not files:
@@ -117,7 +129,7 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
                 if src is None:
                     continue
                 safe = _FN_BAD.sub("·", fname) or "未命名.md"
-                shutil.copyfile(src, _uniq(d, safe))
+                _write_dir_file(src, _uniq(d, safe))
         # 单文件桶:多份拼接 + 溯源头(拼接天然要 decode,容错读兜底,不崩、不把 BOM 落进中段)
         for bucket, rel in _SINGLE.items():
             files = routing.get(bucket, [])
@@ -126,8 +138,11 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
             parts = []
             for fname in files:
                 src = _take(fname, used)
-                if src is not None:
-                    parts.append(f"## 来自:{fname}\n\n{_read_tolerant(src).strip()}")
+                if src is None:
+                    continue
+                content = _read_tolerant(src)
+                if content.strip():                          # 纯空白源跳过,免产裸「## 来自」头
+                    parts.append(f"## 来自:{fname}\n\n{content}")   # content 不 strip,保他缩进/空行
             if parts:
                 atomic_write_text(root / rel, "\n\n".join(parts) + "\n")
     except Exception:

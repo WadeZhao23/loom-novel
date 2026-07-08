@@ -145,6 +145,7 @@ function bind() {
   };
   $("folder-cancel").onclick = () => $("folder-overlay").classList.add("hidden");
   $("folder-pick").onclick = async () => { const p = await window.pywebview.api.pick_folder(); if (p) $("folder-path").value = p; };
+  $("folder-path").addEventListener("input", () => { _importRouted = null; $("folder-confirm").classList.add("hidden"); });
   $("folder-scan").onclick = scanFolder;
   $("folder-commit").onclick = commitFolder;
   $("create-cancel").onclick = () => $("create-overlay").classList.add("hidden");

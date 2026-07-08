@@ -176,10 +176,11 @@ def test_import_endpoints(tmp_path):
     d = r.json()
     assert d["name_suggest"] == "陈的资料"
     assert "力量设定.md" in d["routed"]["世界观"] and "主角.md" in d["routed"]["人物"]
-    # 「总纲」不撞 _RULES 任何关键词(只收「大纲/章纲/分卷/卷纲」)→ 与「随手记」一起落 unknown,交作者指认
-    assert "总纲.md" in d["unknown"] and "随手记.md" in d["unknown"]
+    # M3:「纲」收进卡章纲关键词 → 「总纲」自动落卡章纲;「随手记」仍零命中,落 unknown 交作者指认
+    assert "总纲.md" in d["routed"]["卡章纲"]
+    assert "随手记.md" in d["unknown"]
 
-    # 作者把 unknown「随手记」指认进世界观后 commit(「总纲」留在 unknown、不勾选 → 本次不落盘)
+    # 作者把 unknown「随手记」指认进世界观后 commit
     routing = {**{b: d["routed"].get(b, []) for b in
                   ["世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考"]}}
     routing["世界观"] = routing["世界观"] + ["随手记.md"]
@@ -195,3 +196,35 @@ def test_import_endpoints(tmp_path):
 
     # 不存在的 folder → 400
     assert c.post("/api/project/import/scan", json={"folder": str(tmp_path / "没这个")}).status_code == 400
+
+
+def test_import_dir_bucket_transcodes_gbk_and_book_loads(tmp_path):
+    from loom import importer
+    from loom.paths import WORLD_DIR_REL
+    from loom.studio import names
+    src = tmp_path / "s"; src.mkdir()
+    (src / "力量体系.md").write_bytes("# 力量体系\n\n凡境→筑基。".encode("gbk"))   # GBK 硬设定文件
+    routing = {"世界观": ["力量体系.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "GBK硬设定书", routing, tmp_path / "lib")
+    # 落盘成 UTF-8、可读、字符不变
+    assert (root / WORLD_DIR_REL / "力量体系.md").read_text(encoding="utf-8").count("凡境") == 1
+    # 下游严 utf-8 读侧不崩(旗舰场景:studio.names + import_summary)
+    assert names(root)["sections"]                        # 力量体系命中硬设定小节,不崩
+    assert importer.import_summary(root, routing)["placed"]["世界观"] == 1   # 不 UnicodeDecodeError
+
+
+def test_import_single_bucket_preserves_indent_and_blanks(tmp_path):
+    from loom import importer
+    from loom.paths import CARD_REL
+    src = tmp_path / "s"; src.mkdir()
+    (src / "总纲.md").write_text("　第一卷:复仇。\n\n　第二卷:夺宝。\n", encoding="utf-8")  # 全角缩进+空行
+    routing = {"世界观": [], "人物": [], "卡章纲": ["总纲.md"], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "缩进书", routing, tmp_path / "lib")
+    card = (root / CARD_REL).read_text(encoding="utf-8")
+    assert "　第一卷" in card and "　第二卷" in card     # 全角缩进原样,不被 strip 吃掉
+
+
+def test_route_outline_synonyms_to_card(tmp_path):
+    from loom.importer import route_files
+    r = route_files(["总纲.md", "细纲.md", "纲要.md", "提纲.md"])
+    assert set(r["卡章纲"]) == {"总纲.md", "细纲.md", "纲要.md", "提纲.md"} and r["unknown"] == []
