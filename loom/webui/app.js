@@ -136,8 +136,9 @@ function bind() {
   $("btn-new-book").onclick = () => { $("create-error").textContent = ""; _togglePickButtons(); $("create-overlay").classList.remove("hidden"); $("new-name").focus(); };
   $("btn-import-book").onclick = () => { $("import-error").textContent = ""; _togglePickButtons(); $("import-overlay").classList.remove("hidden"); };
   $("btn-import-folder").onclick = () => {
-    ["folder-error", "folder-path", "folder-name"].forEach((id) => { if ($(id).value !== undefined) $(id).value = $(id).value; });
     $("folder-confirm").classList.add("hidden");
+    _importRouted = null;
+    $("folder-name").value = "";
     $("folder-error").textContent = "";
     $("folder-pick").classList.toggle("hidden", !_hasNativePicker());
     $("folder-overlay").classList.remove("hidden");
@@ -340,6 +341,8 @@ async function scanFolder() {
   const folder = $("folder-path").value.trim();
   if (!folder) { $("folder-error").textContent = "先选一个文件夹。"; return; }
   $("folder-error").textContent = "";
+  $("folder-confirm").classList.add("hidden");
+  _importRouted = null;
   try {
     const d = await jreq("POST", "/api/project/import/scan", { folder });
     _importRouted = d.routed;
@@ -370,6 +373,7 @@ function renderRouted(routed, unknown) {
   }
 }
 async function commitFolder() {
+  if (!_importRouted) return;
   const folder = $("folder-path").value.trim();
   const name = $("folder-name").value.trim();
   if (!name) { $("folder-error").textContent = "先给这本书起个名字。"; return; }
