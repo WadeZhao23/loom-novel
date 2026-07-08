@@ -65,3 +65,13 @@ def test_templates_drop_hardcoded_scene_count():
     engine = (TEMPLATES_DIR / "skills/故事引擎.md").read_text(encoding="utf-8")
     assert "3-6 个场景" not in outliner and "3-6 个场景" not in engine
     assert "字数预算为准" in outliner   # 改成以任务预算为准
+
+
+def test_grade_length_strict_tolerance_guards_20pct():
+    """螺丝⑦:grade_length 严口径(tol=0.25)回归护栏——±20% 字数承诺有确定性证明。"""
+    from evals.graders import grade_length
+    target = 800
+    ok = "字" * 900        # +12.5%,在 ±25% 内 → 过
+    bad = "字" * 1100      # +37.5%,超 ±25% → 不过
+    assert grade_length(ok, target, tol=0.25).passed is True
+    assert grade_length(bad, target, tol=0.25).passed is False
