@@ -158,3 +158,40 @@ def test_summary_world_spoiler_section_still_warns(tmp_path):
     routing = {"世界观": ["势力真相.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
     root = importer.import_folder(src, "真相书", routing, tmp_path / "l3")
     assert any("硬设定" in n for n in importer.import_summary(root, routing)["notes"])
+
+
+def test_import_endpoints(tmp_path):
+    from fastapi.testclient import TestClient
+    from loom.server import app
+    src = tmp_path / "陈的资料"
+    (src / "人物").mkdir(parents=True)
+    (src / "力量设定.md").write_text("# 力量\n\n九阶。", encoding="utf-8")
+    (src / "人物" / "主角.md").write_text("# 主角\n\n- 底线:护道。", encoding="utf-8")
+    (src / "总纲.md").write_text("三卷复仇。", encoding="utf-8")
+    (src / "随手记.md").write_text("零碎想法。", encoding="utf-8")
+    c = TestClient(app, base_url="http://127.0.0.1")
+
+    r = c.post("/api/project/import/scan", json={"folder": str(src)})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["name_suggest"] == "陈的资料"
+    assert "力量设定.md" in d["routed"]["世界观"] and "主角.md" in d["routed"]["人物"]
+    # 「总纲」不撞 _RULES 任何关键词(只收「大纲/章纲/分卷/卷纲」)→ 与「随手记」一起落 unknown,交作者指认
+    assert "总纲.md" in d["unknown"] and "随手记.md" in d["unknown"]
+
+    # 作者把 unknown「随手记」指认进世界观后 commit(「总纲」留在 unknown、不勾选 → 本次不落盘)
+    routing = {**{b: d["routed"].get(b, []) for b in
+                  ["世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考"]}}
+    routing["世界观"] = routing["世界观"] + ["随手记.md"]
+    r2 = c.post("/api/project/import/commit",
+                json={"folder": str(src), "name": "陈的书", "parent": str(tmp_path / "书库"),
+                      "routing": routing})
+    assert r2.status_code == 200
+    d2 = r2.json()
+    # 返回体顶层就是 project_state(同 create_project 形状对齐)+ summary 键,不套 state/ok 包装
+    assert d2["title"] == "陈的书"
+    assert d2["summary"]["placed"]["世界观"] == 2
+    assert (tmp_path / "书库" / "陈的书" / "外置大脑/人物/主角.md").exists()
+
+    # 不存在的 folder → 400
+    assert c.post("/api/project/import/scan", json={"folder": str(tmp_path / "没这个")}).status_code == 400

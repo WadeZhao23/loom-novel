@@ -150,6 +150,53 @@ def sample_open(b: ParentBody):
     return _shelve(root, _state(root))
 
 
+class ImportScanBody(BaseModel):
+    folder: str
+
+
+class ImportCommitBody(BaseModel):
+    folder: str
+    name: str
+    parent: str
+    routing: dict = {}
+
+
+@app.post("/api/project/import/scan")
+def import_scan(b: ImportScanBody):
+    """扫资料夹里的 .md,按文件名启发路由(不落盘),供前端出确认屏。"""
+    from . import importer
+    folder = Path(b.folder).expanduser()
+    if not folder.is_dir():
+        return JSONResponse({"error": f"{folder} 不是文件夹或不存在。"}, status_code=400)
+    names = sorted(p.name for p in folder.rglob("*.md"))
+    if not names:
+        return JSONResponse({"error": "这个文件夹里没有 .md 文件。"}, status_code=400)
+    routed = importer.route_files(names)
+    unknown = routed.pop("unknown")
+    return {"ok": True, "name_suggest": folder.name, "routed": routed, "unknown": unknown}
+
+
+@app.post("/api/project/import/commit")
+def import_commit(b: ImportCommitBody):
+    """按确认后的 routing 机械落盘成新书,入书架,返回全景 + 降级小结。"""
+    from . import importer
+    folder = Path(b.folder).expanduser()
+    if not folder.is_dir():
+        return JSONResponse({"error": f"{folder} 不是文件夹或不存在。"}, status_code=400)
+    if not (b.name or "").strip():
+        return JSONResponse({"error": "先给这本书起个名字。"}, status_code=400)
+    routing = {bk: list(b.routing.get(bk, [])) for bk in importer.BUCKETS}
+    try:
+        root = importer.import_folder(folder, b.name.strip(), routing, Path(b.parent).expanduser())
+    except (FileExistsError, FileNotFoundError, ValueError) as e:
+        return _err_json(e)
+    from . import userconf
+    userconf.apply_default_to_new_book(root)   # 同 create:新书继承用户级默认后端
+    summary = importer.import_summary(root, routing)
+    state = _shelve(root, _state(root))        # 同 create_project:顶层就是 project_state
+    return {**state, "summary": summary}       # webui: enterProject(d) 吃 state 字段、d.summary 取小结
+
+
 @app.post("/api/project/open")
 def open_project(b: RootBody):
     root = Path(b.root).expanduser()
