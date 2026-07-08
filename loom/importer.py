@@ -138,27 +138,16 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
 
 def import_summary(root: Path, routing: dict[str, list[str]]) -> dict:
     """落盘后降级小结(只读,不调 LLM):各桶份数 + 降级提示。指路二期能力手动修。"""
-    from .agents import _hardfacts_for
-    from .parse import is_substantive
     root = Path(root)
     placed = {b: len(routing.get(b, [])) for b in BUCKETS}
     notes: list[str] = []
 
-    # 世界观有内容却硬设定零命中 → 境界专名会漂
-    # 只检查世界观目录的硬设定关键词匹配,不包括人物约束
-    _HARDFACT_KW = ("力量", "体系", "境界", "等级", "修为", "实力", "修炼", "金手指",
-                    "地理", "地名", "势力", "国家", "派系", "种族", "血脉", "资源", "时间")
-    world_has_facts = False
-    if placed["世界观"]:
-        world_dir = root / paths.WORLD_DIR_REL
-        if world_dir.is_dir():
-            for f in world_dir.glob("*.md"):
-                if any(kw in f.stem for kw in _HARDFACT_KW):
-                    world_has_facts = True
-                    break
-        if not world_has_facts:
-            notes.append("世界观里没识别到硬设定小节(如「力量体系」「地理势力」),境界/专名这次没有逐字保护、"
-                         "可能写漂——去左栏世界观里选中那段,用「AI 改写」把它单列成一节即可。")
+    from .studio import names as _world_names
+    # 世界观有内容却没识别到硬设定小节:用 studio.names 的世界观小节检测=硬设定直送同口径
+    # (单一真相 _HARDFACT_KW/_SPOILER_KW、双形态、成长档案排除,且 sections 纯世界观不掺人物 roster)
+    if placed["世界观"] and not _world_names(root).get("sections"):
+        notes.append("世界观里没识别到硬设定小节(如「力量体系」「地理势力」),境界/专名这次没有逐字保护、"
+                     "可能写漂——去左栏世界观里选中那段,用「AI 改写」把它单列成一节即可。")
 
     # 卡章纲有内容却不是「- 第N章:」一行格式 → 自动记忆不挂
     card_p = root / paths.CARD_REL

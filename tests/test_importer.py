@@ -129,3 +129,32 @@ def test_import_summary_flags_degradations(project, tmp_path):
     assert "硬设定" in joined       # 世界观零命中 → 提示专名可能漂
     assert "时间轴" in joined or "自动记忆" in joined   # 段落式章纲 → 自动记忆暂不挂
     assert "中性文风" in joined or "写作指纹" in joined  # 无正文 → 中性文风
+
+
+def test_summary_world_no_warn_when_hardfact_hit(tmp_path):
+    # 文件名命中硬设定关键词(如「阵营」「势力」)→ 真实硬设定直送会保护 → 不报警
+    from loom import importer
+    src = tmp_path / "s"; src.mkdir()
+    (src / "阵营势力.md").write_text("# 阵营\n\n三大阵营。", encoding="utf-8")
+    routing = {"世界观": ["阵营势力.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "阵营书", routing, tmp_path / "l1")
+    assert not any("硬设定" in n for n in importer.import_summary(root, routing)["notes"])
+
+
+def test_summary_world_warns_when_no_hardfact(tmp_path):
+    from loom import importer
+    src = tmp_path / "s"; src.mkdir()
+    (src / "背景杂谈.md").write_text("# 背景\n\n随便写的。", encoding="utf-8")
+    routing = {"世界观": ["背景杂谈.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "背景书", routing, tmp_path / "l2")
+    assert any("硬设定" in n for n in importer.import_summary(root, routing)["notes"])
+
+
+def test_summary_world_spoiler_section_still_warns(tmp_path):
+    # 势力=硬设定kw 但 真相=剧透,deny 压过 → 世界观无受保护小节 → 报警(与真实口径一致)
+    from loom import importer
+    src = tmp_path / "s"; src.mkdir()
+    (src / "势力真相.md").write_text("# 真相\n\n终极反转。", encoding="utf-8")
+    routing = {"世界观": ["势力真相.md"], "人物": [], "卡章纲": [], "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "真相书", routing, tmp_path / "l3")
+    assert any("硬设定" in n for n in importer.import_summary(root, routing)["notes"])
