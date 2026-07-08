@@ -28,3 +28,48 @@ def test_fingerprint_is_never_a_bucket():
     r = route_files(["写作指纹.md", "文风指纹.md"])
     # 「写作指纹」不路由(它是 learn 蒸出的、不接受粘贴);「文风X」也不硬塞指纹,撞不到唯一类→unknown
     assert "写作指纹.md" in r["unknown"]
+
+
+def test_import_folder_lands_files(project, tmp_path):
+    # project fixture 只借它的 scaffold 能力;这里独立建源资料夹 + 目标 parent
+    from loom import importer
+    from loom.paths import CARD_REL, CHARS_DIR_REL, WORLD_DIR_REL
+    src = tmp_path / "我的设定"
+    (src / "人物").mkdir(parents=True)
+    (src / "力量体系.md").write_text("# 力量体系\n\n凡境→筑基→金丹。", encoding="utf-8")
+    (src / "人物" / "主角·沈砚.md").write_text("# 沈砚\n\n- 底线:不杀无辜。", encoding="utf-8")
+    (src / "大纲.md").write_text("第一卷:复仇。", encoding="utf-8")
+    (src / "第二卷章纲.md").write_text("第二卷:夺宝。", encoding="utf-8")
+
+    routing = {"世界观": ["力量体系.md"], "人物": ["主角·沈砚.md"],
+               "卡章纲": ["大纲.md", "第二卷章纲.md"],
+               "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "沈砚传", routing, tmp_path / "书库")
+
+    # 目录桶:一份一文件,原样不改字,占位模板已清(不再有 力量体系 的空模板/主角·未命名)
+    world = (root / WORLD_DIR_REL)
+    assert (world / "力量体系.md").read_text(encoding="utf-8") == "# 力量体系\n\n凡境→筑基→金丹。"
+    assert not (world / "金手指.md").exists()   # 收了文件的桶,其余出厂占位模板被清掉(免真假混着)
+    chars = (root / CHARS_DIR_REL)
+    assert (chars / "主角·沈砚.md").exists() and not (chars / "主角·未命名.md").exists()
+    assert (chars / "成长档案.md").exists()          # 成长档案(AI 自留地)永远保留
+
+    # 单文件桶:多份拼接 + 溯源头,原文都在
+    card = (root / CARD_REL).read_text(encoding="utf-8")
+    assert "## 来自:大纲.md" in card and "第一卷:复仇。" in card
+    assert "## 来自:第二卷章纲.md" in card and "第二卷:夺宝。" in card
+
+
+def test_import_folder_sanitizes_and_dedups_names(project, tmp_path):
+    from loom import importer
+    from loom.paths import WORLD_DIR_REL
+    src = tmp_path / "s"
+    (src / "a").mkdir(parents=True)
+    (src / "b").mkdir(parents=True)
+    (src / "a" / "设定.md").write_text("A", encoding="utf-8")
+    (src / "b" / "设定.md").write_text("B", encoding="utf-8")   # 同名撞车
+    routing = {"世界观": ["设定.md", "设定.md"], "人物": [], "卡章纲": [],
+               "立项卡": [], "违禁词": [], "文风参考": []}
+    root = importer.import_folder(src, "去重书", routing, tmp_path / "lib")
+    world = list((root / WORLD_DIR_REL).glob("设定*.md"))
+    assert len(world) == 2   # 两份同名都落盘,第二份自动改名不覆盖

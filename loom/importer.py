@@ -36,3 +36,84 @@ def route_files(names: list[str]) -> dict[str, list[str]]:
         else:
             out["unknown"].append(name)   # 撞多类/零类都让作者定
     return out
+
+
+from pathlib import Path
+
+from . import paths
+from .fsutil import atomic_write_text
+
+_FN_BAD = re.compile(r'[\\/:*?"<>|]')   # 文件名非法字符净化(同 draft._FN_BAD 口径)
+
+# 单文件桶:桶名 → 目标 rel(多份拼接进这一个文件)
+_SINGLE = {"卡章纲": paths.CARD_REL, "立项卡": paths.PROJECT_CARD_REL,
+           "违禁词": paths.BANNED_REL, "文风参考": paths.brain_rel("文风参考")}
+# 目录桶:桶名 → 目标目录 rel(一份一文件)
+_DIR = {"世界观": paths.WORLD_DIR_REL, "人物": paths.CHARS_DIR_REL}
+
+
+def _clear_placeholders(dir_path: Path) -> None:
+    """清掉目录桶里的出厂占位模板(留 成长档案.md=AI 自留地),免得真文件混着空模板。"""
+    from .draft import _is_blank_or_template
+    if not dir_path.is_dir():
+        return
+    for f in dir_path.glob("*.md"):
+        if f.name != paths.GROWTH_NAME and _is_blank_or_template(f):
+            f.unlink()
+
+
+def _uniq(dir_path: Path, name: str) -> Path:
+    """目录桶落盘防同名覆盖:已存在就 名·2.md、名·3.md…"""
+    p = dir_path / name
+    stem, suffix = Path(name).stem, Path(name).suffix
+    i = 2
+    while p.exists():
+        p = dir_path / f"{stem}·{i}{suffix}"
+        i += 1
+    return p
+
+
+def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent: Path) -> Path:
+    """机械落盘:scaffold 建骨架 → 清收了文件的桶的占位 → 原样落他的 md。不改一个字、不调 LLM。"""
+    from .scaffold import init as scaffold_init
+    folder = Path(folder)
+    root = scaffold_init(name, Path(parent))
+    # 源文件按名索引(rglob 兜住他自己的子目录结构;同名以第一份为准,后续靠 _uniq 落不同名)
+    by_name: dict[str, list[Path]] = {}
+    for p in folder.rglob("*.md"):
+        by_name.setdefault(p.name, []).append(p)
+
+    def _take(fname: str, used: dict[str, int]) -> Path | None:
+        pool = by_name.get(fname, [])
+        i = used.get(fname, 0)
+        used[fname] = i + 1
+        return pool[i] if i < len(pool) else None
+
+    used: dict[str, int] = {}
+    # 目录桶
+    for bucket, dir_rel in _DIR.items():
+        files = routing.get(bucket, [])
+        if not files:
+            continue
+        d = root / dir_rel
+        d.mkdir(parents=True, exist_ok=True)
+        _clear_placeholders(d)
+        for fname in files:
+            src = _take(fname, used)
+            if src is None:
+                continue
+            safe = _FN_BAD.sub("·", fname) or "未命名.md"
+            atomic_write_text(_uniq(d, safe), src.read_text(encoding="utf-8"))
+    # 单文件桶:多份拼接 + 溯源头
+    for bucket, rel in _SINGLE.items():
+        files = routing.get(bucket, [])
+        if not files:
+            continue
+        parts = []
+        for fname in files:
+            src = _take(fname, used)
+            if src is not None:
+                parts.append(f"## 来自:{fname}\n\n{src.read_text(encoding='utf-8').strip()}")
+        if parts:
+            atomic_write_text(root / rel, "\n\n".join(parts) + "\n")
+    return root
