@@ -13,3 +13,8 @@ __pycache__/
 # PyInstaller 产物
 build/
 dist/
+
+# 品牌楷体:源字体缓存(25MB,packaging/subset_font.py 自动下载)+ ttf 备份
+# (运行时/打包只用 woff2,ttf 是可复跑的中间产物,不进库也不进包)
+packaging/.font-cache/
+loom/webui/fonts/*.ttf

@@ -15,6 +15,13 @@ bash packaging/build.sh
 
 底层就是 `pyinstaller packaging/loom.spec`。改配置改那个 spec。
 
+## 品牌楷体(Loom Kai)
+
+`loom/webui/fonts/loom-kai.woff2` 是霞鹜文楷屏幕阅读版的 GB2312 子集(1.73MB,OFL 1.1,
+授权全文在同目录 `OFL.txt`,**随包分发勿删**)。它让 Windows / 非中文系统的品牌楷体
+不再依赖系统 KaiTi。产物已进仓,打包零额外步骤(spec 整目录收 `loom/webui`);
+换字体版本/改子集范围时重跑:`python3 packaging/subset_font.py`(需 `pip install fonttools brotli`)。
+
 ## 应用图标 / 应用名
 
 - **图标**:`spec` 的 BUNDLE `icon=` 指向 `packaging/loom.icns`(墨绿底 + 暖金织标)。

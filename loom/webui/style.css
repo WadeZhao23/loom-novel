@@ -6,6 +6,17 @@
    组件只用语义 token;改主题只换 §1 的映射。
    ============================================================ */
 
+/* ---------- 0. 品牌楷体 · Loom Kai ----------
+   霞鹜文楷屏幕阅读版 GB2312 子集(OFL 1.1,授权全文 fonts/OFL.txt;
+   packaging/subset_font.py 可复跑)。swap:字体没到先用系统楷,不白屏 */
+@font-face {
+  font-family: "Loom Kai";
+  src: url("fonts/loom-kai.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------- 1a. 语义 Token · LIGHT(宣纸) ---------- */
 :root, [data-theme="light"] {
   --bg:             #F5F1E8;   /* 宣纸 */
@@ -96,9 +107,11 @@
 :root {
   --font-ui:   -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
                "Segoe UI", system-ui, sans-serif;
-  /* 品牌时刻专用楷体(logo/弹窗标题/章题/引语),每屏至多一处;禁伪粗 */
-  --font-brand: "LXGW WenKai Screen", "LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi",
-                "楷体", "Songti SC", serif;
+  /* 品牌时刻专用楷体(logo/弹窗标题/章题/引语),每屏至多一处;禁伪粗。
+     首位 Loom Kai 是随包捆的文楷 GB2312 子集(见顶部 @font-face);
+     子集外的生僻字逐字回退:本机全量文楷 → 系统楷 → 宋 */
+  --font-brand: "Loom Kai", "LXGW WenKai Screen", "LXGW WenKai", "Kaiti SC",
+                "STKaiti", "KaiTi", "楷体", "Songti SC", serif;
   /* 手稿正文衬线:Win 无好宋体时退黑体,绝不落 SimSun */
   --font-read: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
                Georgia, "PingFang SC", "Microsoft YaHei", serif;
