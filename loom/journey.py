@@ -15,6 +15,8 @@ from pathlib import Path
 
 from . import paths
 from .backends import LoomBackendError
+from .fsutil import atomic_write_text
+from .guard import DRAFT_SECTION, validate_output
 from .parse import is_substantive, parse_journey_card
 from .state import load_state, save_state
 
@@ -223,3 +225,124 @@ def next_card(root: Path, backend) -> dict:
     st["journey"] = j
     save_state(root, st)
     return {"card": card, "state": journey_state(root)}
+
+
+# ---- 答案落盘(作者拍板过的答案=人写主体;人写优先,答案绝不丢) ----
+
+_DIGEST_SYSTEM = (
+    "你是写作伙伴的记录员。把作者对一个创作问题的回答,整理成要落进资料文件的正式文本。\n"
+    "红线:只整形作者说的内容,绝不添加作者没说的设定事实;不加客套、不加解释。\n"
+    "输出格式严格按任务里的要求。"
+)
+_DIGEST_MAX_CHARS = 400
+
+
+def land_answer(root: Path, answer: str, backend) -> dict:
+    answer = (answer or "").strip()
+    if not answer:
+        raise ValueError("答案是空的。")
+    st = load_state(root)
+    j = _journey(st)
+    card = j["card"]
+    if not card or "static" in card:
+        raise ValueError("没有待答的问题卡,先出题。")
+    spec = _stage_spec(card["stage"])
+    if spec.land == "field":
+        landed = _land_field(root, card.get("field", ""), answer)
+    elif spec.land == "sections":
+        landed = _land_sections(root, spec, card["question"], answer, backend)
+    else:   # card_lines
+        landed = _land_card_lines(root, card["question"], answer, backend)
+    j["card"] = None
+    st["journey"] = j
+    save_state(root, st)
+    return {"landed": landed, "state": journey_state(root)}
+
+
+def _replace_h2_body(text: str, title: str, new_body: str) -> str:
+    """占位格 → 换成答案;已有人写内容 → 在格尾追加(人写优先);缺格 → 文末补格。"""
+    old = _h2_body(text, title)
+    if not re.search(rf"^##\s*{re.escape(title)}\s*$", text, flags=re.M):
+        return text.rstrip() + f"\n\n## {title}\n{new_body}\n"
+    if is_substantive(old):
+        replacement = old.rstrip() + f"\n\n{new_body}\n"
+    else:
+        replacement = f"\n{new_body}\n"
+    return re.sub(rf"(^##\s*{re.escape(title)}\s*$).*?(?=^##\s|\Z)",
+                  lambda m: m.group(1) + replacement + "\n", text, count=1, flags=re.M | re.S)
+
+
+def _land_field(root: Path, field: str, answer: str) -> str:
+    p = root / paths.PROJECT_CARD_REL
+    text = p.read_text(encoding="utf-8") if p.is_file() else "# 立项卡\n"
+    if field == "平台":
+        text, n = re.subn(r"^平台[:：].*$", f"平台:{answer}", text, count=1, flags=re.M)
+        if not n:
+            text = text.rstrip() + f"\n\n平台:{answer}\n"
+    else:
+        if field not in _CARD_FIELDS:
+            field = "题材"   # 领航员出了怪格名 → 落最通用的格,答案绝不丢
+        text = _replace_h2_body(text, field, answer)
+    atomic_write_text(p, text)
+    return paths.PROJECT_CARD_REL
+
+
+def _digest(backend, question: str, answer: str, format_ask: str) -> str:
+    """一次消化调用;失败或过不了 guard 返回空串(调用方落原答案兜底)。"""
+    user = f"问题:{question}\n作者的回答:{answer}\n\n{format_ask}只用作者给的信息。"
+    try:
+        body = backend.complete(_DIGEST_SYSTEM, user, max_chars=_DIGEST_MAX_CHARS)
+    except LoomBackendError:
+        return ""
+    return "" if validate_output(body, DRAFT_SECTION) else body
+
+
+def _land_sections(root: Path, spec: StageSpec, question: str, answer: str, backend) -> str:
+    from .draft import _write_sections_into_dir   # 只写空白/模板文件,人写的一律不碰
+    body = _digest(backend, question, answer,
+                   "整理成 markdown:每个主题一节,以「## 标题」开头(标题即文件名,如「## 金手指」「## 主角·林潜」),标题下写正文。")
+    if not body:
+        title = re.sub(r'[\\/:*?"<>|]|[??。,:]', "", question)[:12] or "访谈补充"
+        body = f"## {title}\n{answer}"
+    form = paths.brain_form(root, spec.target, spec.target_dir)
+    if form != "file":
+        written = _write_sections_into_dir(root, spec.target_dir, "\n" + body,
+                                           drop_unnamed=(spec.key == "人物"))
+        if written:
+            return f"{spec.target_dir}/{written[0]}.md"
+        rel = f"{spec.target_dir}/访谈补充.md"      # 同名文件已是人写成品 → 兜底追加,绝不覆盖
+        p = root / rel
+        old = p.read_text(encoding="utf-8") if p.is_file() else "# 访谈补充\n"
+        atomic_write_text(p, old.rstrip() + "\n\n" + body.strip() + "\n")
+        return rel
+    p = root / spec.target                          # 单文件形态的老书
+    old = p.read_text(encoding="utf-8") if p.is_file() else ""
+    atomic_write_text(p, (old.rstrip() + "\n\n" if old.strip() else "") + body.strip() + "\n")
+    return spec.target
+
+
+def _land_card_lines(root: Path, question: str, answer: str, backend) -> str:
+    body = _digest(backend, question, answer,
+                   "整理成卡章纲行:每行「- 第N章:这章完成什么+章末钩子」;不属于具体某章的规划(如全书大弧),输出「- 大弧:一句话」。")
+    if not body:
+        body = f"- {answer}"
+    p = root / paths.CARD_REL
+    text = p.read_text(encoding="utf-8") if p.is_file() else "# 卡章纲\n"
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("- ") or line == "-":
+            continue
+        m = re.match(r"^-\s*第(\d+)章[:：]\s*(.*)$", line)
+        if m and m.group(2).strip():
+            n, content = m.group(1), m.group(2).strip()
+            empty_pat = re.compile(rf"^-\s*第{n}章[:：]\s*$", re.M)
+            if empty_pat.search(text):
+                text = empty_pat.sub(f"- 第{n}章:{content}", text, count=1)
+            elif not re.search(rf"^-\s*第{n}章[:：]\s*\S", text, flags=re.M):
+                text = text.rstrip() + f"\n- 第{n}章:{content}\n"
+            # 已有人写内容的章行 → 跳过,绝不覆盖
+        else:
+            if line not in text:
+                text = text.rstrip() + f"\n{line}\n"
+    atomic_write_text(p, text)
+    return paths.CARD_REL

@@ -142,3 +142,86 @@ def test_last_question_of_stage_pins_current(project):
     assert out["state"]["card"] == out["card"]        # state 与顶层 card 一致
     s2 = journey.journey_state(project)               # 模拟重启后重取 state
     assert s2["card"] == out["card"]
+
+
+# ---- 答案落盘(Task 5) ----
+
+def _prime_card(project, **extra):
+    """直接种一张待答卡进游标(绕过出题,单测落盘)。"""
+    from loom.state import load_state, save_state
+    st = load_state(project)
+    j = journey._journey(st)
+    j["card"] = {"stage": extra.pop("stage", "立项"), "sig": "x", "question": "测试题?",
+                 "options": [], **extra}
+    st["journey"] = j
+    save_state(project, st)
+
+
+def test_land_field_platform_replaces_line(project):
+    _prime_card(project, field="平台")
+    out = journey.land_answer(project, "番茄", FakeBackend(const("不该被调用")))
+    assert out["landed"] == PROJECT_CARD_REL
+    assert "平台:番茄" in (project / PROJECT_CARD_REL).read_text(encoding="utf-8")
+
+
+def test_land_field_section_replaces_placeholder(project):
+    _prime_card(project, field="题材")
+    journey.land_answer(project, "重生 + 复仇 + 宗门流", FakeBackend(const("x")))
+    text = (project / PROJECT_CARD_REL).read_text(encoding="utf-8")
+    body = journey._h2_body(text, "题材")
+    assert "重生 + 复仇 + 宗门流" in body and "占位示例" not in body
+
+
+def test_land_field_appends_below_human_content(project):
+    p = project / PROJECT_CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace(
+        "(占位示例:重生 + 复仇 + 宗门流。一句话点明核心题材标签。)", "我手写的题材定位"),
+        encoding="utf-8")
+    _prime_card(project, field="题材")
+    journey.land_answer(project, "补一句:加无限流元素", FakeBackend(const("x")))
+    body = journey._h2_body((project / PROJECT_CARD_REL).read_text(encoding="utf-8"), "题材")
+    assert "我手写的题材定位" in body and "加无限流元素" in body   # 人写优先:只追加不覆盖
+
+
+def test_land_sections_writes_into_world_dir(project):
+    _prime_card(project, stage="世界观")
+    fake = FakeBackend(const("## 金手指\n吞噬万物的胃袋,吃什么长什么,代价是饭量与寿命挂钩。"))
+    out = journey.land_answer(project, "金手指是吞噬胃袋,代价挂寿命", fake)
+    assert out["landed"] == "外置大脑/世界观/金手指.md"
+    assert "吞噬万物的胃袋" in (project / "外置大脑/世界观/金手指.md").read_text(encoding="utf-8")
+
+
+def test_land_sections_digest_garbage_keeps_answer(project):
+    _prime_card(project, stage="世界观")
+    out = journey.land_answer(project, "金手指是吞噬胃袋", FakeBackend(const("嗯")))  # 消化产物过不了 guard
+    text = (project / out["landed"]).read_text(encoding="utf-8")
+    assert "金手指是吞噬胃袋" in text                        # 答案原样落盘,绝不丢
+
+
+def test_land_card_lines_fills_empty_and_respects_human(project):
+    p = project / CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace("- 第2章:", "- 第2章:人写的第二章规划"),
+                 encoding="utf-8")
+    _prime_card(project, stage="卡章纲")
+    fake = FakeBackend(const("- 第1章:雪夜被逐,捡到会说话的鼎\n- 第2章:AI 想覆盖人写的这行\n- 大弧:从废柴到执掌宗门"))
+    journey.land_answer(project, "开局雪夜被逐……", fake)
+    text = p.read_text(encoding="utf-8")
+    assert "- 第1章:雪夜被逐,捡到会说话的鼎" in text
+    assert "- 第2章:人写的第二章规划" in text               # 人写行绝不覆盖
+    assert "AI 想覆盖" not in text
+    assert "- 大弧:从废柴到执掌宗门" in text
+
+
+def test_land_answer_clears_card(project):
+    _prime_card(project, field="平台")
+    journey.land_answer(project, "起点", FakeBackend(const("x")))
+    assert journey.journey_state(project)["card"] is None
+
+
+def test_land_answer_requires_card_and_text(project):
+    import pytest
+    with pytest.raises(ValueError):
+        journey.land_answer(project, "没出题就答", FakeBackend(const("x")))
+    _prime_card(project, field="平台")
+    with pytest.raises(ValueError):
+        journey.land_answer(project, "   ", FakeBackend(const("x")))
