@@ -191,3 +191,28 @@ def is_substantive(text: str) -> bool:
             continue
         return True
     return False
+
+
+# ── 领航员问题卡(journey.next_card 消费;输出约定住 templates/agents/领航员.md) ──
+# 输出约定(prompt ↔ 解析器共置面):
+#   格:题材            ← 可选,仅立项阶段
+#   问:一行问题
+#   - 选项(2-4 个)
+#   无题哨兵:整段含「【无题】」。
+_CARD_Q_RE = re.compile(r"^问[:：]\s*(\S.*)$", re.M)
+_CARD_F_RE = re.compile(r"^格[:：]\s*(\S+)\s*$", re.M)
+
+
+def parse_journey_card(raw: str) -> dict | None:
+    """领航员输出 → 问题卡;无题 {"exhausted": True};不成卡 None(调用方降级为自由输入)。"""
+    if "【无题】" in raw:
+        return {"exhausted": True}
+    m = _CARD_Q_RE.search(raw)
+    if not m:
+        return None
+    options = [l.strip()[2:].strip() for l in raw.splitlines() if l.strip().startswith("- ")]
+    card: dict = {"question": m.group(1).strip(), "options": [o for o in options if o][:4]}
+    f = _CARD_F_RE.search(raw)
+    if f:
+        card["field"] = f.group(1).strip()
+    return card
