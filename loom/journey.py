@@ -116,6 +116,9 @@ def journey_state(root: Path) -> dict:
               for s in STAGES]
     open_keys = [x["key"] for x in stages if not x["done"] and not x["skipped"]]
     current = j["focus"] if j["focus"] in open_keys else ""
+    pending = j["card"] or {}
+    if not current and pending.get("stage") in open_keys:
+        current = pending["stage"]   # 未答的卡钉住本段(哪怕本段预算已满)
     if not current:
         nxt = next((x for x in stages if x["key"] in open_keys and x["asked"] < _MAX_QUESTIONS), None)
         current = nxt["key"] if nxt else ""

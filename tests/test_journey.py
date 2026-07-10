@@ -125,3 +125,20 @@ def test_voice_stage_static_card(project):
         journey.goto(project, k, skip=True)
     out = journey.next_card(project, FakeBackend(const("不该被调用")))
     assert out["card"] == {"stage": "voice", "static": "seed"}
+
+
+def test_last_question_of_stage_pins_current(project):
+    # 第 4 张卡(预算最后一题)出卡后,state 不得跳段、卡不得从 state 里消失
+    from loom.state import load_state, save_state
+    st = load_state(project)
+    j = journey._journey(st)
+    j["asked"]["立项"] = 3
+    st["journey"] = j
+    save_state(project, st)
+    fake = FakeBackend(const(_CARD_RAW))
+    out = journey.next_card(project, fake)
+    assert out["card"]["stage"] == "立项"
+    assert out["state"]["current"] == "立项"          # 未答的卡钉住本段
+    assert out["state"]["card"] == out["card"]        # state 与顶层 card 一致
+    s2 = journey.journey_state(project)               # 模拟重启后重取 state
+    assert s2["card"] == out["card"]
