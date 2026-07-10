@@ -814,34 +814,47 @@ function jcBtn(label, fn, ghost) {
 }
 
 async function postJourneyCard() {
+  const root = DATA && DATA.root;
+  if (!root) return;
   try {
-    const out = await jreq("POST", "/api/journey/card", { root: DATA.root });
+    const out = await jreq("POST", "/api/journey/card", { root });
+    if (!DATA || DATA.root !== root) return;   // 已换书:迟到的卡绝不上屏
     JOURNEY = out.state;
     JOURNEY.card = out.card;
     paintJourney();
   } catch (e) {
+    if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
   }
 }
 
 async function postJourneyAnswer(text) {
   if (!text || !text.trim()) return toast("先写点什么");
+  const root = DATA && DATA.root;
+  if (!root) return;
   try {
-    const out = await jreq("POST", "/api/journey/answer", { root: DATA.root, answer: text.trim() });
+    const out = await jreq("POST", "/api/journey/answer", { root, answer: text.trim() });
+    if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
     JOURNEY = out.state;
     toast("已记下 → " + out.landed);
     paintJourney();
     refresh();   // 外置大脑侧栏跟着长
   } catch (e) {
+    if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
   }
 }
 
 async function postJourneyGoto(stage, skip) {
+  const root = DATA && DATA.root;
+  if (!root) return;
   try {
-    JOURNEY = await jreq("POST", "/api/journey/goto", { root: DATA.root, stage, skip: !!skip });
+    const out = await jreq("POST", "/api/journey/goto", { root, stage, skip: !!skip });
+    if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
+    JOURNEY = out;
     paintJourney();
   } catch (e) {
+    if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
   }
 }
