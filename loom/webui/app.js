@@ -426,6 +426,7 @@ function enterProject(d) {
   DATA = d;
   _brainGateShown = false;   // 织章拦截按书粒度:换一本书,空底提醒重新有效(一期终审留档项)
   hideInlinePanel();   // 换书收面板:稳态残留的候选绝不能落进另一本书
+  JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -705,11 +706,16 @@ function renderJourney() {
 }
 
 async function loadJourney() {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  let out = null;
   try {
-    JOURNEY = await jreq("GET", `/api/journey/state?root=${encodeURIComponent(DATA.root)}`);
+    out = await jreq("GET", `/api/journey/state?root=${encodeURIComponent(root)}`);
   } catch (e) {
-    JOURNEY = null;
+    out = null;
   }
+  if (!DATA || DATA.root !== root) return;   // 已换书:过期响应丢弃,不碰 JOURNEY
+  JOURNEY = out;
   paintJourney();
 }
 
