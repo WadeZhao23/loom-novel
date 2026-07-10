@@ -297,23 +297,45 @@ def _digest(backend, question: str, answer: str, format_ask: str) -> str:
     return "" if validate_output(body, DRAFT_SECTION) else body
 
 
+_H2_SPLIT_RE = re.compile(r"^(?=## )", re.M)
+
+
+def _split_h2(body: str) -> list[str]:
+    """消化产物 → H2 节列表(每项含「## 标题」头);H2 前导语丢弃,与 _write_sections_into_dir 口径一致。"""
+    return [p for p in _H2_SPLIT_RE.split(body) if p.strip().startswith("## ")]
+
+
+def _fallback_title(question: str) -> str:
+    return re.sub(r'[\\/:*?"<>|。,]', "", question)[:12] or "访谈补充"
+
+
 def _land_sections(root: Path, spec: StageSpec, question: str, answer: str, backend) -> str:
     from .draft import _write_sections_into_dir   # 只写空白/模板文件,人写的一律不碰
     body = _digest(backend, question, answer,
                    "整理成 markdown:每个主题一节,以「## 标题」开头(标题即文件名,如「## 金手指」「## 主角·林潜」),标题下写正文。")
     if not body:
-        title = re.sub(r'[\\/:*?"<>|]|[??。,:]', "", question)[:12] or "访谈补充"
-        body = f"## {title}\n{answer}"
+        body = f"## {_fallback_title(question)}\n{answer}"
+    segs = _split_h2(body)
+    if not segs:   # 消化产物没按格式出 H2 → 整段当一节,绝不丢
+        segs = [f"## {_fallback_title(question)}\n{body.strip()}"]
     form = paths.brain_form(root, spec.target, spec.target_dir)
     if form != "file":
-        written = _write_sections_into_dir(root, spec.target_dir, "\n" + body,
+        written: list[str] = []
+        leftover: list[str] = []
+        for seg in segs:   # 逐节落盘:哪节撞上人写成品,哪节进兜底——绝不整批丢
+            got = _write_sections_into_dir(root, spec.target_dir, "\n" + seg,
                                            drop_unnamed=(spec.key == "人物"))
+            if got:
+                written.extend(got)
+            else:
+                leftover.append(seg.strip())
+        rel = f"{spec.target_dir}/访谈补充.md"      # 同名文件已是人写成品 → 兜底追加,绝不覆盖
+        if leftover:
+            p = root / rel
+            old = p.read_text(encoding="utf-8") if p.is_file() else "# 访谈补充\n"
+            atomic_write_text(p, old.rstrip() + "\n\n" + "\n\n".join(leftover) + "\n")
         if written:
             return f"{spec.target_dir}/{written[0]}.md"
-        rel = f"{spec.target_dir}/访谈补充.md"      # 同名文件已是人写成品 → 兜底追加,绝不覆盖
-        p = root / rel
-        old = p.read_text(encoding="utf-8") if p.is_file() else "# 访谈补充\n"
-        atomic_write_text(p, old.rstrip() + "\n\n" + body.strip() + "\n")
         return rel
     p = root / spec.target                          # 单文件形态的老书
     old = p.read_text(encoding="utf-8") if p.is_file() else ""

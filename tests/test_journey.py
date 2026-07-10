@@ -198,6 +198,20 @@ def test_land_sections_digest_garbage_keeps_answer(project):
     assert "金手指是吞噬胃袋" in text                        # 答案原样落盘,绝不丢
 
 
+def test_land_sections_partial_collision_keeps_leftover(project):
+    # 多主题答案部分撞车:撞车节兜底进访谈补充,新节正常落盘——答案绝不丢
+    (project / "外置大脑/世界观/金手指.md").write_text(
+        "# 金手指\n\n人写的金手指设定,已经很完整。\n", encoding="utf-8")
+    _prime_card(project, stage="世界观")
+    fake = FakeBackend(const("## 金手指\n金手指还能消化空间乱流。\n## 三大阵营\n正邪隐三方割据。"))
+    journey.land_answer(project, "金手指补充+三大阵营", fake)
+    kept = (project / "外置大脑/世界观/金手指.md").read_text(encoding="utf-8")
+    assert "人写的金手指设定" in kept and "空间乱流" not in kept          # 人写优先
+    assert "正邪隐三方割据" in (project / "外置大脑/世界观/三大阵营.md").read_text(encoding="utf-8")
+    supp = (project / "外置大脑/世界观/访谈补充.md").read_text(encoding="utf-8")
+    assert "空间乱流" in supp                                            # 撞车内容兜底
+
+
 def test_land_card_lines_fills_empty_and_respects_human(project):
     p = project / CARD_REL
     p.write_text(p.read_text(encoding="utf-8").replace("- 第2章:", "- 第2章:人写的第二章规划"),
