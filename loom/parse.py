@@ -11,6 +11,7 @@
 - recap._RECAP_SYSTEM                   → format_recap_block
 - enrich._ENRICH_SYSTEM                 → parse_enrich_sections
 - draft._DRAFT_SYSTEM                   → split_brain_draft
+- agents/领航员.md 输出格式              → parse_journey_card
 - fingerprint(anchor 例句段)的读侧在 aitell.load_anchors(挂名于此,不搬——它同时服务检测器)
 """
 
@@ -207,11 +208,13 @@ def parse_journey_card(raw: str) -> dict | None:
     """领航员输出 → 问题卡;无题 {"exhausted": True};不成卡 None(调用方降级为自由输入)。"""
     if "【无题】" in raw:
         return {"exhausted": True}
-    m = _CARD_Q_RE.search(raw)
-    if not m:
+    lines = raw.splitlines()
+    q_idx = next((i for i, l in enumerate(lines) if _CARD_Q_RE.match(l.strip())), None)
+    if q_idx is None:
         return None
-    options = [l.strip()[2:].strip() for l in raw.splitlines() if l.strip().startswith("- ")]
-    card: dict = {"question": m.group(1).strip(), "options": [o for o in options if o][:4]}
+    question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip()
+    options = [l.strip()[2:].strip() for l in lines[q_idx + 1:] if l.strip().startswith("- ")]
+    card: dict = {"question": question, "options": [o for o in options if o][:4]}
     f = _CARD_F_RE.search(raw)
     if f:
         card["field"] = f.group(1).strip()

@@ -31,5 +31,11 @@ def test_options_capped_at_four():
 
 
 def test_fullwidth_colon_tolerated():
-    card = parse_journey_card("问:主角叫什么?\n- 林潜\n- 你自己起")
-    assert card["question"] == "主角叫什么?"
+    card = parse_journey_card("问：主角叫什么？\n- 林潜\n- 你自己起")
+    assert card["question"] == "主角叫什么？"
+
+
+def test_preamble_bullets_not_leaked_into_options():
+    raw = "- 已确认三个候选题材\n问:选哪个作主线?\n- 重生流\n- 无敌流"
+    card = parse_journey_card(raw)
+    assert card["options"] == ["重生流", "无敌流"]
