@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from . import chapters as chap
+from . import journey as journey_mod
 from . import ledger, paths
 from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
@@ -292,3 +293,32 @@ def project_state(root: Path | str) -> dict:
         "chapters": chs,
         "next_chapter": (chapters[-1] + 1) if chapters else 1,
     }
+
+
+# ---- 创作旅程(伙伴面板;spec docs/superpowers/specs/2026-07-10-journey-partner-design.md) ----
+
+def journey_state(root: Path | str) -> dict:
+    """纯读派生视图,无锁(同 project_state)。"""
+    return journey_mod.journey_state(Path(root))
+
+
+def journey_card(root: Path | str) -> dict:
+    """出下一张问题卡;评估类调用走 cheap_model(空则主模型)。"""
+    root = Path(root)
+    with write_lock(root):
+        cfg = load_config(root)
+        return journey_mod.next_card(root, cheap_backend(cfg) or get_backend(cfg))
+
+
+def journey_answer(root: Path | str, answer: str) -> dict:
+    """收作者答案:整形(必要时一次消化调用)→ 落外置大脑 → 清待答卡。"""
+    root = Path(root)
+    with write_lock(root):
+        cfg = load_config(root)
+        return journey_mod.land_answer(root, answer, cheap_backend(cfg) or get_backend(cfg))
+
+
+def journey_goto(root: Path | str, stage: str, skip: bool = False) -> dict:
+    root = Path(root)
+    with write_lock(root):
+        return journey_mod.goto(root, stage, skip=skip)

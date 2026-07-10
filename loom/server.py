@@ -352,6 +352,17 @@ class ChapterOpBody(BaseModel):
     direction: str | None = None
 
 
+class JourneyAnswerBody(BaseModel):
+    root: str
+    answer: str
+
+
+class JourneyGotoBody(BaseModel):
+    root: str
+    stage: str
+    skip: bool = False
+
+
 @app.post("/api/chapter/delete")
 def chapter_delete(b: ChapterOpBody):
     try:
@@ -374,6 +385,38 @@ def chapter_move(b: ChapterOpBody):
         return {**usecases.chapter_move(b.root, b.n, b.direction or "up"), **{"state": _state(Path(b.root))}}
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.get("/api/journey/state")
+def journey_state_ep(root: str):
+    try:
+        return usecases.journey_state(Path(root))
+    except (ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.post("/api/journey/card")
+def journey_card_ep(b: RootBody):
+    try:
+        return usecases.journey_card(Path(b.root))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.post("/api/journey/answer")
+def journey_answer_ep(b: JourneyAnswerBody):
+    try:
+        return usecases.journey_answer(Path(b.root), b.answer)
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.post("/api/journey/goto")
+def journey_goto_ep(b: JourneyGotoBody):
+    try:
+        return usecases.journey_goto(Path(b.root), b.stage, b.skip)
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
 
 
 class ScanBody(BaseModel):
