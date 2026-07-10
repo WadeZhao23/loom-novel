@@ -47,7 +47,6 @@ STAGES: tuple[StageSpec, ...] = (
     StageSpec("voice", "喂 2-3 段你的真实样本让指纹像你(走 seed,不出题)",
               (), "seed"),
 )
-_STAGE_KEYS = tuple(s.key for s in STAGES)
 
 _CARD_FIELDS = ("分区", "题材", "对标意图", "为什么选它")
 _CARD_LINE_RE = re.compile(r"^-\s*第(\d+)章[:：][ \t]*\S", re.M)
@@ -117,7 +116,8 @@ def journey_state(root: Path) -> dict:
                "asked": int(j["asked"].get(s.key, 0))}
               for s in STAGES]
     open_keys = [x["key"] for x in stages if not x["done"] and not x["skipped"]]
-    current = j["focus"] if j["focus"] in open_keys else ""
+    focusable = [x["key"] for x in stages if not x["skipped"]]   # 回头改压过 done,只避 skip(I1)
+    current = j["focus"] if j["focus"] in focusable else ""
     pending = j["card"] or {}
     if not current and pending.get("stage") in open_keys:
         current = pending["stage"]   # 未答的卡钉住本段(哪怕本段预算已满)
@@ -130,6 +130,9 @@ def journey_state(root: Path) -> dict:
 
 def goto(root: Path, stage: str, *, skip: bool = False) -> dict:
     _stage_spec(stage)   # 未知段名即 ValueError
+    view = journey_state(root)
+    if not skip and stage == view["current"]:
+        return view   # 已在本段:幂等返回,不作废待答卡、不清预算(防误点重复计费,I2)
     st = load_state(root)
     j = _journey(st)
     if skip:
@@ -191,10 +194,10 @@ def next_card(root: Path, backend) -> dict:
     j = _journey(st)
     sig = _sig(root, spec)
     cached = j["card"]
-    if cached and cached.get("stage") == cur and cached.get("sig") == sig:
-        return {"card": cached, "state": view}
+    if cached and cached.get("stage") == cur and cached.get("sig") == sig and not cached.get("degraded"):
+        return {"card": cached, "state": view}   # 降级卡不吃缓存,每次点「下一题」都真重试(I3)
 
-    left = _MAX_QUESTIONS - int(j["asked"].get(cur, 0))
+    left = max(0, _MAX_QUESTIONS - int(j["asked"].get(cur, 0)))
     user = (f"阶段:{spec.key}\n目标:{spec.goal}\n这一段还能问 {left} 题。\n\n"
             f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
     parsed = None
@@ -276,6 +279,7 @@ def _land_field(root: Path, field: str, answer: str) -> str:
     p = root / paths.PROJECT_CARD_REL
     text = p.read_text(encoding="utf-8") if p.is_file() else "# 立项卡\n"
     if field == "平台":
+        # 平台行整行替换是裁量:答题即作者本人拍板换值(区别于 H2 格的人写只追加)
         text, n = re.subn(r"^平台[:：].*$", f"平台:{answer}", text, count=1, flags=re.M)
         if not n:
             text = text.rstrip() + f"\n\n平台:{answer}\n"
@@ -343,13 +347,19 @@ def _land_sections(root: Path, spec: StageSpec, question: str, answer: str, back
     return spec.target
 
 
+def _bulleted(answer: str) -> str:
+    """答案逐行 bullet 化,兜底用(消化异常/过不了 guard 两处同用)。"""
+    return "\n".join(f"- {l.strip()}" for l in answer.splitlines() if l.strip())
+
+
 def _land_card_lines(root: Path, question: str, answer: str, backend) -> str:
     body = _digest(backend, question, answer,
                    "整理成卡章纲行:每行「- 第N章:这章完成什么+章末钩子」;不属于具体某章的规划(如全书大弧),输出「- 大弧:一句话」。")
     if not body:
-        body = f"- {answer}"
+        body = _bulleted(answer)
     p = root / paths.CARD_REL
     text = p.read_text(encoding="utf-8") if p.is_file() else "# 卡章纲\n"
+    landed_any = False   # 消化产物哪怕不合规(散文/漏行),答案也绝不静默丢(C1)
     for line in body.splitlines():
         line = line.strip()
         if not line.startswith("- ") or line == "-":
@@ -360,11 +370,16 @@ def _land_card_lines(root: Path, question: str, answer: str, backend) -> str:
             empty_pat = re.compile(rf"^-\s*第{n}章[:：]\s*$", re.M)
             if empty_pat.search(text):
                 text = empty_pat.sub(f"- 第{n}章:{content}", text, count=1)
+                landed_any = True
             elif not re.search(rf"^-\s*第{n}章[:：]\s*\S", text, flags=re.M):
                 text = text.rstrip() + f"\n- 第{n}章:{content}\n"
+                landed_any = True
             # 已有人写内容的章行 → 跳过,绝不覆盖
-        else:
-            if line not in text:
-                text = text.rstrip() + f"\n{line}\n"
+        elif re.search(rf"^{re.escape(line)}\s*$", text, flags=re.M) is None:
+            # 整行精确匹配判重(而非子串):新行是已有行前缀时不再被误吞
+            text = text.rstrip() + f"\n{line}\n"
+            landed_any = True
+    if not landed_any:
+        text = text.rstrip() + f"\n{_bulleted(answer)}\n"   # 最后兜底:原答案全量追加,答案绝不丢
     atomic_write_text(p, text)
     return paths.CARD_REL
