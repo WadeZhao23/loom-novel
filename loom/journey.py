@@ -138,3 +138,13 @@ def goto(root: Path, stage: str, *, skip: bool = False) -> dict:
     st["journey"] = j
     save_state(root, st)
     return journey_state(root)
+
+
+# ---- 领航员(第六个角色;项目文件优先、包内模板回退——同 deconstruct._load_skill 先例) ----
+
+def _navigator_system(root: Path) -> str:
+    from .agents import _parse_frontmatter   # 薄别名惯例(同 draft.py 之于 parse.py)
+    local = root / "agents" / "领航员.md"
+    path = local if local.exists() else Path(__file__).parent / "templates" / "agents" / "领航员.md"
+    _, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+    return body

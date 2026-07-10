@@ -57,3 +57,14 @@ def test_broken_cursor_falls_back(project):
     (project / ".loom_state.json").write_text("{烂掉的json", encoding="utf-8")
     s = journey.journey_state(project)          # load_state 容错 → 当无游标
     assert s["current"] == "立项"
+
+
+def test_navigator_loads_from_project(project):
+    text = journey._navigator_system(project)
+    assert "问题卡" in text and "绝不" in text     # 职责 + 红线都在系统提示词里
+
+
+def test_navigator_falls_back_to_package_template(project):
+    (project / "agents/领航员.md").unlink(missing_ok=True)        # 老书没有这个文件
+    text = journey._navigator_system(project)
+    assert "问题卡" in text                        # 包内模板兜底,不抛 FileNotFoundError
