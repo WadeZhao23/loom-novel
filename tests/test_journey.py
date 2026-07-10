@@ -3,6 +3,7 @@ from pathlib import Path
 
 from loom import journey
 from loom.paths import CARD_REL, PROJECT_CARD_REL
+from conftest import FakeBackend, const
 
 
 def test_fresh_project_stages_and_current(project):
@@ -68,3 +69,59 @@ def test_navigator_falls_back_to_package_template(project):
     (project / "agents/领航员.md").unlink(missing_ok=True)        # 老书没有这个文件
     text = journey._navigator_system(project)
     assert "问题卡" in text                        # 包内模板兜底,不抛 FileNotFoundError
+
+
+# ---- 出题(Task 4) ----
+
+_CARD_RAW = "问:主角的金手指是什么?\n- 吞噬胃袋\n- 时间回溯"
+
+
+def test_next_card_generates_and_caches(project):
+    fake = FakeBackend(const(_CARD_RAW))
+    out = journey.next_card(project, fake)
+    assert out["card"]["question"] == "主角的金手指是什么?"
+    assert out["card"]["stage"] == "立项"
+    assert len(fake.calls) == 1
+    out2 = journey.next_card(project, fake)      # 源文件没动 → 吃缓存,零计费
+    assert len(fake.calls) == 1
+    assert out2["card"]["question"] == out["card"]["question"]
+
+
+def test_next_card_regenerates_when_files_change(project):
+    fake = FakeBackend(const(_CARD_RAW))
+    journey.next_card(project, fake)
+    p = project / PROJECT_CARD_REL               # 用户外改文件 → 签名变 → 重出题
+    p.write_text(p.read_text(encoding="utf-8") + "\n手补一行定位\n", encoding="utf-8")
+    journey.next_card(project, fake)
+    assert len(fake.calls) == 2
+
+
+def test_next_card_counts_budget(project):
+    fake = FakeBackend(const(_CARD_RAW))
+    journey.next_card(project, fake)
+    s = journey.journey_state(project)
+    assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 1
+
+
+def test_exhausted_chain_advances_to_voice(project):
+    fake = FakeBackend(const("【无题】"))         # 每段都答无题 → 设计内的连锁问尽
+    out = journey.next_card(project, fake)
+    s = out["state"]
+    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is True
+    assert out["card"] == {"stage": "voice", "static": "seed"}   # 四段跳完停在 voice 静态卡
+
+
+def test_garbage_degrades_without_burning_budget(project):
+    fake = FakeBackend(const("我觉得这本书应该……(不成卡的闲聊)"))
+    out = journey.next_card(project, fake)
+    assert out["card"]["degraded"] is True
+    assert out["card"]["options"] == []
+    s = journey.journey_state(project)
+    assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 0
+
+
+def test_voice_stage_static_card(project):
+    for k in ("立项", "世界观", "人物", "卡章纲"):
+        journey.goto(project, k, skip=True)
+    out = journey.next_card(project, FakeBackend(const("不该被调用")))
+    assert out["card"] == {"stage": "voice", "static": "seed"}

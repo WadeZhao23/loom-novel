@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
-from .parse import is_substantive
+from .backends import LoomBackendError
+from .parse import is_substantive, parse_journey_card
 from .state import load_state, save_state
 
 _MAX_QUESTIONS = 4   # 每段题数预算(交互从简;代码侧常量,不进 loom.toml)
@@ -148,3 +150,73 @@ def _navigator_system(root: Path) -> str:
     path = local if local.exists() else Path(__file__).parent / "templates" / "agents" / "领航员.md"
     _, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
     return body
+
+
+# ---- 出题 ----
+
+_NAV_MAX_CHARS = 300   # 一张卡的输出预算(短步骤,防思考型模型吃空正文)
+
+
+def _sig(root: Path, spec: StageSpec) -> str:
+    """缓存卡签名 = 阶段源文件全文哈希;文件一动签名即失配 → 重出题(防旧卡问馊问题)。"""
+    h = hashlib.sha256()
+    for rel in spec.reads:
+        p = root / rel
+        files = sorted(p.glob("*.md")) if p.is_dir() else ([p] if p.is_file() else [])
+        for f in files:
+            h.update(f.read_text(encoding="utf-8").encode("utf-8"))
+    return h.hexdigest()[:12]
+
+
+def _stage_context(root: Path, spec: StageSpec) -> str:
+    from .agents import _read_files, _noop   # 复用:剥占位、跳空文件、目录展开
+    return _read_files(root, list(spec.reads), _noop)
+
+
+def next_card(root: Path, backend) -> dict:
+    view = journey_state(root)
+    cur = view["current"]
+    if cur is None:
+        return {"card": None, "state": view}
+    spec = _stage_spec(cur)
+    if spec.land == "seed":
+        return {"card": {"stage": "voice", "static": "seed"}, "state": view}
+
+    st = load_state(root)
+    j = _journey(st)
+    sig = _sig(root, spec)
+    cached = j["card"]
+    if cached and cached.get("stage") == cur and cached.get("sig") == sig:
+        return {"card": cached, "state": view}
+
+    left = _MAX_QUESTIONS - int(j["asked"].get(cur, 0))
+    user = (f"阶段:{spec.key}\n目标:{spec.goal}\n这一段还能问 {left} 题。\n\n"
+            f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
+    parsed = None
+    try:
+        raw = backend.complete(_navigator_system(root), user, max_chars=_NAV_MAX_CHARS)
+        parsed = parse_journey_card(raw)
+    except LoomBackendError:
+        parsed = None   # 断网/超时 → 降级卡,旅程不卡死
+
+    if parsed and parsed.get("exhausted"):
+        j["skips"][cur] = True   # 无题=本段该问的都有了;游标可丢,丢了最多重问一次
+        j["card"] = None
+        st["journey"] = j
+        save_state(root, st)
+        return next_card(root, backend) if journey_state(root)["current"] else \
+            {"card": None, "state": journey_state(root)}
+
+    if parsed:
+        card = {"stage": cur, "sig": sig, "question": parsed["question"],
+                "options": parsed["options"]}
+        if "field" in parsed:
+            card["field"] = parsed["field"]
+        j["asked"][cur] = int(j["asked"].get(cur, 0)) + 1   # 只有成卡才烧预算
+    else:
+        card = {"stage": cur, "sig": sig, "options": [], "degraded": True,
+                "question": f"关于「{spec.key}」,你想先定下什么?(出题失败,直接写你的决定)"}
+    j["card"] = card
+    st["journey"] = j
+    save_state(root, st)
+    return {"card": card, "state": journey_state(root)}
