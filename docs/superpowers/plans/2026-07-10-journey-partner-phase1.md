@@ -499,10 +499,12 @@ def test_next_card_counts_budget(project):
     assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 1
 
 
-def test_exhausted_advances_stage(project):
-    fake = FakeBackend(const("【无题】"))
+def test_exhausted_chain_advances_to_voice(project):
+    fake = FakeBackend(const("【无题】"))         # 每段都答无题 → 设计内的连锁问尽
     out = journey.next_card(project, fake)
-    assert out["state"]["current"] == "世界观"    # 立项问尽 → 推进
+    s = out["state"]
+    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is True
+    assert out["card"] == {"stage": "voice", "static": "seed"}   # 四段跳完停在 voice 静态卡
 
 
 def test_garbage_degrades_without_burning_budget(project):
@@ -604,7 +606,7 @@ def next_card(root: Path, backend) -> dict:
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `python3 -m pytest tests/test_journey.py -v`
-Expected: 全部通过(含 Task 1/2 旧测试)。注意 `test_exhausted_advances_stage`:无题推进后会对「世界观」段再出一题(FakeBackend 恒返【无题】→ 五段连锁跳完、card=None)——断言按 `out["state"]["current"] == "世界观"` 会失败的话,改为断言 `next(x for x in out["state"]["stages"] if x["key"]=="立项")["skipped"] is True`(连锁行为是设计内的,测试跟设计走)。
+Expected: 全部通过(含 Task 1/2 旧测试)。
 
 - [ ] **Step 5: 提交**
 
@@ -792,7 +794,7 @@ def _land_sections(root: Path, spec: StageSpec, question: str, answer: str, back
     body = _digest(backend, question, answer,
                    "整理成 markdown:每个主题一节,以「## 标题」开头(标题即文件名,如「## 金手指」「## 主角·林潜」),标题下写正文。")
     if not body:
-        title = re.sub(r"[\\/:*?\"<>|??。,]", "", question)[:12] or "访谈补充"
+        title = re.sub(r'[\\/:*?"<>|]|[??。,:]', "", question)[:12] or "访谈补充"
         body = f"## {title}\n{answer}"
     form = paths.brain_form(root, spec.target, spec.target_dir)
     if form != "file":
@@ -1003,10 +1005,10 @@ from pathlib import Path
 from loom.scaffold import init
 root = init('伙伴冒烟书', parent=Path('/private/tmp/claude-501/-Users-chambers-Desktop-Project-playground-Loom/7f43a148-e1b6-4bc9-81e4-a6a2267f46cf/scratchpad'))
 print(root)"
-LOOM_DEMO=1 python3 -m uvicorn loom.server:app --port 8788 &
+LOOM_DEMO=1 python3 -m uvicorn loom.server:app --port 8788 & SERVER_PID=$!
 sleep 2
 curl -s "http://127.0.0.1:8788/api/journey/state?root=<上一步输出的路径>" | python3 -m json.tool
-kill %1
+kill $SERVER_PID
 ```
 Expected: JSON 含 `"current": "立项"` 与五段 stages
 
