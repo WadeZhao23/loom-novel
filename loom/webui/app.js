@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 let DATA = null;            // 当前项目 state
 let CUR = null;             // 当前打开的文件 {rel, editable, chapter}
+let JOURNEY = null;         // 伙伴面板旅程状态缓存(/api/journey/state)
 let _lastLearnChapter = null;  // 最近一次 learn 的章号(供撤销)
 let _rewriteSel = null;        // 当前重写的选区 {start, end, span}
 let _rewriteText = "";         // 当前重写候选
@@ -690,46 +691,153 @@ function render() {
   renderJourney();
 }
 
-// ---------- 起步旅程卡(五步向导的书内形态):五步闭环,全完成自动收起 ----------
+// ---------- 伙伴面板(起书访谈卡片的书内形态):出题/选项/自答/跳段/回头改,全 done 自动收起 ----------
 function renderJourney() {
   const card = $("journey-card");
-  if (!DATA) { card.classList.add("hidden"); return; }
-  const dKey = "loom_journey_dismiss:" + DATA.root;
-  if (localStorage.getItem(dKey) === "1") { card.classList.add("hidden"); return; }
-  const be = DATA.backend || {};
-  const keyed = providerKeyed(be.provider);
-  const steps = [
-    { label: "接入模型(填 key 或用订阅)", done: keyed, run: openSettings },
-    { label: "AI 铺设定底稿(世界观/人物/卡章纲)", done: !!DATA.brain_ready, run: () => draftBrain("") },
-    { label: "喂样本,让它懂你(seed)", done: DATA.fingerprint_source !== "default", run: openSeed },
-    { label: "织第一章", done: (DATA.chapters || []).length > 0,
-      run: () => writeChapter(DATA.next_chapter, false) },
-    { label: "手改后 learn(越写越像你)", done: (DATA.chapters || []).some((c) => c.learned),
-      run: () => { const c = (DATA.chapters || [])[0];
-        if (c) openFile(`正文/第${c.n}章.md`, true, c.n); else toast("先织第一章"); } },
-  ];
-  if (steps.every((s) => s.done)) { localStorage.setItem(dKey, "1"); card.classList.add("hidden"); return; }
-  const n = steps.filter((s) => s.done).length;
-  card.innerHTML = "";
-  const head = document.createElement("div"); head.className = "jc-head";
-  const t = document.createElement("span"); t.textContent = `起步 · ${n}/${steps.length}`; head.appendChild(t);
-  const x = document.createElement("button"); x.className = "jc-dismiss";
-  x.title = "不再显示"; x.textContent = "×";
-  x.onclick = () => { localStorage.setItem(dKey, "1"); card.classList.add("hidden"); };
-  head.appendChild(x); card.appendChild(head);
-  let nextMarked = false;
-  steps.forEach((s) => {
-    const el = document.createElement("div");
-    const isNext = !s.done && !nextMarked; if (isNext) nextMarked = true;
-    el.className = "jc-step" + (s.done ? " done" : isNext ? " next" : "");
-    const mark = document.createElement("span"); mark.className = "jc-mark";
-    mark.textContent = s.done ? "✓" : "○";
-    const lab = document.createElement("span"); lab.textContent = s.label;
-    el.appendChild(mark); el.appendChild(lab);
-    el.onclick = s.run;
-    card.appendChild(el);
-  });
+  if (!card || !DATA) return;
+  if (localStorage.getItem("loom_journey_dismiss:" + DATA.root) === "1") {
+    card.classList.add("hidden");
+    return;
+  }
   card.classList.remove("hidden");
+  card.innerHTML = "<div class='jc-head'>伙伴 · 起书访谈</div><div class='jc-body'>加载中…</div>";
+  loadJourney();
+}
+
+async function loadJourney() {
+  try {
+    JOURNEY = await jreq("GET", `/api/journey/state?root=${encodeURIComponent(DATA.root)}`);
+  } catch (e) {
+    JOURNEY = null;
+  }
+  paintJourney();
+}
+
+function paintJourney() {
+  const card = $("journey-card");
+  if (!card || !DATA) return;
+  card.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "jc-head";
+  const stages = (JOURNEY && JOURNEY.stages) || [];
+  const doneN = stages.filter((s) => s.done || s.skipped).length;
+  head.textContent = `伙伴 · 起书访谈 ${doneN}/${stages.length || 5}`;
+  const dis = document.createElement("span");
+  dis.className = "jc-dismiss";
+  dis.textContent = "×";
+  dis.onclick = () => {
+    localStorage.setItem("loom_journey_dismiss:" + DATA.root, "1");
+    card.classList.add("hidden");
+  };
+  head.appendChild(dis);
+  card.appendChild(head);
+
+  // 段进度行(点击=回头改这段)
+  stages.forEach((s) => {
+    const row = document.createElement("div");
+    row.className = "jc-step" + (s.done ? " done" : "") + (s.key === JOURNEY.current ? " next" : "");
+    row.innerHTML = `<span class="jc-mark">${s.done ? "✓" : s.skipped ? "–" : "○"}</span>${escHtml(s.key)}`;
+    row.onclick = () => postJourneyGoto(s.key, false);
+    card.appendChild(row);
+  });
+
+  const body = document.createElement("div");
+  body.className = "jc-body";
+  card.appendChild(body);
+
+  const be = DATA.backend || {};
+  if (!providerKeyed(be.provider)) {
+    body.innerHTML = `<div class="jc-question">先接入模型,伙伴才能出题。</div>`;
+    body.appendChild(jcBtn("接入模型", openSettings));
+    return;
+  }
+  if (!JOURNEY) {
+    body.innerHTML = `<div class="jc-question">旅程状态没取到,稍后重试。</div>`;
+    return;
+  }
+  if (!JOURNEY.current) {
+    if (stages.length && stages.every((s) => s.done)) {
+      localStorage.setItem("loom_journey_dismiss:" + DATA.root, "1");
+      card.classList.add("hidden");
+    } else {
+      body.innerHTML = `<div class="jc-question">起书访谈走完了——去织第一章吧。</div>`;
+    }
+    return;
+  }
+  const cur = stages.find((s) => s.key === JOURNEY.current) || {};
+  if (cur.land === "seed") {
+    body.innerHTML = `<div class="jc-question">喂 2-3 段你的真实样本,让指纹像你(可跳过)。</div>`;
+    body.appendChild(jcBtn("去喂样本(seed)", openSeed));
+    body.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+    return;
+  }
+  const c = JOURNEY.card;
+  if (!c) {
+    body.appendChild(jcBtn("问我下一题", postJourneyCard));
+    body.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+    return;
+  }
+  const q = document.createElement("div");
+  q.className = "jc-question";
+  q.textContent = c.question;
+  body.appendChild(q);
+  (c.options || []).forEach((opt) => {
+    const b = document.createElement("button");
+    b.className = "jc-opt";
+    b.textContent = opt;
+    b.onclick = () => postJourneyAnswer(opt);
+    body.appendChild(b);
+  });
+  const ta = document.createElement("textarea");
+  ta.className = "jc-input";
+  ta.rows = 2;
+  ta.placeholder = c.options && c.options.length ? "或者自己写……" : "写下你的决定……";
+  body.appendChild(ta);
+  const row = document.createElement("div");
+  row.appendChild(jcBtn("就这么定", () => postJourneyAnswer(ta.value)));
+  row.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+  body.appendChild(row);
+}
+
+function jcBtn(label, fn, ghost) {
+  const b = document.createElement("button");
+  b.className = "jc-btn" + (ghost ? " ghost" : "");
+  b.textContent = label;
+  b.onclick = fn;
+  return b;
+}
+
+async function postJourneyCard() {
+  try {
+    const out = await jreq("POST", "/api/journey/card", { root: DATA.root });
+    JOURNEY = out.state;
+    JOURNEY.card = out.card;
+    paintJourney();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function postJourneyAnswer(text) {
+  if (!text || !text.trim()) return toast("先写点什么");
+  try {
+    const out = await jreq("POST", "/api/journey/answer", { root: DATA.root, answer: text.trim() });
+    JOURNEY = out.state;
+    toast("已记下 → " + out.landed);
+    paintJourney();
+    refresh();   // 外置大脑侧栏跟着长
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function postJourneyGoto(stage, skip) {
+  try {
+    JOURNEY = await jreq("POST", "/api/journey/goto", { root: DATA.root, stage, skip: !!skip });
+    paintJourney();
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // 5 个 agent 不是「提示词文件」,是流水线上五个有人设的角色。点卡片 → 看整条流水线(不贴 Markdown)。
