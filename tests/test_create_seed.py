@@ -49,6 +49,13 @@ def test_title_with_quotes_roundtrips(tmp_path):
     assert load_config(root).title == '崇祯"帝"书'
 
 
+def test_title_with_illegal_chars_sanitizes_dirname(tmp_path):
+    # 书名带 Windows 非法字符 → 目录名清洗(否则 Win 建目录 WinError 123);title 仍原样进 loom.toml
+    root = scaffold_init('崇祯"帝":书*卷?', parent=tmp_path)
+    assert not any(c in root.name for c in '\\/:*?"<>|')   # 目录名不落任何非法字符
+    assert load_config(root).title == '崇祯"帝":书*卷?'       # 书名本身分毫不改
+
+
 def test_platform_with_backref_chars_safe(tmp_path):
     root = scaffold_init("回引书", parent=tmp_path, platform="番茄\\1")
     assert "平台:番茄\\1" in (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")

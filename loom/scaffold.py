@@ -58,6 +58,16 @@ def available_genres() -> list[str]:
     return sorted(p.stem for p in d.glob("*.md") if p.stem != "README")
 
 
+_ILLEGAL_DIRCHARS = re.compile(r'[\\/:*?"<>|]')  # Windows 目录名禁用字符(Mac/Linux 允许,故只 Win CI 暴露)
+
+
+def _safe_dirname(name: str) -> str:
+    """书名清成 Windows 也能建的目录名:非法字符→·、去尾部点/空格(Win 会静默剥、致路径不符)。
+    书名本身原样存 loom.toml title(见 init 落 _toml_str(name)),不受此清洗影响。"""
+    safe = _ILLEGAL_DIRCHARS.sub("·", name).rstrip(" .")
+    return safe or "新书"
+
+
 def init(name: str, parent: Path | None = None, genre: str | None = None,
          idea: str = "", platform: str = "") -> Path:
     """在 parent(默认当前目录)下建一个名为 name 的项目骨架,返回项目根路径。
@@ -66,7 +76,7 @@ def init(name: str, parent: Path | None = None, genre: str | None = None,
     idea(一句话设定)存 loom.toml 供 AI 铺底稿;platform 写立项卡平台行——都是作者在建书框
     填的,loom 只代为落盘(立项卡「从不自动写」红线不涉:内容所有权在作者)。
     """
-    target = (parent or Path.cwd()) / name
+    target = (parent or Path.cwd()) / _safe_dirname(name)
     if target.exists() and any(target.iterdir()):
         raise FileExistsError(f"目录 {target} 已存在且非空,换个名字或先清空。")
 
