@@ -29,7 +29,15 @@ def test_write_mutex_blocks_concurrent_write_and_learn(project, monkeypatch):
     monkeypatch.setattr(server, "get_backend", lambda cfg: object())
     monkeypatch.setattr(server, "cheap_backend", lambda cfg: None)
 
-    body = {"root": str(project), "chapter": 1}
+    # 预置一章 Loom 快照 → 门禁豁免,专测并发锁(body 改写第2章)
+    from loom import ledger, paths as _paths
+    c1 = _paths.chapter_path(project, 1); c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# 第1章\n\nx\n", encoding="utf-8")
+    snap1 = _paths.snapshot_path(project, 1); snap1.parent.mkdir(parents=True, exist_ok=True)
+    snap1.write_text(c1.read_text(encoding="utf-8"), encoding="utf-8")   # .原稿 快照(_has_loom_chapter 判据)
+    ledger.record_snapshot(project, 1, c1.read_text(encoding="utf-8"))
+
+    body = {"root": str(project), "chapter": 2}
     first: dict = {}
 
     def run_first():

@@ -58,20 +58,18 @@ def test_learn_report_shape_and_recap(project):
 
 # ---------------------------------------------------------------- write 前置三态
 def test_write_precheck_three_states(project):
-    assert usecases.write_precheck(project, 1, False) is None      # 没写过 → 放行
-
     out = paths.chapter_path(project, 1)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("# 第1章\n\n正文。\n", encoding="utf-8")
-    ledger.record_snapshot(project, 1, out.read_text(encoding="utf-8"))
-    rej = usecases.write_precheck(project, 1, False)               # 已写完、未手改
+    snap = paths.snapshot_path(project, 1)
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    snap.write_text(out.read_text(encoding="utf-8"), encoding="utf-8")   # .原稿 快照(_has_loom_chapter 判据)
+    ledger.record_snapshot(project, 1, out.read_text(encoding="utf-8"))   # 造 Loom 章 → 门禁豁免
+    assert usecases.write_precheck(project, 1, True) is None              # force 放行
+    rej = usecases.write_precheck(project, 1, False)
     assert rej["code"] == "chapter_exists"
-
     out.write_text("# 第1章\n\n我手改过的正文。\n", encoding="utf-8")
-    rej = usecases.write_precheck(project, 1, False)               # 与账本不符 → drifted
-    assert rej["code"] == "chapter_drifted"
-
-    assert usecases.write_precheck(project, 1, True) is None       # force → 放行
+    assert usecases.write_precheck(project, 1, False)["code"] == "chapter_drifted"
 
 
 # ---------------------------------------------------------------- 锁:用例层直接拒

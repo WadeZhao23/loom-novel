@@ -167,7 +167,8 @@ def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, 
         if rej:
             _die({"chapter_drifted": f"第 {chapter} 章正文与上次记录不符(你手改过?)。"
                                      f"先 learn {chapter},或加 --force 以你的正文为准重写。",
-                  "chapter_exists": f"第 {chapter} 章已写完。要重写加 --force。"}[rej["code"]])
+                  "chapter_exists": f"第 {chapter} 章已写完。要重写加 --force。"}
+                 .get(rej["code"], rej["error"]))   # 新 code(brain_incomplete)用 precheck 自带文案,不 KeyError
         config = load_config(root)
         console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字[/dim]\n")
         with usecases.write_lock(root):

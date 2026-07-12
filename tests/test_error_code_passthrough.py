@@ -29,14 +29,23 @@ def test_write_stream_error_event_carries_code(project, monkeypatch):
     from starlette.testclient import TestClient
     import loom.server as server
     import loom.usecases as usecases
+    from loom import ledger, paths
 
     def boom(root, chapter, progress, **kw):
         raise LoomBackendError(render("deepseek_insufficient_balance"),
                                code="deepseek_insufficient_balance")
 
     monkeypatch.setattr(usecases, "write_chapter", boom)
+
+    # 预置一章 Loom 快照 → 起书门禁豁免(本测试意在验错误 code 透传,不是门禁;写第2章)
+    c1 = paths.chapter_path(project, 1); c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# 第1章\n\nx\n", encoding="utf-8")
+    snap1 = paths.snapshot_path(project, 1); snap1.parent.mkdir(parents=True, exist_ok=True)
+    snap1.write_text(c1.read_text(encoding="utf-8"), encoding="utf-8")
+    ledger.record_snapshot(project, 1, c1.read_text(encoding="utf-8"))
+
     client = TestClient(server.app, base_url="http://127.0.0.1")
-    r = client.post("/api/write", json={"root": str(project), "chapter": 1})
+    r = client.post("/api/write", json={"root": str(project), "chapter": 2})
     assert r.status_code == 200
     evs = [json.loads(l) for l in r.text.splitlines() if l.strip()]
     err = next(e for e in evs if e["type"] == "error")

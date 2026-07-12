@@ -85,11 +85,25 @@ def write_lock(root: Path | str) -> Iterator[None]:
 
 
 # ---------------------------------------------------------------- write
+def _has_loom_chapter(root: Path) -> bool:
+    """本书有没有任何 Loom 织出的章(判据:存在 .原稿 快照)。导入章无快照 → 视作未织。"""
+    return any(paths.snapshot_path(root, n).exists() for n in paths.chapter_numbers(root))
+
+
 def write_precheck(root: Path | str, chapter: int, force: bool = False) -> dict | None:
-    """写前三态检查:None=放行;否则 {"error","code"}(措辞即 server 409 响应体)。"""
+    """写前检查:None=放行;否则 {"error","code",...}(措辞即 server 409 响应体)。
+    起书完整性硬门禁在最前:仅当本书还没有 Loom 织的章时启用,force 不越它。"""
+    root = Path(root)
+    if not _has_loom_chapter(root):
+        ok, missing = journey_mod.writing_unlocked(root)
+        if not ok:
+            names = "、".join(missing)
+            return {"error": f"开书资料还差:{names}。在伙伴面板答几题即可解锁"
+                             f"(或手填 外置大脑/ 对应文件)。",
+                    "code": "brain_incomplete", "missing": missing, "stage": missing[0]}
     if force or not paths.chapter_path(root, chapter).exists():
         return None
-    if ledger.chapter_drifted(Path(root), chapter):
+    if ledger.chapter_drifted(root, chapter):
         return {"error": f"第 {chapter} 章正文与上次记录不符(手改过?)。先 learn,或勾选覆盖以你的正文为准重写。",
                 "code": "chapter_drifted"}
     return {"error": f"第 {chapter} 章已写完。要重写请勾选覆盖。", "code": "chapter_exists"}
