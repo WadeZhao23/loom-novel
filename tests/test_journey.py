@@ -33,10 +33,11 @@ def test_project_card_platform_line_alone_not_done(project):
     assert next(x for x in journey.journey_state(project)["stages"] if x["key"] == "立项")["done"] is False
 
 
-def test_skip_advances_current(project):
+def test_gate_stage_skip_downgrades_to_focus(project):
+    # 门禁段(立项)禁跳:goto(skip=True) 静默降级为聚焦本段,不写 skip 标记、不前进(Task 5)
     s = journey.goto(project, "立项", skip=True)
-    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is True
-    assert s["current"] == "世界观"
+    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is False
+    assert s["current"] == "立项"
 
 
 def test_goto_refocuses_and_resets_budget(project):
@@ -101,12 +102,14 @@ def test_next_card_counts_budget(project):
     assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 1
 
 
-def test_exhausted_chain_advances_to_voice(project):
-    fake = FakeBackend(const("【无题】"))         # 每段都答无题 → 设计内的连锁问尽
+def test_exhausted_without_done_degrades_instead_of_skip(project):
+    # 空文件却报无题 = 模型误判;门禁段没做完不许被自动跳过,降级卡兜底,别死锁(Task 5)
+    fake = FakeBackend(const("【无题】"))
     out = journey.next_card(project, fake)
     s = out["state"]
-    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is True
-    assert out["card"] == {"stage": "voice", "static": "seed"}   # 四段跳完停在 voice 静态卡
+    assert next(x for x in s["stages"] if x["key"] == "立项")["skipped"] is False
+    assert s["current"] == "立项"
+    assert out["card"]["degraded"] is True
 
 
 def test_garbage_degrades_without_burning_budget(project):
@@ -119,8 +122,18 @@ def test_garbage_degrades_without_burning_budget(project):
 
 
 def test_voice_stage_static_card(project):
-    for k in ("立项", "世界观", "人物", "卡章纲"):
-        journey.goto(project, k, skip=True)
+    # 门禁段不能再靠 skip=True 快进(Task 5 后禁跳);真填内容让四段 done,才轮到 voice
+    p = project / PROJECT_CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace(
+        "(占位示例:重生 + 复仇 + 宗门流。一句话点明核心题材标签。)", "重生 + 复仇 + 宗门流"),
+        encoding="utf-8")
+    (project / "外置大脑/世界观/金手指.md").write_text(
+        "# 金手指\n\n吞噬万物的胃袋,吃什么长什么,代价是饭量与寿命挂钩。\n", encoding="utf-8")
+    (project / "外置大脑/人物/主角·雪夜.md").write_text(
+        "# 主角·雪夜\n\n宗门废柴,被逐出师门,捡到会说话的鼎。\n", encoding="utf-8")
+    p = project / CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace(
+        "- 第1章:", "- 第1章:主角雪夜被逐出宗门,捡到会说话的鼎"), encoding="utf-8")
     out = journey.next_card(project, FakeBackend(const("不该被调用")))
     assert out["card"] == {"stage": "voice", "static": "seed"}
 
@@ -305,3 +318,27 @@ def test_degraded_card_not_pinned_by_cache(project):
     out2 = journey.next_card(project, fake)       # 网络恢复:降级卡不吃缓存,真重试
     assert "degraded" not in out2["card"]
     assert out2["card"]["question"] == "主角的金手指是什么?"
+
+
+# ---- skip 语义修正:门禁段禁跳 + exhausted 守卫(Task 5) ----
+
+def test_gate_stage_cannot_be_skipped(project):
+    s = journey.goto(project, "世界观", skip=True)   # 门禁段禁跳
+    assert next(x for x in s["stages"] if x["key"] == "世界观")["skipped"] is False
+    assert s["current"] == "世界观"                   # 降级为聚焦本段,不跳走
+
+
+def test_voice_stage_can_still_skip(project):
+    s = journey.goto(project, "voice", skip=True)
+    assert next(x for x in s["stages"] if x["key"] == "voice")["skipped"] is True
+
+
+def test_exhausted_on_done_stage_skips_and_advances(project):
+    # 门禁段真做完了(stage_done 真)才允许 exhausted 自动跳段——回头改场景:已完成段仍可被再问尽
+    (project / "外置大脑/世界观/金手指.md").write_text(
+        "# 金手指\n\n吞噬万物的胃袋,吃什么长什么,代价是饭量与寿命挂钩。\n", encoding="utf-8")
+    journey.goto(project, "世界观")   # 回头改:压过 done,显式聚焦已完成段
+    out = journey.next_card(project, FakeBackend(const("【无题】")))
+    s = out["state"]
+    assert next(x for x in s["stages"] if x["key"] == "世界观")["skipped"] is True
+    assert s["current"] != "世界观"   # 真做完了 + 报无题 → 真跳走,不困在本段

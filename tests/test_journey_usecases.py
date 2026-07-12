@@ -31,5 +31,5 @@ def test_journey_answer_and_goto(project, monkeypatch):
     usecases.journey_card(project)
     out = usecases.journey_answer(project, "番茄")
     assert out["landed"].endswith("立项卡.md")
-    s = usecases.journey_goto(project, "立项", skip=True)
-    assert s["current"] == "世界观"
+    s = usecases.journey_goto(project, "立项", skip=True)   # 门禁段禁跳:静默降级为聚焦,不前进(Task 5)
+    assert s["current"] == "立项"

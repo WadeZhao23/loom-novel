@@ -769,16 +769,22 @@ function paintJourney() {
     return;
   }
   const cur = stages.find((s) => s.key === JOURNEY.current) || {};
+  // 门禁四段(立项/世界观/人物/卡章纲)禁跳过:按钮改「先放放」聚焦不跳;只有 voice 保留真跳过
+  const GATE = ["立项", "世界观", "人物", "卡章纲"];
+  const isGate = GATE.includes(JOURNEY.current);
+  const skipBtn = isGate
+    ? jcBtn("先放放", () => postJourneyGoto(JOURNEY.current, false), true)
+    : jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true);
   if (cur.land === "seed") {
     body.innerHTML = `<div class="jc-question">喂 2-3 段你的真实样本,让指纹像你(可跳过)。</div>`;
     body.appendChild(jcBtn("去喂样本(seed)", openSeed));
-    body.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+    body.appendChild(skipBtn);
     return;
   }
   const c = JOURNEY.card;
   if (!c) {
     body.appendChild(jcBtn("问我下一题", postJourneyCard));
-    body.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+    body.appendChild(skipBtn);
     return;
   }
   const q = document.createElement("div");
@@ -799,7 +805,7 @@ function paintJourney() {
   body.appendChild(ta);
   const row = document.createElement("div");
   row.appendChild(jcBtn("就这么定", () => postJourneyAnswer(ta.value)));
-  row.appendChild(jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true));
+  row.appendChild(skipBtn);
   body.appendChild(row);
 }
 

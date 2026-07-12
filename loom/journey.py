@@ -164,6 +164,8 @@ def journey_state(root: Path) -> dict:
 
 def goto(root: Path, stage: str, *, skip: bool = False) -> dict:
     _stage_spec(stage)   # 未知段名即 ValueError
+    if skip and stage in _GATE_STAGES:
+        return goto(root, stage, skip=False)   # 门禁段不许跳过,静默降级为「聚焦本段」,不写 skip 标记
     view = journey_state(root)
     if not skip and stage == view["current"]:
         return view   # 已在本段:幂等返回,不作废待答卡、不清预算(防误点重复计费,I2)
@@ -242,12 +244,14 @@ def next_card(root: Path, backend) -> dict:
         parsed = None   # 断网/超时 → 降级卡,旅程不卡死
 
     if parsed and parsed.get("exhausted"):
-        j["skips"][cur] = True   # 无题=本段该问的都有了;游标可丢,丢了最多重问一次
-        j["card"] = None
-        st["journey"] = j
-        save_state(root, st)
-        return next_card(root, backend) if journey_state(root)["current"] else \
-            {"card": None, "state": journey_state(root)}
+        if stage_done(root, spec):
+            j["skips"][cur] = True   # 真做完了才跳;游标可丢,丢了最多重问一次
+            j["card"] = None
+            st["journey"] = j
+            save_state(root, st)
+            return next_card(root, backend) if journey_state(root)["current"] else \
+                {"card": None, "state": journey_state(root)}
+        parsed = None   # 没做完却报无题 → 模型误判,降级卡兜底,给自由输入出口,别死锁
 
     if parsed:
         card = {"stage": cur, "sig": sig, "question": parsed["question"],
