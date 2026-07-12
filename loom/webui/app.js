@@ -770,11 +770,12 @@ function paintJourney() {
     return;
   }
   const cur = stages.find((s) => s.key === JOURNEY.current) || {};
-  // 门禁四段(立项/世界观/人物/卡章纲)禁跳过:按钮改「先放放」聚焦不跳;只有 voice 保留真跳过
+  // 门禁四段(立项/世界观/人物/卡章纲)禁跳过:按钮改「先答别的」跳去下一个没填的地基段;只有 voice 保留真跳过
   const GATE = ["立项", "世界观", "人物", "卡章纲"];
   const isGate = GATE.includes(JOURNEY.current);
+  const nextGate = (JOURNEY.stages || []).find((s) => GATE.includes(s.key) && !s.done && s.key !== JOURNEY.current);
   const skipBtn = isGate
-    ? jcBtn("先放放", () => postJourneyGoto(JOURNEY.current, false), true)
+    ? jcBtn("先答别的", () => nextGate ? postJourneyGoto(nextGate.key, false) : toast("这几段填齐才能开写"), true)
     : jcBtn("跳过这段", () => postJourneyGoto(JOURNEY.current, true), true);
   if (cur.land === "seed") {
     body.innerHTML = `<div class="jc-question">喂 2-3 段你的真实样本,让指纹像你(可跳过)。</div>`;
@@ -953,6 +954,7 @@ function showGuide({ title, bodyHtml, primary, ghost }) {
 function openGateGuide(missing) {
   const first = missing[0];
   localStorage.removeItem("loom_journey_dismiss:" + DATA.root);   // 一键去补前先解除面板收起
+  $("journey-card").classList.remove("hidden");                   // 卡若已被×收起,同步摘掉 hidden,补齐后立刻可见
   showGuide({
     title: "先把开书地基打完",
     bodyHtml:

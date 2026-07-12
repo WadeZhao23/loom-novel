@@ -302,7 +302,7 @@ def project_state(root: Path | str) -> dict:
                     "providers": provider_catalog()},
         "fingerprint_source": st.get("fingerprint_source", "default"),
         "brain_ready": brain_ready(root),   # 弱判据:铺过底(保留供旧前端,门禁判据用下面两项)
-        "writing_unlocked": _wu[0],
+        "writing_unlocked": _wu[0] or _has_loom_chapter(root),
         "missing": _wu[1],
         "brain": _brain_entries(root),   # 双形态:单文件=一行;目录=分组(children 子文件)
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],

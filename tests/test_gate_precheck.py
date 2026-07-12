@@ -39,3 +39,16 @@ def test_book_with_loom_chapter_is_exempt(project):
     snap.write_text(out.read_text(encoding="utf-8"), encoding="utf-8")   # .原稿 快照(_has_loom_chapter 判据)
     ledger.record_snapshot(project, 1, out.read_text(encoding="utf-8"))
     assert usecases.write_precheck(project, 2, False) is None   # 写第2章:大脑空也豁免(书已在写)
+
+
+def test_book_with_loom_chapter_reports_writing_unlocked_true(project):
+    # project_state 暴露的裸 writing_unlocked 必须折叠进同一豁免作用域,
+    # 否则前端软拦(app.js: DATA.writing_unlocked === false)会把存量老书 UI 回溯锁死
+    out = paths.chapter_path(project, 1)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("# 第1章\n\nx\n", encoding="utf-8")
+    snap = paths.snapshot_path(project, 1)
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    snap.write_text("# 第1章\n\nx\n", encoding="utf-8")   # .原稿 快照文件 = Loom 织过的标志
+    ledger.record_snapshot(project, 1, out.read_text(encoding="utf-8"))
+    assert usecases.project_state(project)["writing_unlocked"] is True   # 老书豁免,四项空也放行
