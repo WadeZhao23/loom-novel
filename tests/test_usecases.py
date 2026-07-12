@@ -121,3 +121,10 @@ def test_lock_covers_new_endpoints_but_not_file_put(project):
     client = TestClient(server.app, base_url="http://127.0.0.1")
     r = client.post("/api/chapter/delete", json={"root": root, "n": 99})
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------- 起书完整性门禁
+def test_project_state_exposes_gate(project):
+    st = usecases.project_state(project)
+    assert st["writing_unlocked"] is False
+    assert st["missing"] == ["立项", "世界观", "人物", "卡章纲"]
