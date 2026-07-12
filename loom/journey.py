@@ -51,6 +51,19 @@ STAGES: tuple[StageSpec, ...] = (
 _CARD_FIELDS = ("分区", "题材", "对标意图", "为什么选它")
 _CARD_LINE_RE = re.compile(r"^-\s*第(\d+)章[:：][ \t]*\S", re.M)
 
+_NAME_SEP = ("·", "・", "•")   # 与 agents._NAME_SEP 同一口径:专名册只认带分隔符的「类型·名字」标题
+_PROTAG_HEAD_RE = re.compile(r"^##\s*主角\s*[·・•]\s*\S", re.M)
+_GATE_STAGES = ("立项", "世界观", "人物", "卡章纲")   # voice 不进门禁
+
+
+def _all_h2(text: str) -> list[tuple[str, str]]:
+    """粗切 (H2标题, 段落体) 列表——救导入立项卡的非标准 H2(如「## 来自:xxx」)。"""
+    out: list[tuple[str, str]] = []
+    for chunk in re.split(r"^##\s+", text, flags=re.M)[1:]:
+        head, _, body = chunk.partition("\n")
+        out.append((head.strip(), body))
+    return out
+
 
 def _stage_spec(key: str) -> StageSpec:
     for s in STAGES:
@@ -67,12 +80,28 @@ def _h2_body(text: str, title: str) -> str:
 
 
 def _project_card_done(root: Path) -> bool:
-    """任一格有实质内容即算(模板自带的「平台:起点」默认行不算)。"""
+    """四格任一实质;或救导入——任一非模板 H2 段有实质(整卡兜底,不误吃模板占位/平台默认行)。"""
     p = root / paths.PROJECT_CARD_REL
     if not p.is_file():
         return False
     text = p.read_text(encoding="utf-8")
-    return any(is_substantive(_h2_body(text, f)) for f in _CARD_FIELDS)
+    if any(is_substantive(_h2_body(text, f)) for f in _CARD_FIELDS):
+        return True
+    return any(is_substantive(body) for head, body in _all_h2(text) if head not in _CARD_FIELDS)
+
+
+def _protagonist_done(root: Path) -> bool:
+    """至少一张「主角·名字」实质卡;只填反派/未命名/占位不算(同专名册口径)。"""
+    form = paths.brain_form(root, paths.CHARS_REL, paths.CHARS_DIR_REL)
+    if form == "dir":
+        return any(f.name != paths.GROWTH_NAME and f.stem.startswith("主角")
+                   and any(s in f.stem for s in _NAME_SEP) and "未命名" not in f.stem
+                   and is_substantive(f.read_text(encoding="utf-8"))
+                   for f in paths.brain_dir_files(root, paths.CHARS_DIR_REL))
+    if form == "file":
+        p = root / paths.CHARS_REL
+        return p.is_file() and bool(_PROTAG_HEAD_RE.search(p.read_text(encoding="utf-8")))
+    return False
 
 
 def _rel_has_content(root: Path, rel: str) -> bool:
@@ -90,7 +119,12 @@ def stage_done(root: Path, spec: StageSpec) -> bool:
         return _project_card_done(root)
     if spec.land == "card_lines":
         p = root / spec.target
-        return p.is_file() and bool(_CARD_LINE_RE.search(p.read_text(encoding="utf-8")))
+        if not p.is_file():
+            return False
+        text = p.read_text(encoding="utf-8")
+        return bool(_CARD_LINE_RE.search(text)) or is_substantive(text)   # 放宽:段落式章纲也算
+    if spec.key == "人物":
+        return _protagonist_done(root)   # 硬判主角,面板与门禁同口径(只填反派不算过)
     return any(_rel_has_content(root, rel) for rel in spec.reads)
 
 
@@ -383,3 +417,9 @@ def _land_card_lines(root: Path, question: str, answer: str, backend) -> str:
         text = text.rstrip() + f"\n{_bulleted(answer)}\n"   # 最后兜底:原答案全量追加,答案绝不丢
     atomic_write_text(p, text)
     return paths.CARD_REL
+
+
+def writing_unlocked(root: Path) -> tuple[bool, list[str]]:
+    """起书完整性:立项+世界观+主角+卡章纲 是否齐;返回 (解锁?, 缺项 STAGES key 列表)。纯文件派生。"""
+    missing = [s.key for s in STAGES if s.key in _GATE_STAGES and not stage_done(root, s)]
+    return (not missing, missing)
