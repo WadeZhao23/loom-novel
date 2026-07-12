@@ -393,7 +393,7 @@ async function commitFolder() {
       title: "导入完成",
       bodyHtml: `<p class="guide-lead">已接进来:${placed || "(空)"}。</p>` +
         (s.notes.length ? `<p class="hint">${s.notes.map((n) => "· " + n).join("<br>")}</p>` : "") +
-        `<p class="hint">你的设定原样进来了,直接就能织第一章。</p>`,
+        `<p class="hint">你的设定原样进来了。缺立项/世界观/主角/章纲的话,写第一章前伙伴会带你补齐。</p>`,
       primary: { label: "知道了" },
     });
   } catch (e) { $("folder-error").textContent = e.message; }
