@@ -726,6 +726,7 @@ function paintJourney() {
   const stages = (JOURNEY && JOURNEY.stages) || [];
   const doneN = stages.filter((s) => s.done || s.skipped).length;
   head.textContent = `伙伴 · 起书访谈 ${doneN}/${stages.length || 5}`;
+  head.prepend(agentAvatar("领航员", "jc-ava", "jc-fallback"));
   const dis = document.createElement("span");
   dis.className = "jc-dismiss";
   dis.textContent = "×";
@@ -866,11 +867,12 @@ async function postJourneyGoto(stage, skip) {
 // 5 个 agent 不是「提示词文件」,是流水线上五个有人设的角色。点卡片 → 看整条流水线(不贴 Markdown)。
 const AGENT_ORDER = ["设定师", "大纲师", "写手", "编辑", "润色师"];
 const AGENTS_META = {
-  "设定师": { slug: "loremaster", tag: "第一棒 · 立规矩", reads: "世界观 · 人物卡 · 方法论", produces: "本章设定锚点",        desc: "守世界观的人。开写前为这章圈好边界、钉死硬约束,绝不让设定穿帮。" },
+  "设定师": { slug: "loremaster", tag: "第一棒 · 立规矩", reads: "世界观 · 人物卡 · 方法论", produces: "本章设定锚点",        desc: "守世界观的人。开写前为这章圈好边界、钉死硬约束,绝不让设定穿帖。" },
   "大纲师": { slug: "outliner",   tag: "第二棒 · 搭骨架", reads: "卡章纲 · 故事引擎",       produces: "分镜细纲(场景骨头)", desc: "搭骨架的人。把这章拆成 3-6 场分镜,标好爆点和章末钩,让写手照着就能落字。" },
   "写手":   { slug: "writer",     tag: "第三棒 · 落字",   reads: "写作指纹 · 网文大神",     produces: "本章初稿",          desc: "真正落字的人。照着你的写作指纹写初稿——越写越像你,是这本书的灵魂。" },
   "编辑":   { slug: "editor",     tag: "第四棒 · 挑硬伤", reads: "评估自检",               produces: "本章改稿",          desc: "挑刺的人。盘爽点、钩子、OOC、设定漂移,问题当场改掉,只管内容硬伤。" },
   "润色师": { slug: "polisher",   tag: "第五棒 · 去AI味", reads: "去AI味 · 写作指纹",       produces: "本章终稿",          desc: "最后一道。擦掉 AI 腔与套话,却保留你的口头禅和怪句,让它读起来像真人。" },
+  "领航员": { slug: "navigator", tag: "伙伴 · 起书" },
 };
 // 头像:有图用 /agents/<slug>.jpg,没生成则退化成首字徽标
 function agentAvatar(name, imgCls, fbCls) {

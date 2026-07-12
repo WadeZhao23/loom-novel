@@ -571,11 +571,15 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 /* ---------- 7f. 起步旅程卡(五步向导壳的书内形态):全部完成自动消失 ---------- */
 .journey-card { margin-bottom: var(--space-5); padding: var(--space-3);
   border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-sunken); }
-.journey-card .jc-head { display: flex; align-items: center; justify-content: space-between;
+.journey-card .jc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: var(--fs-xs); font-weight: 700; color: var(--text-soft); margin-bottom: 4px; }
 .journey-card .jc-dismiss { border: none; background: transparent; color: var(--text-mute);
   cursor: pointer; padding: 0 2px; font-size: var(--fs-sm); line-height: 1; }
 .journey-card .jc-dismiss:hover { color: var(--text); }
+.journey-card .jc-ava, .journey-card .jc-fallback {
+  width: 24px; height: 24px; border-radius: 50%; flex: none;
+  object-fit: cover; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(127,127,127,0.15); font-size: 13px; }
 .journey-card .jc-step { display: flex; align-items: center; gap: 7px; padding: 4px 2px;
   font-size: var(--fs-sm); color: var(--text-soft); cursor: pointer; border-radius: var(--radius-xs); }
 .journey-card .jc-step:hover { background: var(--line-soft); }
