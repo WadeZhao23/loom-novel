@@ -59,3 +59,11 @@ def test_title_with_illegal_chars_sanitizes_dirname(tmp_path):
 def test_platform_with_backref_chars_safe(tmp_path):
     root = scaffold_init("回引书", parent=tmp_path, platform="番茄\\1")
     assert "平台:番茄\\1" in (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+
+
+def test_genre_lands_into_project_card(tmp_path):
+    from loom import journey
+    root = scaffold_init("题材落卡书", parent=tmp_path, genre="重生")
+    text = (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+    assert "重生" in journey._h2_body(text, "题材")
+    assert journey._project_card_done(root) is True   # 建完即过立项谓词

@@ -110,6 +110,14 @@ def init(name: str, parent: Path | None = None, genre: str | None = None,
         atomic_write_text(card, re.sub(r"^平台:.*$", lambda m: f"平台:{platform.strip()}",
                                        card.read_text(encoding="utf-8"), count=1, flags=re.M))
 
+    # 建书框选的题材代落立项卡「## 题材」格(同平台行先例:作者填的,loom 只代为落盘)
+    if genre and genre.strip():
+        card = target / PROJECT_CARD_REL
+        text = card.read_text(encoding="utf-8")
+        text = re.sub(r"(^##\s*题材\s*$).*?(?=^##\s|\Z)",
+                      lambda m: f"{m.group(1)}\n{genre.strip()}\n\n", text, count=1, flags=re.M | re.S)
+        atomic_write_text(card, text)
+
     # 写作指纹.md 离线落一份中性默认(不联网、不播种)
     atomic_write_text(target / FINGERPRINT_REL, neutral_default())
 
