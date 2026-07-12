@@ -10,7 +10,6 @@ let _rewriteText = "";         // 当前重写候选
 let _dirty = false;            // 编辑器是否有未保存改动
 let _saveTimer = null;         // 自动保存 debounce
 let _seedMode = "sample";      // seed 来源:sample | inherit
-let _brainGateShown = false;   // 织章拦截只弹一次:「就这样写」后本次会话不再唠叨
 let _lastDebugReport = null;   // 写章流里先到的 debug_report 事件,chapter_done 后延时弹报告
 
 // ---------- 图标(iconfont Symbol)----------
@@ -424,7 +423,6 @@ function showWelcome() {
 }
 function enterProject(d) {
   DATA = d;
-  _brainGateShown = false;   // 织章拦截按书粒度:换一本书,空底提醒重新有效(一期终审留档项)
   hideInlinePanel();   // 换书收面板:稳态残留的候选绝不能落进另一本书
   JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
   localStorage.setItem("loom_root", d.root);
@@ -941,6 +939,20 @@ function showGuide({ title, bodyHtml, primary, ghost }) {
   };
   wire(pb, primary); wire(gb, ghost);
   $("guide-overlay").classList.remove("hidden");
+}
+
+// 起书完整性硬门禁的引导卡:missing 没齐就拦,只给「去补齐」/「AI 铺底稿」两条路,没有「就这样写」
+function openGateGuide(missing) {
+  const first = missing[0];
+  localStorage.removeItem("loom_journey_dismiss:" + DATA.root);   // 一键去补前先解除面板收起
+  showGuide({
+    title: "先把开书地基打完",
+    bodyHtml:
+      `<p class="guide-lead">还差:${(missing.length ? missing : ["起书资料"]).join("、")}。没有这些上下文,AI 只能瞎编、和你的书对不上。</p>` +
+      `<p class="hint">在伙伴面板答几题就能补齐;或让 AI 按书名先铺一版设定底稿(世界观/人物/章纲)。</p>`,
+    primary: { label: "去伙伴面板补齐", fn: () => first && postJourneyGoto(first, false) },
+    ghost: { label: "✨ AI 铺底稿", fn: () => draftBrain("") },
+  });
 }
 
 // skills 是给 Agent 看的「方法论手册」:点开先讲清是什么 / 哪一棒用,而不是糊一脸 Markdown
@@ -1557,17 +1569,9 @@ async function writeChapter(n, force) {
     toast(`先在设置里填 ${bspec.label || be.provider} 的 API Key(或把供应商切到 Claude / Codex 免 key)再开写`, true);
     flashSetting("api-key"); return;
   }
-  // 外置大脑全空(世界观/人物/卡章纲都没实质内容)→ 拦一次:直接写必跑偏,AI 只能瞎编
-  if (!DATA.brain_ready && !_brainGateShown) {
-    _brainGateShown = true;
-    showGuide({
-      title: "设定还是空的",
-      bodyHtml:
-        `<p class="guide-lead">世界观 / 人物 / 卡章纲都还没内容——直接写,AI 只能按题材套路瞎编,容易和你的书名、想法对不上。</p>` +
-        `<p class="hint">推荐先让 AI 按书名起草一版设定底稿(十几秒),你改成自己的再开写。</p>`,
-      primary: { label: "✨ 先让 AI 铺底稿", fn: () => draftBrain("") },
-      ghost: { label: "就这样写", fn: () => writeChapter(n, force) },
-    });
+  // 起书完整性硬门禁:四项没齐 → 引导去补,不再给「就这样写」逃生门(硬门禁下它必撞 409)
+  if (DATA.writing_unlocked === false) {
+    openGateGuide(DATA.missing || []);
     return;
   }
   _wroteChapter = null;
@@ -1595,8 +1599,12 @@ async function writeChapter(n, force) {
     const d = await resp.json().catch(() => ({}));
     logRun(d.error || `失败 (${resp.status})`, "err", "cross");
     if (resp.status === 409) {
-      $("run-title").textContent = `第 ${n} 章已存在`;
-      showRunForce(n);
+      if (d.code === "brain_incomplete") {
+        openGateGuide(d.missing || []);          // 门禁:引导去补齐,绝不给覆盖按钮
+      } else {
+        $("run-title").textContent = `第 ${n} 章已存在`;
+        showRunForce(n);                          // 仅 chapter_exists/drifted 才给覆盖
+      }
     }
     showRunClose();
     return;
