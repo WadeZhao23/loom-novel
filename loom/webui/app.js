@@ -436,6 +436,9 @@ async function openProject(root, silent) {
 function showWelcome() {
   $("app").classList.add("hidden");
   $("welcome").classList.remove("hidden");
+  $("nav-ball").classList.add("hidden");
+  $("nav-popover").classList.add("hidden");
+  _navPopOpen = false;
   renderRecent();
   loadConnectStatus();
 }
@@ -753,6 +756,7 @@ async function loadJourney() {
   if (!DATA || DATA.root !== root) return;   // 已换书:过期响应丢弃,不碰 JOURNEY
   JOURNEY = out;
   if (navMode() === "center") paintNavCenterChrome();   // 段进度条首次加载没画过(chrome 早于 JOURNEY 就绪),这里补一次
+  else if (navMode() === "float") { paintNavDot(); if (_navPopOpen) paintNavPopList(); }
   paintJourney();
 }
 
@@ -929,6 +933,7 @@ async function postJourneyGoto(stage, skip) {
     if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
     JOURNEY = out;
     paintJourney();
+    if (navMode() === "center") paintNavCenterChrome();
   } catch (e) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);

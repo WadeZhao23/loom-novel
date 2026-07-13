@@ -573,9 +573,6 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
   border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-sunken); }
 .journey-card .jc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: var(--fs-xs); font-weight: 700; color: var(--text-soft); margin-bottom: 4px; }
-.journey-card .jc-dismiss { border: none; background: transparent; color: var(--text-mute);
-  cursor: pointer; padding: 0 2px; font-size: var(--fs-sm); line-height: 1; }
-.journey-card .jc-dismiss:hover { color: var(--text); }
 .journey-card .jc-ava, .journey-card .jc-fallback {
   width: 24px; height: 24px; border-radius: 50%; flex: none;
   object-fit: cover; display: inline-flex; align-items: center; justify-content: center;
@@ -614,7 +611,7 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 @keyframes navFadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .nav-center-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
 .nav-center-head .jc-ava, .nav-center-head .jc-fallback { width: 64px; height: 64px; font-size: 24px; }
-.nav-center-name { font-family: var(--font-brand); font-size: var(--fs-lg); }
+.nav-center-name { font-family: var(--font-brand); font-size: var(--fs-h2); }
 .nav-center-sub { color: var(--text-soft); font-size: var(--fs-sm); margin-top: 2px; }
 .nav-center-sub.hot { color: var(--seal); transition: color var(--dur-4); }
 .nav-strip { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4); }
