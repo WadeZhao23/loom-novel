@@ -45,3 +45,38 @@ def test_scan_garbage_returns_empty(project):
 
 def test_scan_no_chapters_returns_empty(project):
     assert diagnose.scan(project, FakeBackend(const(_CANDIDATE))) == {}
+
+
+def test_commit_lands_candidates_skipping_digest(project):
+    # commit 直接落已整形候选,不调 LLM(backend 传 None 也能落 sections/card_lines)
+    from loom import diagnose
+    picks = {
+        "世界观": "## 金手指\n重生记忆。",
+        "人物卡": "## 主角 · 沈砚\n矿场少年。",
+        "卡章纲": "- 第1章:雪夜重生。",
+        "protagonist": "沈砚",
+    }
+    out = diagnose.commit(project, picks)
+    assert (project / "外置大脑/世界观/金手指.md").is_file()
+    assert (project / "外置大脑/人物/主角·沈砚.md").is_file()   # 主角指认落对名
+    assert "第1章:雪夜重生" in (project / "外置大脑/卡章纲.md").read_text(encoding="utf-8")
+
+
+def test_commit_does_not_overwrite_human_file(project):
+    from loom import diagnose
+    human = project / "外置大脑/世界观/金手指.md"
+    human.write_text("# 金手指\n\n我手写的,别动。\n", encoding="utf-8")
+    diagnose.commit(project, {"世界观": "## 金手指\nAI 提炼的。", "人物卡": "", "卡章纲": "", "protagonist": ""})
+    assert "我手写的,别动" in human.read_text(encoding="utf-8")   # 人写优先,不覆盖
+    assert "AI 提炼的" not in human.read_text(encoding="utf-8")   # 撞人写成品 → 进访谈补充,不进原文件
+
+
+def test_commit_unlocks_gate(project):
+    from loom import diagnose, journey, paths
+    # 先造正文章(有章)+ 立项(建书代落场景外,手补一格)
+    (project / paths.PROJECT_CARD_REL).write_text("# 立项卡\n\n## 题材\n重生\n", encoding="utf-8")
+    diagnose.commit(project, {
+        "世界观": "## 金手指\n重生记忆。", "人物卡": "## 主角 · 沈砚\n少年。",
+        "卡章纲": "- 第1章:重生。", "protagonist": "沈砚"})
+    ok, missing = journey.writing_unlocked(project)
+    assert ok is True and missing == []   # 四项齐,门禁开

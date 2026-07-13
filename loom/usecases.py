@@ -349,3 +349,11 @@ def diagnose_scan(root: Path | str) -> dict:
     from . import diagnose
     cfg = load_config(root)
     return diagnose.scan(root, cheap_backend(cfg) or get_backend(cfg))
+
+
+def diagnose_commit(root: Path | str, picks: dict) -> dict:
+    """整书诊断 commit 半:作者确认的候选落盘(不调 LLM,候选已整形)。"""
+    root = Path(root)
+    with write_lock(root):
+        from . import diagnose
+        return diagnose.commit(root, picks)

@@ -44,6 +44,39 @@ def _sample_chapters(root: Path) -> str:
     return "\n\n".join(parts)
 
 
+def commit(root: Path, picks: dict) -> dict:
+    """把作者确认的候选落盘:世界观/人物走 _write_sections_into_dir(人写优先),卡章纲走 _apply_card_lines;
+    主角指认:picks['protagonist'] 指明主角名 → 该人物节改名 ## 主角 · 名字,落成 主角·名字.md。立项永不碰。"""
+    from .draft import _write_sections_into_dir
+    from .journey import _apply_card_lines
+    landed: list[str] = []
+    world = (picks.get("世界观") or "").strip()
+    if world:
+        got = _write_sections_into_dir(root, paths.WORLD_DIR_REL, "\n" + world, drop_unnamed=False)
+        landed += [f"{paths.WORLD_DIR_REL}/{n}.md" for n in got]
+    chars = _reheader_protagonist(picks.get("人物卡") or "", (picks.get("protagonist") or "").strip())
+    if chars.strip():
+        got = _write_sections_into_dir(root, paths.CHARS_DIR_REL, "\n" + chars, drop_unnamed=True)
+        landed += [f"{paths.CHARS_DIR_REL}/{n}.md" for n in got]
+    card = (picks.get("卡章纲") or "").strip()
+    if card:
+        landed.append(_apply_card_lines(root, card))
+    return {"landed": landed}
+
+
+def _reheader_protagonist(chars_body: str, protagonist: str) -> str:
+    """把候选人物卡里名为 protagonist 的那节标题归一为「## 主角 · 名字」(主角谓词要这个命名)。"""
+    if not protagonist:
+        return chars_body
+    import re as _re
+
+    def _fix(m):
+        head = m.group(0)
+        return f"## 主角 · {protagonist}" if protagonist in head else head
+
+    return _re.sub(r"^##\s*[^\n]*$", _fix, chars_body, flags=_re.M)
+
+
 def scan(root: Path, backend) -> dict:
     """读采样章 → LLM 出三段候选 dict(世界观/人物卡/卡章纲);不落盘。失败/空/无章 → {}。"""
     from .backends import LoomBackendError
