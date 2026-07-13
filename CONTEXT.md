@@ -25,7 +25,7 @@ _Avoid_: 用题材名词命名 agent(见下方"Flagged ambiguities")
 _Avoid_: 让它替作者做决定/未确认就落盘;把它的出题历史当状态(出题只看文件现状);让访谈答案回流写作指纹(学习信号仍只是改稿 diff,ADR 0002)
 
 **创作旅程(伙伴面板)**:
-起书访谈的**阶段状态机**(`journey.py` STAGES 表:立项→世界观→人物→卡章纲→voice):完成判据全部从文件派生,游标(`.loom_state.json` 的 `journey` 键)只存 跳过标记/各段已问计数(与代码侧预算常量比较)/待答卡缓存/回头改聚焦,**可丢弃、坏了当无**(同 ledger 哲学)。每段封顶 4 题;出题/消化走 cheap_model 通道。
+起书访谈的**阶段状态机**(`journey.py` STAGES 表:立项→世界观→人物→卡章纲→voice)与**逐章决策卡**;完成判据全部从文件派生,游标(`.loom_state.json` 的 `journey` 键)只存 跳过标记/各段已问计数(与代码侧预算常量比较)/待答卡缓存/回头改聚焦,**可丢弃、坏了当无**(同 ledger 哲学)。每段封顶 4 题;出题/消化走 cheap_model 通道。**形态**:起书四段未解锁时,领航员占居中大卡(人物/卡章纲等题卡在)、作者改不了别的;解锁后搬右下 48px 悬浮球(未读朱点,点开浮层答题/回头改,常驻),dismiss 语义已废(球不可关,居中卡化为让位)。织章中领航员隐身。门禁拦截(聚焦居中卡、guide 弹层退役)时答题聚焦不分散。**IP**:领航员头像=水墨卡通「提灯小童」(`webui/agents/navigator.jpg`,生成留档见 `docs/design/proposals/navigator-avatar.md`)。
 _Avoid_: 引入 langgraph/langchain 做这层编排(ADR 0013 留档否决);给旅程建第二状态真相(sqlite/checkpoint);把问答历史当真相
 
 **写作指纹**:
