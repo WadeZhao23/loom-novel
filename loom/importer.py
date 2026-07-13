@@ -37,7 +37,8 @@ def route_files(names: list[str]) -> dict[str, list[str]]:
         stem = name.rsplit(".", 1)[0]
         ext = name.rsplit(".", 1)[1].lower() if "." in name else ""
         if _BODY_NAME.match(stem) or _SERIAL_NAME.match(stem):
-            out["正文"].append(name)
+            hit_kw = any(kw in stem for _, kws in _RULES for kw in kws)
+            out["unknown" if hit_kw else "正文"].append(name)   # 第N章大纲/细纲/人物表→交作者指认,别当正文吞
             continue
         if ext == "txt":                 # 非正文的 txt → 让作者指认(设定桶不收 txt)
             out["unknown"].append(name)
@@ -142,6 +143,7 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
                 if src is None:
                     continue
                 safe = _FN_BAD.sub("·", fname) or "未命名.md"
+                safe = Path(safe).stem + ".md"   # 设定桶 md-only:txt 指认进来也落成 .md,不成孤儿
                 _write_dir_file(src, _uniq(d, safe))
         # 单文件桶:多份拼接 + 溯源头(拼接天然要 decode,容错读兜底,不崩、不把 BOM 落进中段)
         for bucket, rel in _SINGLE.items():

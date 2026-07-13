@@ -41,7 +41,7 @@ def _sample_chapters(root: Path) -> str:
     for n in picked:
         p = paths.chapter_path(root, n)
         if p.is_file():
-            body = strip_title(p.read_text(encoding="utf-8")).strip()
+            body = strip_title(p.read_text(encoding="utf-8")).strip()[:3500]
             parts.append(f"【第{n}章】\n{body}")
     return "\n\n".join(parts)
 
@@ -83,26 +83,29 @@ def commit(root: Path, picks: dict) -> dict:
 
 
 def _reheader_protagonist(chars_body: str, protagonist: str) -> str:
-    """把候选人物卡里名为 protagonist 的那节标题归一为「## 主角 · 名字」(主角谓词要这个命名)。"""
+    """把候选人物卡里名字全等 protagonist 的那节标题归一「## 主角 · 名字」(全等,免子串误吞同姓 沈砚/沈砚秋)。"""
     if not protagonist:
         return chars_body
 
     def _fix(m):
         head = m.group(0)
-        return f"## 主角 · {protagonist}" if protagonist in head else head
+        body = head.lstrip("#").strip()          # 「类型 · 名字」或「名字」
+        name = body
+        for sep in ("·", "・", "•"):
+            if sep in body:
+                name = body.split(sep, 1)[1].strip()
+                break
+        return f"## 主角 · {protagonist}" if name == protagonist else head
 
     return re.sub(r"^##\s*[^\n]*$", _fix, chars_body, flags=re.M)
 
 
 def scan(root: Path, backend) -> dict:
-    """读采样章 → LLM 出三段候选 dict(世界观/人物卡/卡章纲);不落盘。失败/空/无章 → {}。"""
-    from .backends import LoomBackendError
+    """读采样章 → LLM 出三段候选 dict(世界观/人物卡/卡章纲);不落盘。无章 → {};
+    后端失败(欠费/断网/超时)自然上抛,由调用端点 catch→_err_json 带 code,不吞成假的「没提炼到」。"""
     sample = _sample_chapters(root)
     if not sample:
         return {}
     user = f"作者已写好的小说正文(采样):\n\n{sample}\n\n按三段格式,把正文里已有的设定提炼成候选。"
-    try:
-        raw = backend.complete(_SYSTEM, user, max_chars=_MAX_CHARS)
-    except LoomBackendError:
-        return {}
-    return split_brain_draft(raw)   # {"世界观":..,"人物卡":..,"卡章纲":..},缺段不进;不成三段则 {}
+    raw = backend.complete(_SYSTEM, user, max_chars=_MAX_CHARS)   # 失败自然上抛,端点→_err_json带code
+    return split_brain_draft(raw)   # {"世界观":..,"人物卡":..,"卡章纲":..},缺段不进;不成三段则 {}(垃圾输出降级)

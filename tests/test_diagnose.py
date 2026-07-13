@@ -94,6 +94,25 @@ def test_commit_unlocks_gate(project):
     assert ok is True and missing == []   # 四项齐,门禁开
 
 
+def test_reheader_protagonist_exact_match_not_substring():
+    from loom.diagnose import _reheader_protagonist
+    body = "## 主角 · 沈砚\n少年。\n## 配角 · 沈砚秋\n妹妹。"
+    out = _reheader_protagonist(body, "沈砚")
+    assert out.count("## 主角 · 沈砚") == 1          # 只改真主角
+    assert "## 配角 · 沈砚秋" in out                  # 同姓配角不被误改
+
+
+def test_commit_file_form_appends_not_overwrite(project, tmp_path):
+    # 单文件形态老书:世界观.md 存在 → 候选追加进 .md,不落孤儿目录、不覆盖
+    from loom import diagnose
+    from loom.paths import WORLD_REL
+    w = project / WORLD_REL
+    w.write_text("# 世界观\n\n## 旧设定\n人写的,别动。\n", encoding="utf-8")
+    diagnose.commit(project, {"世界观": "## 金手指\n重生记忆。", "人物卡": "", "卡章纲": "", "protagonist": ""})
+    text = w.read_text(encoding="utf-8")
+    assert "人写的,别动" in text and "金手指" in text   # 追加不覆盖
+
+
 def test_diagnose_endpoints(project, monkeypatch):
     from fastapi.testclient import TestClient
     from loom import server, usecases, paths

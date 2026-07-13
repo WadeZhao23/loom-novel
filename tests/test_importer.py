@@ -265,6 +265,15 @@ def test_import_folder_body_sequential_rename(tmp_path):
     assert (root / "正文/第3章.md").read_text(encoding="utf-8").strip() == "第十章内容"
 
 
+def test_route_chapter_outline_files_to_unknown():
+    from loom import importer
+    routed = importer.route_files(["第1章大纲.md", "第3章细纲.txt", "第一章人物表.md", "第1章.md"])
+    assert "第1章大纲.md" in routed["unknown"]      # 撞设定关键词→交指认,不当正文吞
+    assert "第3章细纲.txt" in routed["unknown"]
+    assert "第一章人物表.md" in routed["unknown"]
+    assert routed["正文"] == ["第1章.md"]            # 纯章节名仍直进正文
+
+
 def test_import_summary_body_notes(tmp_path):
     from loom import importer
     src = tmp_path / "src"; src.mkdir()
