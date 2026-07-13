@@ -729,7 +729,7 @@ function renderJourney() {
   if (editorScroll) editorScroll.classList.toggle("hidden", mode === "center");
   ball.classList.toggle("hidden", mode !== "float");
   if (mode !== "float") { pop.classList.add("hidden"); _navPopOpen = false; }
-  else pop.classList.toggle("hidden", !_navPopOpen);
+  else { pop.classList.toggle("hidden", !_navPopOpen); if (_navPopOpen) paintNavPopList(); }   // 恢复显示的顶条随 render 刷新,不吃 stale 未读文案
   if (mode === "hidden") return;
   // 头像位(球与居中头各一次,幂等重建)
   const ava = $("nav-center-ava"), bava = $("nav-ball-ava");
@@ -752,6 +752,7 @@ async function loadJourney() {
   }
   if (!DATA || DATA.root !== root) return;   // 已换书:过期响应丢弃,不碰 JOURNEY
   JOURNEY = out;
+  if (navMode() === "center") paintNavCenterChrome();   // 段进度条首次加载没画过(chrome 早于 JOURNEY 就绪),这里补一次
   paintJourney();
 }
 
@@ -797,22 +798,25 @@ function paintJourney() {
   const card = journeyHost();
   if (!card || !DATA) return;
   card.innerHTML = "";
-  const head = document.createElement("div");
-  head.className = "jc-head";
   const stages = (JOURNEY && JOURNEY.stages) || [];
-  const doneN = stages.filter((s) => s.done || s.skipped).length;
-  head.textContent = `伙伴 · 起书访谈 ${doneN}/${stages.length || 5}`;
-  head.prepend(agentAvatar("领航员", "jc-ava", "jc-fallback"));
-  card.appendChild(head);
+  const centerMode = navMode() === "center";   // 居中态外层 chrome 已有头像+标题+段进度条,卡内不重复画
+  if (!centerMode) {
+    const head = document.createElement("div");
+    head.className = "jc-head";
+    const doneN = stages.filter((s) => s.done || s.skipped).length;
+    head.textContent = `伙伴 · 起书访谈 ${doneN}/${stages.length || 5}`;
+    head.prepend(agentAvatar("领航员", "jc-ava", "jc-fallback"));
+    card.appendChild(head);
 
-  // 段进度行(点击=回头改这段)
-  stages.forEach((s) => {
-    const row = document.createElement("div");
-    row.className = "jc-step" + (s.done ? " done" : "") + (s.key === JOURNEY.current ? " next" : "");
-    row.innerHTML = `<span class="jc-mark">${s.done ? "✓" : s.skipped ? "–" : "○"}</span>${escHtml(s.key)}`;
-    row.onclick = () => postJourneyGoto(s.key, false);
-    card.appendChild(row);
-  });
+    // 段进度行(点击=回头改这段)
+    stages.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "jc-step" + (s.done ? " done" : "") + (s.key === JOURNEY.current ? " next" : "");
+      row.innerHTML = `<span class="jc-mark">${s.done ? "✓" : s.skipped ? "–" : "○"}</span>${escHtml(s.key)}`;
+      row.onclick = () => postJourneyGoto(s.key, false);
+      card.appendChild(row);
+    });
+  }
 
   const body = document.createElement("div");
   body.className = "jc-body";
@@ -1731,6 +1735,8 @@ async function writeChapter(n, force) {
     _weaving = false;   // 门禁引导要在织章隐身解除后才显得出居中态(Task 3)
     if (resp.status === 409) {
       if (d.code === "brain_incomplete") {
+        DATA.writing_unlocked = false;                 // 服务端 409=权威:同步本地,navMode 才会算 center
+        if (d.missing) DATA.missing = d.missing;
         openGateGuide(d.missing || []);          // 门禁:引导去补齐,绝不给覆盖按钮
       } else {
         $("run-title").textContent = `第 ${n} 章已存在`;

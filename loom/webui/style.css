@@ -901,6 +901,7 @@ input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-ino
 .coach-pop .cp-body { font-size: var(--fs-sm); line-height: 1.7; color: var(--text); }
 .coach-pop b { color: var(--seal-ink); font-weight: 700; }
 .coach-pop .cp-foot { margin-top: var(--space-3); display: flex; justify-content: flex-end; }
+.coach-pop .jc-ava, .coach-pop .jc-fallback { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; flex: none; }
 
 /* T1:暗背景(吞点击)+ 聚光环 + 提示卡 */
 .tour-back { position: fixed; inset: 0; z-index: 55; display: none; }
