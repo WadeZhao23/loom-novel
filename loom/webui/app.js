@@ -712,6 +712,15 @@ function render() {
 // ---------- 领航员在场(伙伴面板的书内形态):出题/选项/自答/跳段/回头改 ----------
 // navMode 三态编排:未解锁→主区居中(#nav-center);已解锁→球浮层(#nav-ball/#nav-popover);织章中→隐身。
 function renderJourney() {
+  // S0→S2 一次性交接:地基刚齐、还没写第一章、这本书没交接过 → 球脉冲一下 + 自动弹浮层 + 一句话提示(Task 3)
+  const hk = DATA ? "loom_nav_handoff:" + DATA.root : "";
+  if (hk && DATA.writing_unlocked && (DATA.chapters || []).length === 0 && !localStorage.getItem(hk)) {
+    localStorage.setItem(hk, "1");
+    const ball0 = $("nav-ball");
+    if (ball0) { ball0.classList.add("nav-handoff"); setTimeout(() => ball0.classList.remove("nav-handoff"), 1400); }
+    _navPopOpen = true;   // 交接后自动开一次浮层
+    setTimeout(() => { toast("地基齐了——去织第一章。我搬去右下角,随叫随到"); }, 200);
+  }
   const mode = navMode();
   const center = $("nav-center"), ball = $("nav-ball"), pop = $("nav-popover");
   const editorScroll = document.querySelector(".editor-scroll");
@@ -1059,20 +1068,16 @@ function showGuide({ title, bodyHtml, primary, ghost }) {
   $("guide-overlay").classList.remove("hidden");
 }
 
-// 起书完整性硬门禁的引导卡:missing 没齐就拦,只给「去补齐」/「AI 铺底稿」两条路,没有「就这样写」
-function openGateGuide(missing) {
-  const first = missing[0];
-  localStorage.removeItem("loom_journey_dismiss:" + DATA.root);   // 一键去补前先解除面板收起(Task 3 收编)
-  const jc = $("journey-card"); if (jc) jc.classList.remove("hidden");   // 侧栏宿主已删,此行防空引用崩溃(Task 2 最小补丁,Task 3 应连同上行一并改成 _navYield=false 语义)
-  showGuide({
-    title: "先把开书地基打完",
-    bodyHtml:
-      `<p class="guide-lead">还差:${(missing.length ? missing : ["起书资料"]).join("、")}。没有这些上下文,AI 只能瞎编、和你的书对不上。</p>` +
-      `<p class="hint">在伙伴面板答几题就能补齐;或让 AI 按书名先铺一版设定底稿(世界观/人物/章纲)。</p>`,
-    primary: { label: "去伙伴面板补齐", fn: () => first && postJourneyGoto(first, false) },
-    ghost: { label: "✨ AI 铺底稿", fn: () => draftBrain("") },
-  });
+// 起书完整性硬门禁:missing 没齐就拦,转发去居中态领航员(Task 3:弹层退役)
+function enterNavCenter(missing) {
+  _navYield = false; _navPopOpen = false;
+  renderJourney();
+  const sub = $("nav-center-sub");
+  if (sub) { sub.classList.add("hot"); setTimeout(() => sub.classList.remove("hot"), 1000); }
+  const first = (missing || [])[0];
+  if (first) postJourneyGoto(first, false);
 }
+function openGateGuide(missing) { enterNavCenter(missing); }   // 弹层退役,签名不动(软拦与409两调用点无感)
 
 // skills 是给 Agent 看的「方法论手册」:点开先讲清是什么 / 哪一棒用,而不是糊一脸 Markdown
 const SKILLS_META = {
@@ -1705,6 +1710,7 @@ async function writeChapter(n, force) {
   $("run-close").classList.add("hidden");
   $("run-force").classList.add("hidden");
   $("run-overlay").classList.remove("hidden");
+  _weaving = true; renderJourney();   // 织章中:领航员隐身(Task 3)
 
   let resp;
   try {
@@ -1712,12 +1718,17 @@ async function writeChapter(n, force) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ root: DATA.root, chapter: n, force }),
     });
-  } catch (e) { logRun("连接失败:" + e.message, "err"); showRunClose(); return; }
+  } catch (e) {
+    logRun("连接失败:" + e.message, "err"); showRunClose();
+    _weaving = false; renderJourney();
+    return;
+  }
 
   const ct = resp.headers.get("content-type") || "";
   if (!ct.includes("ndjson")) {
     const d = await resp.json().catch(() => ({}));
     logRun(d.error || `失败 (${resp.status})`, "err", "cross");
+    _weaving = false;   // 门禁引导要在织章隐身解除后才显得出居中态(Task 3)
     if (resp.status === 409) {
       if (d.code === "brain_incomplete") {
         openGateGuide(d.missing || []);          // 门禁:引导去补齐,绝不给覆盖按钮
@@ -1727,6 +1738,7 @@ async function writeChapter(n, force) {
       }
     }
     showRunClose();
+    renderJourney();
     return;
   }
 
@@ -1744,6 +1756,7 @@ async function writeChapter(n, force) {
     }
   } finally {
     showRunClose();   // 流中断(网络断/解析炸)也得关窗,不卡死在织章弹层
+    _weaving = false; renderJourney();   // 织章结束(正常/中断都到这):领航员复位(Task 3)
   }
 }
 
@@ -1872,6 +1885,7 @@ function showRunForce(n) {
 async function closeRun() {
   $("run-overlay").classList.add("hidden");
   hideStrip(); _runMinimized = false;
+  _weaving = false; renderJourney();   // 兜底:织章后领航员必须复位,漏一处=球永久消失(Task 3)
   await refresh();
   if (_wroteChapter != null) {
     await openFile(`正文/第${_wroteChapter}章.md`, true, _wroteChapter);
@@ -2495,6 +2509,7 @@ function maybeCoachLearnLoop() {
     `再点上面的 <b>「学这章的手改」</b>——它只学<b>你的改动</b>、蒸馏进写作指纹,` +
     `于是<b>越写越像你</b>。这是 Loom 的灵魂。</div>` +
     `<div class="cp-foot"><button class="primary mini" id="cp-ok">懂了,去改稿</button></div>`;
+  pop.prepend(agentAvatar("领航员", "jc-ava", "jc-fallback"));   // 写后气泡挂领航员头像(Task 3)
   document.body.appendChild(pop);
   btn.classList.add("pulse-gold");
   _placeBubble(pop, btn);
