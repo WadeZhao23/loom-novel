@@ -133,6 +133,22 @@
           <button id="search-next" class="mini" title="下一个" data-ico="arrowDown"></button>
           <button id="search-close" class="ghost mini" title="关闭搜索" data-ico="close"></button>
         </div>
+        <div id="nav-center" class="nav-center hidden">
+          <div class="nav-center-inner">
+            <div class="nav-center-head">
+              <span id="nav-center-ava"></span>
+              <div class="nav-center-title">
+                <div class="nav-center-name">领航员 · 陪你把地基打完</div>
+                <div class="nav-center-sub" id="nav-center-sub"></div>
+              </div>
+            </div>
+            <div id="nav-center-strip" class="nav-strip"></div>
+            <div id="nav-center-card" class="journey-card nav-host"></div>
+            <div class="nav-center-foot">
+              <button id="nav-browse" class="ghost">先自己逛逛</button>
+            </div>
+          </div>
+        </div>
         <div class="editor-scroll">
           <textarea id="editor" spellcheck="false" placeholder=""></textarea>
           <div id="preview" class="md-preview hidden"></div>
@@ -425,6 +441,15 @@
         <button id="guide-primary" class="primary"></button>
       </div>
     </div>
+  </div>
+
+  <button id="nav-ball" class="nav-ball hidden" title="领航员">
+    <span id="nav-ball-ava"></span>
+    <span id="nav-dot" class="nav-dot hidden"></span>
+  </button>
+  <div id="nav-popover" class="nav-popover hidden">
+    <div id="nav-pop-list" class="nav-pop-list"></div>
+    <div id="nav-pop-card" class="journey-card nav-host"></div>
   </div>
 
   <!-- 本章版本历史:覆盖前自动留快照,可预览 + 一键回滚 -->
