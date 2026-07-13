@@ -11,7 +11,7 @@ import re
 import shutil
 
 # 桶=外置大脑里作者可粘贴内容的文件(写作指纹刻意不在:它是 learn 蒸出的结构化文件,不接受原文)
-BUCKETS = ("世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考")
+BUCKETS = ("正文", "世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考")
 
 # 文件名关键词 → 桶。一份文件名撞到 >1 个桶,或一个都不撞 → unknown,交作者指认。
 _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -24,13 +24,24 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+_BODY_NAME = re.compile(r"^第\s*(?:[0-9]+|[零〇一二两三四五六七八九十百千]+)\s*章")
+_SERIAL_NAME = re.compile(r"^0*[0-9]+$")
+
+
 def route_files(names: list[str]) -> dict[str, list[str]]:
-    """文件名启发路由。返回 {桶: [文件名], ..., "unknown": [文件名]}。
+    """文件名→桶。正文(第N章/纯序号)前置识别;.txt只准进正文,其余桶md-only。
     撞两桶或零命中 → unknown(含形似「写作指纹」的:它不是桶)。纯字符串,不读内容、不调 LLM。"""
     out: dict[str, list[str]] = {b: [] for b in BUCKETS}
     out["unknown"] = []
     for name in names:
         stem = name.rsplit(".", 1)[0]
+        ext = name.rsplit(".", 1)[1].lower() if "." in name else ""
+        if _BODY_NAME.match(stem) or _SERIAL_NAME.match(stem):
+            out["正文"].append(name)
+            continue
+        if ext == "txt":                 # 非正文的 txt → 让作者指认(设定桶不收 txt)
+            out["unknown"].append(name)
+            continue
         hit = [bucket for bucket, kws in _RULES if any(kw in stem for kw in kws)]
         if len(hit) == 1:
             out[hit[0]].append(name)

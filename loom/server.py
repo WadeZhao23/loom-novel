@@ -163,14 +163,14 @@ class ImportCommitBody(BaseModel):
 
 @app.post("/api/project/import/scan")
 def import_scan(b: ImportScanBody):
-    """扫资料夹里的 .md,按文件名启发路由(不落盘),供前端出确认屏。"""
+    """扫资料夹里的 .md 和 .txt,按文件名启发路由(不落盘),供前端出确认屏。"""
     from . import importer
     folder = Path(b.folder).expanduser()
     if not folder.is_dir():
         return JSONResponse({"error": f"{folder} 不是文件夹或不存在。"}, status_code=400)
-    names = sorted(p.name for p in folder.rglob("*.md"))
+    names = sorted(p.name for p in folder.rglob("*") if p.suffix.lower() in (".md", ".txt") and p.is_file())
     if not names:
-        return JSONResponse({"error": "这个文件夹里没有 .md 文件。"}, status_code=400)
+        return JSONResponse({"error": "这个文件夹里没有 .md 或 .txt 文件。"}, status_code=400)
     routed = importer.route_files(names)
     unknown = routed.pop("unknown")
     return {"ok": True, "name_suggest": folder.name, "routed": routed, "unknown": unknown}

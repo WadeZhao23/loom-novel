@@ -228,3 +228,23 @@ def test_route_outline_synonyms_to_card(tmp_path):
     from loom.importer import route_files
     r = route_files(["总纲.md", "细纲.md", "纲要.md", "提纲.md"])
     assert set(r["卡章纲"]) == {"总纲.md", "细纲.md", "纲要.md", "提纲.md"} and r["unknown"] == []
+
+
+def test_route_chapter_files_to_body():
+    from loom import importer
+    routed = importer.route_files(["第1章.md", "第二章.txt", "05.txt", "世界观设定.md", "乱七八糟.md"])
+    assert set(routed["正文"]) == {"第1章.md", "第二章.txt", "05.txt"}   # 章号/纯序号→正文
+    assert routed["世界观"] == ["世界观设定.md"]                         # 关键词桶不变
+    assert "乱七八糟.md" in routed["unknown"]                            # 猜不中仍 unknown
+
+
+def test_txt_only_routes_to_body_not_setting_buckets():
+    from loom import importer
+    routed = importer.route_files(["人物小传.txt"])   # .txt 命中人物关键词,但 txt 只准进正文
+    assert "人物小传.txt" not in routed["人物"]
+    assert "人物小传.txt" in routed["unknown"]        # 非正文的 txt → unknown(设定桶 md-only)
+
+
+def test_buckets_includes_body():
+    from loom import importer
+    assert "正文" in importer.BUCKETS
