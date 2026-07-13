@@ -308,6 +308,7 @@ def project_state(root: Path | str) -> dict:
         "skills": [{"rel": f"skills/{n}", "name": n[:-3]} for n in _SKILLS],
         "agents": [{"rel": f"agents/{n}.md", "name": n} for n in AGENT_FILES],
         "chapters": chs,
+        "has_body": bool(chapters),   # 有正文章(诊断动作出现条件之一)
         "next_chapter": (chapters[-1] + 1) if chapters else 1,
     }
 

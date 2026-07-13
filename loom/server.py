@@ -419,6 +419,28 @@ def journey_goto_ep(b: JourneyGotoBody):
         return _err_json(e)
 
 
+class DiagnoseCommitBody(BaseModel):
+    root: str
+    picks: dict = {}
+
+
+@app.post("/api/diagnose/scan")
+def diagnose_scan_ep(b: RootBody):
+    try:
+        return {"ok": True, "candidates": usecases.diagnose_scan(Path(b.root))}
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.post("/api/diagnose/commit")
+def diagnose_commit_ep(b: DiagnoseCommitBody):
+    try:
+        usecases.diagnose_commit(Path(b.root), b.picks)
+        return usecases.project_state(Path(b.root))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
 class ScanBody(BaseModel):
     root: str
     text: str

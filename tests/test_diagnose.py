@@ -92,3 +92,21 @@ def test_commit_unlocks_gate(project):
         "卡章纲": "- 第1章:重生。", "protagonist": "沈砚"})
     ok, missing = journey.writing_unlocked(project)
     assert ok is True and missing == []   # 四项齐,门禁开
+
+
+def test_diagnose_endpoints(project, monkeypatch):
+    from fastapi.testclient import TestClient
+    from loom import server, usecases, paths
+    from conftest import FakeBackend, const
+    for i in (1, 2):
+        p = paths.chapter_path(project, i); p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"# 第{i}章\n\n沈砚在矿场。\n", encoding="utf-8")
+    fake = FakeBackend(const("===世界观===\n## 金手指\n重生记忆。\n===人物卡===\n## 主角 · 沈砚\n少年。\n===卡章纲===\n- 第1章:重生。\n"))
+    monkeypatch.setattr(usecases, "cheap_backend", lambda cfg: fake)
+    c = TestClient(server.app, base_url="http://127.0.0.1")
+    r = c.post("/api/diagnose/scan", json={"root": str(project)})
+    assert r.status_code == 200 and "金手指" in r.json()["candidates"]["世界观"]
+    picks = {**r.json()["candidates"], "protagonist": "沈砚"}
+    r2 = c.post("/api/diagnose/commit", json={"root": str(project), "picks": picks})
+    assert r2.status_code == 200
+    assert (project / "外置大脑/人物/主角·沈砚.md").is_file()

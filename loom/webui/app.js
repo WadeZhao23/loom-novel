@@ -233,6 +233,8 @@ function bind() {
   $("run-close").onclick = closeRun;
   $("run-minimize").onclick = minimizeRun;
   $("rs-expand").onclick = () => { if (_stripDone != null) { hideStrip(); closeRun(); } else expandRun(); };
+  $("diag-commit").onclick = commitDiagnose;
+  $("diag-cancel").onclick = () => $("diagnose-overlay").classList.add("hidden");
 
   // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
   $("editor").addEventListener("input", () => {
@@ -352,7 +354,7 @@ async function scanFolder() {
     $("folder-confirm").classList.remove("hidden");
   } catch (e) { $("folder-error").textContent = e.message; }
 }
-const _BUCKETS = ["世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考"];
+const _BUCKETS = ["正文", "世界观", "人物", "卡章纲", "立项卡", "违禁词", "文风参考"];
 function renderRouted(routed, unknown) {
   const box = $("folder-routed"); box.innerHTML = "";
   _BUCKETS.forEach((b) => {
@@ -756,6 +758,9 @@ function paintJourney() {
     body.appendChild(jcBtn("接入模型", openSettings));
     return;
   }
+  if (DATA.has_body && DATA.writing_unlocked === false) {
+    body.appendChild(jcBtn("✨ 从正文提炼设定", startDiagnose));
+  }
   if (!JOURNEY) {
     body.innerHTML = `<div class="jc-question">旅程状态没取到,稍后重试。</div>`;
     return;
@@ -863,6 +868,58 @@ async function postJourneyGoto(stage, skip) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
   }
+}
+
+async function startDiagnose() {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  toast("正在读你的正文提炼设定,稍候…");
+  let out;
+  try {
+    out = await jreq("POST", "/api/diagnose/scan", { root });
+  } catch (e) { return toast(e.message, true); }
+  if (!DATA || DATA.root !== root) return;
+  const cand = out.candidates || {};
+  if (!cand.世界观 && !cand.人物卡 && !cand.卡章纲) {
+    return toast("正文里没提炼出可用设定,直接在伙伴面板答几题吧");
+  }
+  showDiagnoseConfirm(cand);
+}
+
+function showDiagnoseConfirm(cand) {
+  const box = $("diag-body"); box.innerHTML = "";
+  const SEG = [["世界观", "世界观"], ["人物卡", "人物卡"], ["卡章纲", "卡章纲"]];
+  SEG.forEach(([key, label]) => {
+    const val = cand[key] || "";
+    const wrap = document.createElement("div"); wrap.className = "diag-seg";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!val.trim();
+    cb.dataset.seg = key; cb.disabled = !val.trim();
+    const h = document.createElement("label"); h.className = "diag-seg-head";
+    h.appendChild(cb); h.appendChild(document.createTextNode(" " + label + (val.trim() ? "" : "(正文没提炼到)")));
+    const ta = document.createElement("textarea"); ta.className = "diag-seg-text"; ta.dataset.seg = key;
+    ta.value = val; ta.rows = Math.min(10, (val.split("\n").length || 1) + 1);
+    wrap.appendChild(h); wrap.appendChild(ta); box.appendChild(wrap);
+  });
+  const pro = $("diag-protagonist"); if (pro) pro.value = "";
+  $("diagnose-overlay").classList.remove("hidden");
+}
+
+async function commitDiagnose() {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  const picks = { protagonist: ($("diag-protagonist") && $("diag-protagonist").value.trim()) || "" };
+  document.querySelectorAll("#diag-body .diag-seg").forEach((seg) => {
+    const cb = seg.querySelector("input[type=checkbox]");
+    const ta = seg.querySelector("textarea");
+    picks[cb.dataset.seg] = cb.checked ? ta.value : "";
+  });
+  let d;
+  try { d = await jreq("POST", "/api/diagnose/commit", { root, picks }); }
+  catch (e) { return toast(e.message, true); }
+  $("diagnose-overlay").classList.add("hidden");
+  if (!DATA || DATA.root !== root) return;
+  toast("已预填 → 缺的领航员会接着问");
+  enterProject(d);   // 刷新 project_state:签名失配、领航员只问真缺、门禁可能已开
 }
 
 // 5 个 agent 不是「提示词文件」,是流水线上五个有人设的角色。点卡片 → 看整条流水线(不贴 Markdown)。

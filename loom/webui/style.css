@@ -780,6 +780,12 @@ input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-ino
 .folder-routed .fr-file { color: var(--text-soft); font-size: var(--fs-sm); padding: 2px 0; }
 .folder-routed .fr-unknown select { margin-left: var(--space-2); }
 
+/* 从正文提炼设定:诊断确认屏 */
+.diag-seg { margin: var(--space-2) 0; }
+.diag-seg-head { font-weight: 600; display: block; margin-bottom: 4px; }
+.diag-seg-text { width: 100%; font: inherit; border-radius: 8px; padding: 6px 8px;
+  border: 1px solid rgba(127,127,127,0.35); background: transparent; color: inherit; resize: vertical; }
+
 /* doctor 面板 */
 .doctor-list { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 .doctor-item { display: flex; gap: var(--space-3); padding: var(--space-3);

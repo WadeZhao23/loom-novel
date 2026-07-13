@@ -332,6 +332,21 @@
     </div>
   </div>
 
+  <!-- 从正文提炼设定:诊断确认屏(一屏勾选/改写候选,commit 落盘) -->
+  <div id="diagnose-overlay" class="overlay hidden">
+    <div class="run-card settings-card">
+      <h3>从正文提炼设定</h3>
+      <p class="hint">这些是 Loom 从你正文里提炼的设定候选(带出处)。勾选要接受的、可改;不对的取消勾选。立项要你自己填,这里不提炼。</p>
+      <div id="diag-body"></div>
+      <label class="field-label">哪个是主角?(填名字,落成「主角·名字」卡)</label>
+      <input id="diag-protagonist" type="text" placeholder="如:沈砚" />
+      <div class="row-end">
+        <button id="diag-cancel" class="ghost">取消</button>
+        <button id="diag-commit" class="primary">确认预填</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 接入模型(用户级默认后端:连一次全局记住,新建的每本书自动继承) -->
   <div id="connect-overlay" class="overlay hidden">
     <div class="run-card settings-card">
