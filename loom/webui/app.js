@@ -11,6 +11,20 @@ let _dirty = false;            // 编辑器是否有未保存改动
 let _saveTimer = null;         // 自动保存 debounce
 let _seedMode = "sample";      // seed 来源:sample | inherit
 let _lastDebugReport = null;   // 写章流里先到的 debug_report 事件,chapter_done 后延时弹报告
+let _navYield = false;   // 居中态让位(会话级,换书清零;不落 localStorage)
+let _weaving = false;    // 织章中(领航员隐身)
+let _navPopOpen = false; // 球浮层开合(重画后按此恢复)
+
+// ---------- 领航员在场形态:navMode 三态推导(hidden/center/float)----------
+function navMode() {
+  if (!DATA) return "hidden";
+  if (_weaving) return "hidden";
+  if (DATA.writing_unlocked === false) return _navYield ? "float" : "center";
+  return "float";
+}
+function journeyHost() {
+  return navMode() === "center" ? $("nav-center-card") : $("nav-pop-card");
+}
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -235,6 +249,8 @@ function bind() {
   $("rs-expand").onclick = () => { if (_stripDone != null) { hideStrip(); closeRun(); } else expandRun(); };
   $("diag-commit").onclick = commitDiagnose;
   $("diag-cancel").onclick = () => $("diagnose-overlay").classList.add("hidden");
+  $("nav-ball").onclick = () => { _navPopOpen = !_navPopOpen; renderJourney(); if (_navPopOpen) paintNavPopList(); };
+  $("nav-browse").onclick = () => { _navYield = true; renderJourney(); };
 
   // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
   $("editor").addEventListener("input", () => {
@@ -427,6 +443,7 @@ function enterProject(d) {
   DATA = d;
   hideInlinePanel();   // 换书收面板:稳态残留的候选绝不能落进另一本书
   JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
+  _navYield = false; _weaving = false; _navPopOpen = false;   // 换书清领航员在场态:让位/织章/浮层开合都是会话级,不跨书带
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -692,22 +709,32 @@ function render() {
   renderJourney();
 }
 
-// ---------- 伙伴面板(起书访谈卡片的书内形态):出题/选项/自答/跳段/回头改,全 done 自动收起 ----------
+// ---------- 领航员在场(伙伴面板的书内形态):出题/选项/自答/跳段/回头改 ----------
+// navMode 三态编排:未解锁→主区居中(#nav-center);已解锁→球浮层(#nav-ball/#nav-popover);织章中→隐身。
 function renderJourney() {
-  const card = $("journey-card");
-  if (!card || !DATA) return;
-  if (localStorage.getItem("loom_journey_dismiss:" + DATA.root) === "1") {
-    card.classList.add("hidden");
-    return;
-  }
-  card.classList.remove("hidden");
-  card.innerHTML = "<div class='jc-head'>伙伴 · 起书访谈</div><div class='jc-body'>加载中…</div>";
-  loadJourney();
+  const mode = navMode();
+  const center = $("nav-center"), ball = $("nav-ball"), pop = $("nav-popover");
+  const editorScroll = document.querySelector(".editor-scroll");
+  if (!center) return;
+  center.classList.toggle("hidden", mode !== "center");
+  if (editorScroll) editorScroll.classList.toggle("hidden", mode === "center");
+  ball.classList.toggle("hidden", mode !== "float");
+  if (mode !== "float") { pop.classList.add("hidden"); _navPopOpen = false; }
+  else pop.classList.toggle("hidden", !_navPopOpen);
+  if (mode === "hidden") return;
+  // 头像位(球与居中头各一次,幂等重建)
+  const ava = $("nav-center-ava"), bava = $("nav-ball-ava");
+  if (ava) { ava.innerHTML = ""; ava.appendChild(agentAvatar("领航员", "jc-ava", "jc-fallback")); }
+  if (bava) { bava.innerHTML = ""; bava.appendChild(agentAvatar("领航员", "jc-ava", "jc-fallback")); }
+  if (mode === "center") paintNavCenterChrome();
+  if (mode === "float") paintNavDot();
+  loadJourney();   // 取 journey/state → paintJourney() 画进 journeyHost()
 }
 
 async function loadJourney() {
   const root = DATA && DATA.root;
   if (!root) return;
+  if (JOURNEY) paintJourney();   // 有缓存且同书:先画一帧治双帧闪烁,后台刷新到了再重画一次
   let out = null;
   try {
     out = await jreq("GET", `/api/journey/state?root=${encodeURIComponent(root)}`);
@@ -719,8 +746,46 @@ async function loadJourney() {
   paintJourney();
 }
 
+// 居中态镶边(chrome):副标题 + 段进度条(点击=回头改这段)
+function paintNavCenterChrome() {
+  const missing = DATA.missing || [];
+  $("nav-center-sub").textContent = missing.length ? `距开写还差 ${missing.length} 项:${missing.join("、")}` : "地基快齐了";
+  const strip = $("nav-center-strip"); strip.innerHTML = "";
+  ((JOURNEY && JOURNEY.stages) || []).forEach((s) => {
+    const seg = document.createElement("span");
+    seg.className = "ns-seg" + (s.done ? " done" : "") + (JOURNEY && s.key === JOURNEY.current ? " next" : "");
+    seg.textContent = (s.done ? "✓ " : s.skipped ? "– " : "○ ") + s.key;
+    seg.onclick = () => postJourneyGoto(s.key, false);
+    strip.appendChild(seg);
+  });
+}
+
+// 球未读点:有值就说明球浮层里有条领航员想说的话
+function navUnread() {
+  const chs = DATA.chapters || [];
+  const last = chs[chs.length - 1];
+  if (last && last.edited && !last.learned) return "上一章的手改可以 learn 了";
+  const voice = ((JOURNEY && JOURNEY.stages) || []).find((s) => s.land === "seed");
+  if (voice && !voice.done && !voice.skipped && DATA.fingerprint_source === "default") return "喂几段样本,让指纹像你";
+  if (DATA.writing_unlocked && (DATA.missing || []).length) return `地基还差:${DATA.missing.join("、")}`;
+  return "";
+}
+function paintNavDot() { $("nav-dot").classList.toggle("hidden", !navUnread()); }
+
+// 球浮层顶部提示条:未读一句话 + (未解锁时)回居中的路
+function paintNavPopList() {
+  const list = $("nav-pop-list"); list.innerHTML = "";
+  const msg = navUnread();
+  if (msg) { const it = document.createElement("div"); it.className = "np-item"; it.textContent = msg; list.appendChild(it); }
+  if (DATA.writing_unlocked === false) {
+    const back = document.createElement("div"); back.className = "np-item"; back.textContent = "继续答题(回到居中)";
+    back.onclick = () => { _navYield = false; _navPopOpen = false; renderJourney(); };
+    list.appendChild(back);
+  }
+}
+
 function paintJourney() {
-  const card = $("journey-card");
+  const card = journeyHost();
   if (!card || !DATA) return;
   card.innerHTML = "";
   const head = document.createElement("div");
@@ -729,14 +794,6 @@ function paintJourney() {
   const doneN = stages.filter((s) => s.done || s.skipped).length;
   head.textContent = `伙伴 · 起书访谈 ${doneN}/${stages.length || 5}`;
   head.prepend(agentAvatar("领航员", "jc-ava", "jc-fallback"));
-  const dis = document.createElement("span");
-  dis.className = "jc-dismiss";
-  dis.textContent = "×";
-  dis.onclick = () => {
-    localStorage.setItem("loom_journey_dismiss:" + DATA.root, "1");
-    card.classList.add("hidden");
-  };
-  head.appendChild(dis);
   card.appendChild(head);
 
   // 段进度行(点击=回头改这段)
@@ -766,12 +823,7 @@ function paintJourney() {
     return;
   }
   if (!JOURNEY.current) {
-    if (stages.length && stages.every((s) => s.done)) {
-      localStorage.setItem("loom_journey_dismiss:" + DATA.root, "1");
-      card.classList.add("hidden");
-    } else {
-      body.innerHTML = `<div class="jc-question">起书访谈走完了——去织第一章吧。</div>`;
-    }
+    body.innerHTML = `<div class="jc-question">起书访谈走完了——去织第一章吧。</div>`;
     return;
   }
   const cur = stages.find((s) => s.key === JOURNEY.current) || {};
@@ -1010,8 +1062,8 @@ function showGuide({ title, bodyHtml, primary, ghost }) {
 // 起书完整性硬门禁的引导卡:missing 没齐就拦,只给「去补齐」/「AI 铺底稿」两条路,没有「就这样写」
 function openGateGuide(missing) {
   const first = missing[0];
-  localStorage.removeItem("loom_journey_dismiss:" + DATA.root);   // 一键去补前先解除面板收起
-  $("journey-card").classList.remove("hidden");                   // 卡若已被×收起,同步摘掉 hidden,补齐后立刻可见
+  localStorage.removeItem("loom_journey_dismiss:" + DATA.root);   // 一键去补前先解除面板收起(Task 3 收编)
+  const jc = $("journey-card"); if (jc) jc.classList.remove("hidden");   // 侧栏宿主已删,此行防空引用崩溃(Task 2 最小补丁,Task 3 应连同上行一并改成 _navYield=false 语义)
   showGuide({
     title: "先把开书地基打完",
     bodyHtml:
@@ -1215,6 +1267,7 @@ function setPreview(on) {
 
 // ---------- 文件编辑 ----------
 async function openFile(rel, editable, chapter, li) {
+  if (navMode() === "center") { _navYield = true; renderJourney(); }   // 点文件=用户主动逛正文,居中态让位给编辑器
   if (_dirty && CUR && CUR.editable) { try { await autosave(); } catch (e) { /* 落盘失败也别拦切换 */ } }  // 切文件前先保住手改
   clearTimeout(_saveTimer); clearDirty(); closeSearch();
   hideInlinePanel();   // 切文件收面板:稳态残留的候选绝不能落进另一个文件
