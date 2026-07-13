@@ -339,3 +339,13 @@ def journey_goto(root: Path | str, stage: str, skip: bool = False) -> dict:
     root = Path(root)
     with write_lock(root):
         return journey_mod.goto(root, stage, skip=skip)
+
+
+# ---- 整书诊断(导入旧书;spec T4 scan 半——候选不落盘,commit 在别处) ----
+
+def diagnose_scan(root: Path | str) -> dict:
+    """整书诊断:读采样正文出候选(不落盘)。评估类走 cheap_model。"""
+    root = Path(root)
+    from . import diagnose
+    cfg = load_config(root)
+    return diagnose.scan(root, cheap_backend(cfg) or get_backend(cfg))
