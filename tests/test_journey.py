@@ -268,6 +268,21 @@ def test_land_card_lines_prefix_line_not_swallowed(project):
     assert text.count("- 大弧:从废柴到执掌宗门") >= 2   # 新行独立落盘,不被旧行前缀匹配吞掉
 
 
+def test_land_card_lines_collision_keeps_answer_no_double_dash(project):
+    from loom.state import load_state, save_state
+    from loom.paths import CARD_REL
+    p = project / CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace("- 第1章:", "- 第1章:人写的第一章"), encoding="utf-8")
+    _prime_card(project, stage="卡章纲")
+    # digest 产物是一条撞车的第1章行(不会落)→ 兜底必须用原 answer、不能丢、不能 - -
+    fake = FakeBackend(const("- 第1章:AI 想覆盖但撞车"))
+    journey.land_answer(project, "我的原答案:主角雪夜复仇", fake)
+    text = p.read_text(encoding="utf-8")
+    assert "我的原答案:主角雪夜复仇" in text     # 答案绝不丢
+    assert "- - 第" not in text                    # 无双横线
+    assert "- 第1章:人写的第一章" in text          # 人写行没被覆盖
+
+
 def test_land_answer_clears_card(project):
     _prime_card(project, field="平台")
     journey.land_answer(project, "起点", FakeBackend(const("x")))

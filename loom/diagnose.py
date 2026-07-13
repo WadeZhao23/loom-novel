@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
 from . import paths
@@ -44,23 +46,39 @@ def _sample_chapters(root: Path) -> str:
     return "\n\n".join(parts)
 
 
-def commit(root: Path, picks: dict) -> dict:
-    """把作者确认的候选落盘:世界观/人物走 _write_sections_into_dir(人写优先),卡章纲走 _apply_card_lines;
-    主角指认:picks['protagonist'] 指明主角名 → 该人物节改名 ## 主角 · 名字,落成 主角·名字.md。立项永不碰。"""
+def _land_candidate_sections(root: Path, file_rel: str, dir_rel: str, body: str,
+                              *, drop_unnamed: bool) -> list[str]:
+    """世界观/人物候选落盘,双形态兼容(补 brain_form 检查,免得单文件老书落进断链新目录=孤儿):
+    单文件形态(老书/外置大脑/世界观.md 这类)→ 追加进单文件末尾(人写优先,不覆盖);
+    目录/none 形态(新书)→ 按小节落目录(_write_sections_into_dir,人写优先,撞车即丢弃)。"""
+    if paths.brain_form(root, file_rel, dir_rel) == "file":
+        from .fsutil import atomic_write_text
+        p = root / file_rel
+        old = p.read_text(encoding="utf-8") if p.is_file() else ""
+        atomic_write_text(p, (old.rstrip() + "\n\n" if old.strip() else "") + body.strip() + "\n")
+        return [file_rel]
     from .draft import _write_sections_into_dir
+    got = _write_sections_into_dir(root, dir_rel, "\n" + body, drop_unnamed=drop_unnamed)
+    return [f"{dir_rel}/{n}.md" for n in got]
+
+
+def commit(root: Path, picks: dict) -> dict:
+    """把作者确认的候选落盘:世界观/人物走 _land_candidate_sections(单文件/目录双形态,人写优先),
+    卡章纲走 _apply_card_lines(候选撞车即丢弃,不强塞);
+    主角指认:picks['protagonist'] 指明主角名 → 该人物节改名 ## 主角 · 名字,落成 主角·名字.md。立项永不碰。"""
     from .journey import _apply_card_lines
     landed: list[str] = []
     world = (picks.get("世界观") or "").strip()
     if world:
-        got = _write_sections_into_dir(root, paths.WORLD_DIR_REL, "\n" + world, drop_unnamed=False)
-        landed += [f"{paths.WORLD_DIR_REL}/{n}.md" for n in got]
+        landed += _land_candidate_sections(root, paths.WORLD_REL, paths.WORLD_DIR_REL, world,
+                                            drop_unnamed=False)
     chars = _reheader_protagonist(picks.get("人物卡") or "", (picks.get("protagonist") or "").strip())
     if chars.strip():
-        got = _write_sections_into_dir(root, paths.CHARS_DIR_REL, "\n" + chars, drop_unnamed=True)
-        landed += [f"{paths.CHARS_DIR_REL}/{n}.md" for n in got]
+        landed += _land_candidate_sections(root, paths.CHARS_REL, paths.CHARS_DIR_REL, chars,
+                                            drop_unnamed=True)
     card = (picks.get("卡章纲") or "").strip()
     if card:
-        landed.append(_apply_card_lines(root, card))
+        landed.append(_apply_card_lines(root, card))   # fallback 默认空:候选撞车丢弃,不强塞
     return {"landed": landed}
 
 
@@ -68,13 +86,12 @@ def _reheader_protagonist(chars_body: str, protagonist: str) -> str:
     """把候选人物卡里名为 protagonist 的那节标题归一为「## 主角 · 名字」(主角谓词要这个命名)。"""
     if not protagonist:
         return chars_body
-    import re as _re
 
     def _fix(m):
         head = m.group(0)
         return f"## 主角 · {protagonist}" if protagonist in head else head
 
-    return _re.sub(r"^##\s*[^\n]*$", _fix, chars_body, flags=_re.M)
+    return re.sub(r"^##\s*[^\n]*$", _fix, chars_body, flags=re.M)
 
 
 def scan(root: Path, backend) -> dict:

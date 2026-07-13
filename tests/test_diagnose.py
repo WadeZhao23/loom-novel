@@ -71,6 +71,18 @@ def test_commit_does_not_overwrite_human_file(project):
     assert "AI 提炼的" not in human.read_text(encoding="utf-8")   # 撞人写成品 → 进访谈补充,不进原文件
 
 
+def test_commit_card_lines_collision_drops_candidate(project):
+    from loom import diagnose
+    from loom.paths import CARD_REL
+    p = project / CARD_REL
+    p.write_text(p.read_text(encoding="utf-8").replace("- 第1章:", "- 第1章:人写的规划"), encoding="utf-8")
+    diagnose.commit(project, {"世界观": "", "人物卡": "", "卡章纲": "- 第1章:AI候选撞车", "protagonist": ""})
+    text = p.read_text(encoding="utf-8")
+    assert "- 第1章:人写的规划" in text          # 人写不覆盖
+    assert "AI候选撞车" not in text                # 候选撞车丢弃,不强塞
+    assert "- - 第" not in text
+
+
 def test_commit_unlocks_gate(project):
     from loom import diagnose, journey, paths
     # 先造正文章(有章)+ 立项(建书代落场景外,手补一格)

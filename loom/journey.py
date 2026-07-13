@@ -390,8 +390,10 @@ def _bulleted(answer: str) -> str:
     return "\n".join(f"- {l.strip()}" for l in answer.splitlines() if l.strip())
 
 
-def _apply_card_lines(root: Path, body: str) -> str:
-    """把已整形的「- 第N章:…」body 落卡章纲(填空章行/追加缺章行/非章行精确判重;人写行绝不覆盖)。"""
+def _apply_card_lines(root: Path, body: str, *, fallback: str = "") -> str:
+    """把已整形的「- 第N章:…」body 落卡章纲(填空章行/追加缺章行/非章行精确判重;人写行绝不覆盖)。
+    啥都没落且 fallback 非空 → 追加 _bulleted(fallback) 兜底(land_answer 传原 answer 保「答案绝不丢」;
+    诊断候选传空=撞车即丢弃,不强塞 AI 内容)。"""
     p = root / paths.CARD_REL
     text = p.read_text(encoding="utf-8") if p.is_file() else "# 卡章纲\n"
     landed_any = False   # 消化产物哪怕不合规(散文/漏行),答案也绝不静默丢(C1)
@@ -414,8 +416,8 @@ def _apply_card_lines(root: Path, body: str) -> str:
             # 整行精确匹配判重(而非子串):新行是已有行前缀时不再被误吞
             text = text.rstrip() + f"\n{line}\n"
             landed_any = True
-    if not landed_any and body.strip():
-        text = text.rstrip() + f"\n{_bulleted(body)}\n"   # 最后兜底:body 全量追加,答案绝不丢
+    if not landed_any and fallback.strip():
+        text = text.rstrip() + f"\n{_bulleted(fallback)}\n"
     atomic_write_text(p, text)
     return paths.CARD_REL
 
@@ -423,11 +425,9 @@ def _apply_card_lines(root: Path, body: str) -> str:
 def _land_card_lines(root: Path, question: str, answer: str, backend) -> str:
     body = _digest(backend, question, answer,
                    "整理成卡章纲行:每行「- 第N章:这章完成什么+章末钩子」;不属于具体某章的规划(如全书大弧),输出「- 大弧:一句话」。")
-    if not body or not any(l.strip().startswith("- ") for l in body.splitlines()):
-        # 消化产物是空/散文(没有一行「- 」)→ 视同消化失败,原答案兜底(免得 _apply_card_lines
-        # 的内部兜底把消化产物的散文当 body 落盘,答案本身反而丢了)
+    if not body:
         body = _bulleted(answer)
-    return _apply_card_lines(root, body)
+    return _apply_card_lines(root, body, fallback=answer)   # 答案绝不丢:兜底用原 answer,不是 digest 产物
 
 
 def writing_unlocked(root: Path) -> tuple[bool, list[str]]:
