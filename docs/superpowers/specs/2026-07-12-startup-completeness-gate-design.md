@@ -96,3 +96,6 @@
 - importer 里调 LLM(零 LLM 红线);LLM 选正文切点(归拆章工具,不背 backlog 三叉)。
 - 给门禁段留 skip 后门(硬门禁留后门=没门);主角上 LLM 判别(易误伤,用文件名谓词)。
 - 吉祥物动画/表情(违纸墨克制)。
+
+---
+二期实现备注(2026-07-12):导入正文桶 + `第N章.md` 顺序归一(`cnnum.chapter_order_key` 按真实章序重排)+ `.txt` 仅正文放行;`diagnose.py` scan(前3+最近2章、cheap、三段候选带出处、不落盘)/commit(复用 `_write_sections_into_dir`+抽出的 `journey._apply_card_lines`、跳过 _digest、主角指认)。v1 一文件一章;大 txt 切分与 LLM 切点归拆章工具(未做)。
