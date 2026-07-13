@@ -118,6 +118,8 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
         by_name: dict[str, list[Path]] = {}
         for p in folder.rglob("*.md"):
             by_name.setdefault(p.name, []).append(p)
+        for p in folder.rglob("*.txt"):
+            by_name.setdefault(p.name, []).append(p)
 
         def _take(fname: str, used: dict[str, int]) -> Path | None:
             pool = by_name.get(fname, [])
@@ -156,6 +158,17 @@ def import_folder(folder: Path, name: str, routing: dict[str, list[str]], parent
                     parts.append(f"## 来自:{fname}\n\n{content}")   # content 不 strip,保他缩进/空行
             if parts:
                 atomic_write_text(root / rel, "\n\n".join(parts) + "\n")
+        # 正文桶:按真实章序重排、顺序归一为 第N章.md(阿拉伯章号是全系统规范);内容原样(txt 读容错落 md)
+        body_files = routing.get("正文", [])
+        if body_files:
+            from .cnnum import chapter_order_key
+            (root / paths.BODY_DIR).mkdir(parents=True, exist_ok=True)
+            ordered = sorted(body_files, key=chapter_order_key)
+            for i, fname in enumerate(ordered, start=1):
+                src_p = _take(fname, used)
+                if src_p is None:
+                    continue
+                _write_dir_file(src_p, paths.chapter_path(root, i))
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise
@@ -180,7 +193,13 @@ def import_summary(root: Path, routing: dict[str, list[str]]) -> dict:
     if placed["卡章纲"] and card_p.is_file() and not _CH_LINE.search(card_p.read_text(encoding="utf-8")):
         notes.append("你的章纲是段落式,大纲师照读没问题、写正文不受影响;但「时间轴/伏笔账本」这类自动记忆"
                      "按「- 第N章:」一行格式挂,暂不显示——不影响写作。")
-    # 无正文 → 中性文风
-    if not any((root / "正文").glob("第*章.md")):
+    # 正文落盘提示
+    body_n = len(list((root / "正文").glob("第*章.md")))
+    if body_n:
+        notes.append(f"{body_n} 章正文已入库(按章序重排为 第1~{body_n}章)。")
+        notes.append("导入的章不能 learn 属正常(learn 只学 AI 稿→你的手改,导入章没有 AI 原稿)。")
+        notes.append("建议对最近几章跑一次「除虫」铺状态账本(可选,不强制)。")
+    else:
+        # 无正文 → 中性文风
         notes.append("你还没有正文,写作先用中性文风;写几章、手改后点 learn,会越来越像你(也可用 seed 从范文起手)。")
     return {"placed": placed, "notes": notes}

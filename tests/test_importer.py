@@ -248,3 +248,29 @@ def test_txt_only_routes_to_body_not_setting_buckets():
 def test_buckets_includes_body():
     from loom import importer
     assert "正文" in importer.BUCKETS
+
+
+def test_import_folder_body_sequential_rename(tmp_path):
+    from loom import importer, paths
+    src = tmp_path / "src"; src.mkdir()
+    (src / "第一章.txt").write_text("楔子内容\n", encoding="utf-8")
+    (src / "第二章.txt").write_text("第二章内容\n", encoding="utf-8")
+    (src / "第十章.txt").write_text("第十章内容\n", encoding="utf-8")
+    routing = {b: [] for b in importer.BUCKETS}
+    routing["正文"] = ["第一章.txt", "第二章.txt", "第十章.txt"]
+    root = importer.import_folder(src, "导入书", routing, tmp_path / "库")
+    # 按真实章序(一<二<十)顺序归一,不被字符串序坑;落成 .md
+    assert paths.chapter_numbers(root) == [1, 2, 3]
+    assert (root / "正文/第1章.md").read_text(encoding="utf-8").strip() == "楔子内容"
+    assert (root / "正文/第3章.md").read_text(encoding="utf-8").strip() == "第十章内容"
+
+
+def test_import_summary_body_notes(tmp_path):
+    from loom import importer
+    src = tmp_path / "src"; src.mkdir()
+    (src / "第1章.txt").write_text("正文\n", encoding="utf-8")
+    routing = {b: [] for b in importer.BUCKETS}; routing["正文"] = ["第1章.txt"]
+    root = importer.import_folder(src, "书", routing, tmp_path / "库")
+    summary = importer.import_summary(root, routing)
+    assert summary["placed"]["正文"] == 1
+    assert any("章" in n for n in summary["notes"])   # 有"N章已入库"类提示
