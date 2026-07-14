@@ -14,6 +14,7 @@ let _lastDebugReport = null;   // 写章流里先到的 debug_report 事件,chap
 let _navYield = false;   // 居中态让位(会话级,换书清零;不落 localStorage)
 let _weaving = false;    // 织章中(领航员隐身)
 let _navPopOpen = false; // 球浮层开合(重画后按此恢复)
+let _navAutoAsked = new Set(); // 居中态自动出题去重:每段至多自动跑一次 LLM,防降级卡无限重拉
 
 // ---------- 领航员在场形态:navMode 三态推导(hidden/center/float)----------
 function navMode() {
@@ -447,6 +448,7 @@ function enterProject(d) {
   hideInlinePanel();   // 换书收面板:稳态残留的候选绝不能落进另一本书
   JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
   _navYield = false; _weaving = false; _navPopOpen = false;   // 换书清领航员在场态:让位/织章/浮层开合都是会话级,不跨书带
+  _navAutoAsked = new Set();
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -763,7 +765,10 @@ async function loadJourney() {
 // 居中态镶边(chrome):副标题 + 段进度条(点击=回头改这段)
 function paintNavCenterChrome() {
   const missing = DATA.missing || [];
-  $("nav-center-sub").textContent = missing.length ? `距开写还差 ${missing.length} 项:${missing.join("、")}` : "地基快齐了";
+  const cur = ((JOURNEY && JOURNEY.stages) || []).find((s) => JOURNEY && s.key === JOURNEY.current);
+  const gist = missing.length ? `距开写还差 ${missing.length} 项:${missing.join("、")}` : "地基快齐了";
+  // 副标题带上「现在这段要定什么」——立项/世界观等的具体指示,别让用户对着空题干瞪眼
+  $("nav-center-sub").textContent = cur && cur.hint ? `${gist} · 现在定「${cur.key}」:${cur.hint}` : gist;
   const strip = $("nav-center-strip"); strip.innerHTML = "";
   ((JOURNEY && JOURNEY.stages) || []).forEach((s) => {
     const seg = document.createElement("span");
@@ -859,7 +864,14 @@ function paintJourney() {
   }
   const c = JOURNEY.card;
   if (!c) {
-    body.appendChild(jcBtn("问我下一题", postJourneyCard));
+    if (centerMode && !_navAutoAsked.has(JOURNEY.current)) {
+      // 居中态直接对话:进到一段自动把问题摆出来,不用先点「问我下一题」;每段至多自动跑一次(防降级卡无限重拉)
+      _navAutoAsked.add(JOURNEY.current);
+      body.innerHTML = `<div class="jc-question">领航员正在想这段的问题…</div>`;
+      postJourneyCard();
+      return;
+    }
+    body.appendChild(jcBtn(centerMode ? "出个题" : "问我下一题", postJourneyCard));
     body.appendChild(skipBtn);
     return;
   }
@@ -881,6 +893,7 @@ function paintJourney() {
   body.appendChild(ta);
   const row = document.createElement("div");
   row.appendChild(jcBtn("就这么定", () => postJourneyAnswer(ta.value)));
+  if (c.degraded) row.appendChild(jcBtn("重试出题", () => { _navAutoAsked.delete(JOURNEY.current); postJourneyCard(); }, true));
   row.appendChild(skipBtn);
   body.appendChild(row);
 }
@@ -916,6 +929,7 @@ async function postJourneyAnswer(text) {
     const out = await jreq("POST", "/api/journey/answer", { root, answer: text.trim() });
     if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
     JOURNEY = out.state;
+    _navAutoAsked = new Set();   // 答完一题:落到的下一段/下一问在居中态自动出题(接着对话)
     toast("已记下 → " + out.landed);
     paintJourney();
     refresh();   // 外置大脑侧栏跟着长
@@ -932,6 +946,7 @@ async function postJourneyGoto(stage, skip) {
     const out = await jreq("POST", "/api/journey/goto", { root, stage, skip: !!skip });
     if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
     JOURNEY = out;
+    _navAutoAsked = new Set();   // 回头改/换段:落到的段在居中态自动出题
     paintJourney();
     if (navMode() === "center") paintNavCenterChrome();
   } catch (e) {

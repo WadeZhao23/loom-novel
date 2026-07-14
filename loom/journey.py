@@ -51,6 +51,15 @@ STAGES: tuple[StageSpec, ...] = (
 _CARD_FIELDS = ("分区", "题材", "对标意图", "为什么选它")
 _CARD_LINE_RE = re.compile(r"^-\s*第(\d+)章[:：][ \t]*\S", re.M)
 
+# 每段给用户看的「这段要定什么」向导(区别于喂 LLM 的 spec.goal);面板副标题与降级卡都用它
+_STAGE_HINT = {
+    "立项": "这本书发哪个平台、什么分区题材、对标哪本书、为什么选它",
+    "世界观": "力量体系、金手指及其代价、关键的地理与势力",
+    "人物": "主角是谁(名字/动机/底牌/软肋),以及关键的配角、反派",
+    "卡章纲": "开局钩子、前几章一句话章纲、全书大弧",
+    "voice": "喂 2-3 段你写过的样本,让指纹更像你(可跳过)",
+}
+
 _NAME_SEP = ("·", "・", "•")   # 与 agents._NAME_SEP 同一口径:专名册只认带分隔符的「类型·名字」标题
 _PROTAG_HEAD_RE = re.compile(r"^##\s*主角\s*[·・•]\s*\S", re.M)
 _GATE_STAGES = ("立项", "世界观", "人物", "卡章纲")   # voice 不进门禁
@@ -144,7 +153,7 @@ def _journey(st: dict) -> dict:
 def journey_state(root: Path) -> dict:
     st = load_state(root)
     j = _journey(st)
-    stages = [{"key": s.key, "land": s.land,
+    stages = [{"key": s.key, "land": s.land, "hint": _STAGE_HINT.get(s.key, ""),
                "done": stage_done(root, s),
                "skipped": bool(j["skips"].get(s.key)),
                "asked": int(j["asked"].get(s.key, 0))}
@@ -283,7 +292,7 @@ def next_card(root: Path, backend) -> dict:
         j["asked"][cur] = int(j["asked"].get(cur, 0)) + 1   # 只有成卡才烧预算
     else:
         card = {"stage": cur, "sig": sig, "options": [], "degraded": True,
-                "question": f"关于「{spec.key}」,你想先定下什么?(出题失败,直接写你的决定)"}
+                "question": f"「{spec.key}」要定:{_STAGE_HINT.get(cur, spec.key)}。领航员这次没出上题,直接写你想定的。"}
     j["card"] = card
     st["journey"] = j
     save_state(root, st)
