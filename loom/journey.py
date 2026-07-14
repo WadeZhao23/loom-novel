@@ -217,6 +217,26 @@ def _stage_context(root: Path, spec: StageSpec) -> str:
     return _read_files(root, list(spec.reads), _noop)
 
 
+def _premise(root: Path, spec: StageSpec) -> str:
+    """给领航员的「这本书是关于什么」铺垫:建书一句话设定 + 已填的其它设定段(current 段除外,
+    那份在『资料现状』里)。让选项贴这本书、顺着已定的往下问——而不是给崇祯故事出修真选项。"""
+    from .agents import _read_files, _noop
+    from .config import load_config
+    parts: list[str] = []
+    idea = (load_config(root).idea or "").strip()
+    if idea:
+        parts.append(f"【这本书的一句话设定】\n{idea}")
+    other_reads: list[str] = []
+    for s in STAGES:
+        if s.key == spec.key or s.land == "seed":
+            continue
+        other_reads.extend(s.reads)
+    established = _read_files(root, other_reads, _noop)   # 已剥占位/跳空文件;空段自然不出现
+    if established.strip():
+        parts.append(f"【已经定下的设定(顺着它问,别自相矛盾)】\n{established}")
+    return "\n\n".join(parts)
+
+
 def next_card(root: Path, backend) -> dict:
     view = journey_state(root)
     cur = view["current"]
@@ -234,8 +254,10 @@ def next_card(root: Path, backend) -> dict:
         return {"card": cached, "state": view}   # 降级卡不吃缓存,每次点「下一题」都真重试(I3)
 
     left = max(0, _MAX_QUESTIONS - int(j["asked"].get(cur, 0)))
+    premise = _premise(root, spec)
     user = (f"阶段:{spec.key}\n目标:{spec.goal}\n这一段还能问 {left} 题。\n\n"
-            f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
+            + (premise + "\n\n" if premise else "")
+            + f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
     parsed = None
     try:
         raw = backend.complete(_navigator_system(root), user, max_chars=_NAV_MAX_CHARS)
