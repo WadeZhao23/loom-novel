@@ -70,3 +70,20 @@ def test_two_consecutive_botched_tools_terminate_with_trace(project):
     # 连续2次botched→终结,不会一直循环到6轮;留痕文件出现 tool_unparsed
     assert (project / NAV_TRACE_REL).is_file()
     assert "tool_unparsed" in (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+
+
+def test_empty_text_opening_no_user_event(project):
+    # 空 text 开场:不落空 user 事件,但伙伴仍开场发言(spec §2 开场幂等,第二道保险)
+    evs = []
+    run_turn(project, "", ScriptedBackend(["你好,我们从题材聊起?"]), emit=evs.append, ts="t")
+    from loom import partner_store
+    assert not any(e["t"] == "user" and not e.get("text") for e in partner_store.read_events(project))
+    assert any(e["t"] == "assistant" for e in evs)   # 仍开场
+
+
+def test_empty_text_noop_when_history_exists(project):
+    # 已有对话时空 text → no-op 不调模型(防重复开场)
+    run_turn(project, "你好", ScriptedBackend(["回1"]), emit=lambda e: None, ts="t1")
+    be = ScriptedBackend(["不该被调用"])
+    run_turn(project, "", be, emit=lambda e: None, ts="t2")
+    assert be.calls == []   # 模型没被调

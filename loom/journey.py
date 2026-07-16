@@ -379,6 +379,7 @@ def _replace_h2_body(text: str, title: str, new_body: str) -> str:
                   lambda m: m.group(1) + replacement + "\n", text, count=1, flags=re.M | re.S)
 
 
+# ⚠️ 卡片机 legacy 落盘链与伙伴 `_land_slot`(line 分支)共用此 helper——退役卡片机时勿删。
 def _land_field(root: Path, field: str, answer: str) -> str:
     p = root / paths.PROJECT_CARD_REL
     text = p.read_text(encoding="utf-8") if p.is_file() else "# 立项卡\n"
@@ -506,6 +507,7 @@ def _bulleted(answer: str) -> str:
     return "\n".join(f"- {l.strip()}" for l in answer.splitlines() if l.strip())
 
 
+# ⚠️ 卡片机 legacy 落盘链与伙伴 `_land_slot`(row 分支,章纲行)共用此 helper——退役卡片机时勿删。
 def _apply_card_lines(root: Path, body: str, *, fallback: str = "") -> str:
     """把已整形的「- 第N章:…」body 落卡章纲(填空章行/追加缺章行/非章行精确判重;人写行绝不覆盖)。
     啥都没落且 fallback 非空 → 追加 _bulleted(fallback) 兜底(land_answer 传原 answer 保「答案绝不丢」;
