@@ -25,7 +25,6 @@ from . import journey, paths, slots
 from .fsutil import safe_join
 
 _READ_MAX_CHARS = 3000   # 单条工具结果预算(spec §4 常量表:单条工具结果 ≤3k 字)
-_KANDIJI_TOP_K = 3       # 看地基每段展示的未填槽位数上限
 
 
 @dataclass(frozen=True)
@@ -45,18 +44,31 @@ _READ_PREFIXES = (f"{paths.BRAIN_DIR}/", f"{paths.BODY_DIR}/", "skills/")
 
 
 def _safe_read_path(root: Path | str, rel: str) -> Path:
-    """把 rel 锁进读白名单:越界/点开头段/白名单外一律 ValueError。"""
+    """把 rel 锁进读白名单:越界/点开头段/白名单外一律 ValueError。
+
+    点段检查跑两遍,缺一都留后门:
+    ①原始请求串——挡字面写 外置大脑/.拆书/x.md 这种直球。
+    ②safe_join resolve 后、相对 root 的真实路径——挡「请求串字面干净、但是个符号链接,
+      resolve 跟随后落进点目录」的绕过(书内 外置大脑/link.md 指向 外置大脑/.拆书/secret.md,
+      字符串本身不含点段、①放行,不补②就能读到 .拆书 里的机密)。
+    白名单前缀检查同样基于②算出的真实相对路径,不基于原始请求串——防链接指向白名单外。
+    root 自身可能是符号链接(macOS /tmp -> /private/tmp):这里的 base 和 safe_join 内部
+    第二次 resolve 出的 base 是同一个值(对已 resolve 的路径再 resolve 是幂等的),
+    两边比较口径一致,不会因 root 自身是链接而把合法子路径误判越界或误判点段。
+    """
     base = Path(root).resolve()
     r = str(rel or "").replace("\\", "/").strip()
     if not r:
         raise ValueError("路径不能为空。")
-    # 通用规则:路径任一段以「.」开头即拒(点开头 = 引擎自动维护区,paths.py 顶注红线)。
-    # 在 safe_join 之前查:即便某个含 .. 的路径最终 resolve 后仍落在书根内,也照拒——
+    # 点段检查①:查原始请求串。即便某个含 .. 的路径最终 resolve 后仍落在书根内,也照拒——
     # 这条是「点段」黑名单,不只是「越界」检测,两把尺子各管各的。
     if any(seg.startswith(".") for seg in r.split("/") if seg):
         raise ValueError(f"路径不合法(点开头段是引擎自动维护区,拒绝访问):{rel}")
-    target = safe_join(base, r)   # 越界(../、绝对路径顶掉 root)抛 ValueError
+    target = safe_join(base, r)   # 越界(../、绝对路径顶掉 root)抛 ValueError;target 已 resolve,符号链接已跟随
     rel_norm = target.relative_to(base).as_posix()
+    # 点段检查②:查 resolve 后的真实路径(挡符号链接 resolve 后落入点目录的绕过)。
+    if any(seg.startswith(".") for seg in rel_norm.split("/") if seg):
+        raise ValueError(f"路径不合法(解析后落入引擎自动维护区,拒绝访问):{rel}")
     if not rel_norm.startswith(_READ_PREFIXES):
         raise ValueError(f"路径不在只读白名单内(仅 {paths.BRAIN_DIR}/{paths.BODY_DIR}/skills):{rel}")
     return target
@@ -77,24 +89,33 @@ def _handle_read(root: Path, 路径: str = "", 起行: str = "", 止行: str = "
         text = "\n".join(lines[s - 1:e])
     if len(text) > _READ_MAX_CHARS:
         total_chars = len(text)
-        text = (text[:_READ_MAX_CHARS]
-                + f"\n\n…(已截断;此区间共 {len(lines)} 行、{total_chars} 字,超 {_READ_MAX_CHARS} 字预算。"
+        # 提示语本身也要计入预算(之前正文截到 3000 字后再拼提示语,总长会超红线)——
+        # 先把提示语拼出来,正文按「预算减提示语长度」截断,最后再钳一次兜底。
+        suffix = (f"\n\n…(已截断;此区间共 {len(lines)} 行、{total_chars} 字,超 {_READ_MAX_CHARS} 字预算。"
                   f"带「起行」「止行」参数重取指定行区间。)")
+        body_budget = max(0, _READ_MAX_CHARS - len(suffix))
+        text = text[:body_budget] + suffix
+        text = text[:_READ_MAX_CHARS]
     return text
 
 
 def _handle_kandiji(root: Path) -> str:
-    """槽位扫描器摘要:遍历 journey.STAGES,每段一行「段名 未填N/总数:前几个未填 容器#键」。"""
+    """槽位扫描器全量明细(spec §4/§5.3:看地基=全量明细,区别于环境快照的缩略只读投影)。
+
+    每段列出全部槽位(不只未填的前几个),每槽一行:容器#键 + 已填/未填 + preview
+    (已填值前若干字)。环境快照(T4 会建)才是「每段一行未填N/总数」的缩略版,
+    两者刻意不同——伙伴细看某格要看到实际内容,靠的就是这份全量明细。
+    """
     lines: list[str] = []
     for spec in journey.STAGES:
         stage_slot_list = slots.stage_slots(root, spec)
         if not stage_slot_list:
             continue
-        unfilled = [s for s in stage_slot_list if not s.filled]
-        line = f"【{spec.key}】未填 {len(unfilled)}/{len(stage_slot_list)}"
-        if unfilled:
-            line += "：" + "、".join(s.id for s in unfilled[:_KANDIJI_TOP_K])
-        lines.append(line)
+        filled_n = sum(1 for s in stage_slot_list if s.filled)
+        lines.append(f"【{spec.key}】共 {len(stage_slot_list)} 槽,已填 {filled_n}/未填 {len(stage_slot_list) - filled_n}")
+        for s in stage_slot_list:
+            mark = f"已填：{s.preview}" if s.filled else "未填"
+            lines.append(f"  {s.id}：{mark}")
     return "\n".join(lines) if lines else "(暂无可扫描的槽位)"
 
 
@@ -117,7 +138,7 @@ REGISTRY: dict[str, ToolSpec] = {
     ),
     "看地基": ToolSpec(
         name="看地基", params=(),
-        desc="槽位扫描器摘要:各段(立项/世界观/人物/卡章纲)未填槽位统计。",
+        desc="槽位扫描器全量明细:各段(立项/世界观/人物/卡章纲)每个槽位的容器#键、已填/未填、preview。",
         handler=_handle_kandiji, mutates=False,
     ),
     "提设定": ToolSpec(
