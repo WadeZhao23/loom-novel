@@ -420,11 +420,10 @@ def _land_slot(root: Path, slot_id: str, answer: str) -> str:
         return rel
     if slot.at == "row":
         pat = re.compile(_SLOT_ROW_FILL_RE_TMPL.format(key=re.escape(key)), re.M)
-        if slot.key.startswith("第") or key == "大弧":   # 卡章纲行走既有 _apply_card_lines 兜底
-            atomic_write_text(p, _apply_card_lines(root, f"- {key}:{answer}", fallback=answer))
-            return rel
+        if slot.key.startswith("第") or key == "大弧":   # 卡章纲行走既有 _apply_card_lines(内部已落盘)
+            return _apply_card_lines(root, f"- {key}:{answer}", fallback=answer)
         new, n = pat.subn(lambda m: f"{m.group(1)}{answer}", text, count=1)
-        if not n:   # 骨架行不在(被作者删了)→ 文末补一行,答案绝不丢
+        if not n:   # 理论兜底:守卫已保证槽位存在→行通常在;仅防扫描与落盘间文件被并发改(TOCTOU)
             new = text.rstrip() + f"\n- {key}:{answer}\n"
         atomic_write_text(p, new)
         return rel

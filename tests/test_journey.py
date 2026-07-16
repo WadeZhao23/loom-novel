@@ -377,6 +377,24 @@ def test_land_slot_row_refilled_replaces_line(project):
     assert "随身空间" in text and text.count("系统面板") == 0        # 整行替换,旧值不残留
 
 
+def test_land_slot_card_line_does_not_nuke_file(project, monkeypatch):
+    # 卡章纲 row 槽落盘:内容进第N章行,文件标题/其它章行/大弧行都还在(防 rel-as-content bug)
+    from loom import slots as slots_mod
+    from loom.journey import _land_slot
+    from loom.slots import Slot
+    rel = "外置大脑/卡章纲.md"
+    fake = Slot(id=f"{rel}#第1章", label="第1章", container=rel, at="row",
+                key="第1章", hint="", filled=False, preview="")
+    orig = slots_mod.stage_slots
+    monkeypatch.setattr(slots_mod, "stage_slots",
+                        lambda root, spec: [fake] if spec.key == "卡章纲" else orig(root, spec))
+    _land_slot(project, f"{rel}#第1章", "主角觉醒,发现体内有个系统")
+    text = (project / rel).read_text(encoding="utf-8")
+    assert "主角觉醒" in text
+    assert "# 卡章纲" in text           # 标题还在(没被 rel 字符串覆盖)
+    assert "- 第5章:" in text or "第5章" in text   # 其它章行还在
+
+
 # ---- goto 语义(I1/I2) ----
 
 def test_goto_refocuses_done_stage(project):
