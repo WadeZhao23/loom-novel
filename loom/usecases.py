@@ -19,7 +19,7 @@ from typing import Callable, Iterator
 
 from . import chapters as chap
 from . import journey as journey_mod
-from . import ledger, paths
+from . import ledger, partner_store, paths
 from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
 from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
@@ -358,3 +358,46 @@ def diagnose_commit(root: Path | str, picks: dict) -> dict:
     with write_lock(root):
         from . import diagnose
         return diagnose.commit(root, picks)
+
+
+# ---- 书房伙伴(对话拍板;docs/superpowers/plans/2026-07-16-partner-p3-wire-and-migrate.md) ----
+# 红线:对话里的「提设定」只产 proposal 事件(loom/partner_tools.py),不落盘;
+# 唯一落盘出口是 partner_confirm。
+
+
+def partner_history(root: Path | str, *, tail: int | None = None) -> dict:
+    """纯读派生视图,无锁(同 journey_state/project_state)。"""
+    return {"events": partner_store.read_events(Path(root), tail=tail)}
+
+
+def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
+    """拍板落盘:找 proposal → 按其 slot 定址落盘 → 记一条 confirm 事件。
+
+    幂等(防双击/重发对 file 类落点二次追加):jsonl 里已有该 pid 的 confirm 事件,
+    直接返已落盘结果,不重跑 _land_slot。proposal 过期(find_proposal 返 None)或
+    落点冲突/未知(_land_slot 抛 ValueError,如 filename 撞车、槽位不存在)都不崩,
+    返 {"error": ...}——两种情况都不追加 confirm 事件,原 proposal 仍可重试。
+    """
+    root = Path(root)
+    with write_lock(root):
+        existing = next((e for e in partner_store.read_events(root)
+                          if e.get("t") == "confirm" and e.get("id") == pid), None)
+        if existing is not None:
+            return {"landed": existing.get("landed"), "state": journey_mod.journey_state(root)}
+        proposal = partner_store.find_proposal(root, pid)
+        if proposal is None:
+            return {"error": "提案已过期,重新问一次"}
+        try:
+            landed = journey_mod._land_slot(root, proposal["slot"], proposal["content"])
+        except ValueError as e:
+            return {"error": str(e)}
+        partner_store.append_event(root, {"t": "confirm", "id": pid, "ts": ts, "landed": landed})
+        return {"landed": landed, "state": journey_mod.journey_state(root)}
+
+
+def partner_new(root: Path | str, *, stamp: str) -> dict:
+    """归档当前伙伴对话,另起一段(不动书内容,只挪 jsonl 文件)。"""
+    root = Path(root)
+    with write_lock(root):
+        partner_store.archive_current(root, stamp)
+        return {"ok": True}
