@@ -47,3 +47,26 @@ def test_delete_dialogue_keeps_book(project):
     import shutil
     shutil.rmtree(project / ".伙伴对话")
     assert journey_state(project)["current"] == before   # 删对话,门禁不变
+
+
+def test_botched_tool_line_not_leaked_as_assistant(project):
+    # 未知工具名的协议行绝不作为权威 assistant 泄漏
+    evs = []
+    run_turn(project, "x", ScriptedBackend(["用:瞎编的工具\n\n用:看地基"]), emit=evs.append, ts="t")
+    assert not any(e.get("t") == "assistant" and "用:" in e.get("text", "") for e in evs)
+    assert any(e.get("t") == "tool" and e.get("name") == "看地基" for e in evs)   # 真工具仍执行
+
+
+def test_assistant_emitted_once_per_reply(project):
+    evs = []
+    run_turn(project, "y", ScriptedBackend(["好的,继续。"]), emit=evs.append, ts="t")
+    assert sum(1 for e in evs if e.get("t") == "assistant") == 1   # 不双发射
+
+
+def test_two_consecutive_botched_tools_terminate_with_trace(project):
+    from loom.paths import NAV_TRACE_REL
+    evs = []
+    run_turn(project, "z", ScriptedBackend(["用:瞎编1", "用:瞎编2", "用:瞎编3"]), emit=evs.append, ts="t")
+    # 连续2次botched→终结,不会一直循环到6轮;留痕文件出现 tool_unparsed
+    assert (project / NAV_TRACE_REL).is_file()
+    assert "tool_unparsed" in (project / NAV_TRACE_REL).read_text(encoding="utf-8")

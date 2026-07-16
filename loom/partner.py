@@ -22,10 +22,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import partner_context, partner_store, partner_tools
+from . import journey, partner_context, partner_store, partner_tools
 from .parse import _TOOL_USE_RE, parse_tool_block
 
 _MAX_TOOL_ROUNDS = 6   # 每轮工具调用上限(spec §4 常量表:每轮工具调用 ≤6 次)
+_MAX_TOOL_FAIL_STREAK = 2   # 连续「解析失败」(botched 工具调用)上限(spec §5.2)
 
 
 def _is_trigger_line(line: str) -> bool:
@@ -38,6 +39,27 @@ def _is_trigger_line(line: str) -> bool:
     漏发一行不影响正确性,只是这一行没能提前显现。
     """
     return _TOOL_USE_RE.match(line) is not None
+
+
+def _strip_protocol_lines(text: str) -> tuple[str, bool]:
+    """剥掉 `say` 里混入的协议形状整行(剥装饰后以「用:」开头,但没被 `parse_tool_block`
+    选中——工具名瞎编/误触发块排在真工具前时会有这种残留)。
+
+    `parse_tool_block` 拿 `valid_names` 校验后,「说话段」只保证不含**被选中**的那个工具块,
+    不保证不含其它未被选中的 `用:` 行(它们仍在 say 里原样躺着)。这些行是协议行的形状,
+    绝不许漏到作者屏幕(spec §5.2 critical)——不管它是不是真工具触发。
+
+    返回 `(过滤后文本, 是否剥掉过至少一行)`:后者是「模型想调工具但名字没认出来」的判据,
+    供调用方决定要不要走「解析失败回喂」(spec §5.2)。
+    """
+    kept: list[str] = []
+    dropped = False
+    for line in text.splitlines():
+        if _TOOL_USE_RE.match(line):
+            dropped = True
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip(), dropped
 
 
 def _stream_line_relay(sink):
@@ -84,12 +106,15 @@ def run_turn(root, user_text, backend, *, emit, ts) -> None:
         emit(event)
 
     def _preview(text: str) -> None:
+        # 实时增量预览(P3 渐进渲染用),不落盘、不是权威说话段——权威的那条来自下面
+        # `_persist({"t": "assistant", ...})`,每条回复恰好一条,两者事件类型分开、不重复。
         if text.strip():
-            emit({"t": "assistant", "ts": ts, "text": text})
+            emit({"t": "assistant_delta", "ts": ts, "text": text})
 
     _persist({"t": "user", "text": user_text})
 
     tool_rounds = 0
+    tool_fail_count = 0   # 连续「解析失败」(botched 工具调用)计数;成卡/成工具即清零
     while True:
         tail = partner_store.read_events(root)
         system, user = partner_context.assemble(root, tail)
@@ -98,17 +123,37 @@ def run_turn(root, user_text, backend, *, emit, ts) -> None:
         flush()
 
         say, tool = parse_tool_block(raw, valid_names=set(partner_tools.REGISTRY))
+        # critical(spec §5.2):say 里可能混入未被选中的「用:」协议行(工具名瞎编、或
+        # 误触发块排在真工具前)——落盘/emit 前必须过滤掉,绝不许漏到作者屏幕。
+        say, botched = _strip_protocol_lines(say)
         if say:
             _persist({"t": "assistant", "text": say})
 
-        if tool is None:
-            return
+        if tool is not None:
+            tool_fail_count = 0
+            tool_rounds += 1
+            _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
+            result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
+                                                ts=f"{ts}-{tool_rounds}")
+            _persist(result_ev)
+            if tool_rounds >= _MAX_TOOL_ROUNDS:
+                return
+            continue
 
+        if say:
+            return   # 有实质说话内容,正常终结(模型说完话、没有下一步动作)
+
+        if not botched:
+            return   # 真无话可说也没有协议行残留,平常终结
+
+        # 解析失败回喂(spec §5.2):模型想调工具但名字没认出来,say 被剥空——不当静默
+        # 死轮:回喂纠正让模型自我纠正,计入轮内次数;连续 2 次 → 终结本轮并留痕。
+        tool_fail_count += 1
         tool_rounds += 1
-        _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
-        result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
-                                            ts=f"{ts}-{tool_rounds}")
-        _persist(result_ev)
-
+        if tool_fail_count >= _MAX_TOOL_FAIL_STREAK:
+            journey._nav_trace(root, stage="", sig="", why="tool_unparsed", backend=backend, raw=raw)
+            return
         if tool_rounds >= _MAX_TOOL_ROUNDS:
             return
+        names = "、".join(partner_tools.REGISTRY)
+        _persist({"t": "result", "error": f"工具名没认出来。可用工具:{names}"})
