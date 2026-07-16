@@ -1,6 +1,7 @@
 """创作旅程状态机:阶段谓词/游标推进/跳段回跳/坏游标降级(ADR 0013:游标可丢弃、文件现状为准)。"""
 from loom import journey
-from loom.backends import LoomBackendError
+from loom.backends import LoomBackendError, DemoBackend
+from loom.config import load_config
 from loom.paths import CARD_REL, PROJECT_CARD_REL, NAV_TRACE_REL
 from conftest import FakeBackend, const
 
@@ -396,3 +397,12 @@ def test_exhausted_on_done_stage_skips_and_advances(project):
     s = out["state"]
     assert next(x for x in s["stages"] if x["key"] == "世界观")["skipped"] is True
     assert s["current"] != "世界观"   # 真做完了 + 报无题 → 真跳走,不困在本段
+
+
+# ---- DemoBackend 领航员分支(Task 5) ----
+
+def test_demo_navigator_end_to_end_card(project):
+    # LOOM_DEMO 下起书访谈必须端到端可点:出正常卡带 2-4 个候选,不降级
+    out = journey.next_card(project, DemoBackend(load_config(project)))
+    assert "degraded" not in out["card"]
+    assert 2 <= len(out["card"]["options"]) <= 4
