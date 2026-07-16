@@ -23,5 +23,6 @@
 ## 红线
 
 - **不回写**:loom 从不自动写立项卡(同 `违禁词.md`——外置大脑里人手维护、只读不回写的那类);它不随故事生长、没有 `[AI补充]`。
+  > 注:书房伙伴的候选卡拍板落盘**不算**自动回写——判据是「作者没点就一个字不落盘」,拍板动作仍是作者本人触发,只是代笔写入;详见 [ADR 0015](0015-navigator-agent.md) 与 [ADR 0014](0014-startup-completeness-gate.md) 的立项拍板通道。
 - **不越 voice 线**:整卡只喂设定师(what/where),绝不进写手/写作指纹(守 [ADR 0002](0002-fingerprint-purpose-and-division.md) 的 voice/what 分离)。
 - **不阻断**:缺卡/空卡一律照常出稿;平台联动只调违禁词松紧、非阻断(守 [ADR 0006](0006-quality-gates-issue-driven-non-blocking.md))。
