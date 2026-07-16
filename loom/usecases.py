@@ -52,12 +52,15 @@ _locks_guard = threading.Lock()
 
 class ProjectBusyError(RuntimeError):
     """写锁被占(同一本书正有跑模型/落盘任务)。刻意不继承 LoomBackendError/ValueError:
-    入口的 400 网不该兜住它,busy 永远走 409。"""
+    入口的 400 网不该兜住它,busy 永远走 409。code 默认 project_busy(写锁);
+    伙伴轮锁(见下)复用本类,传 code="partner_busy" 让前端区分两种「忙」。"""
 
     code = "project_busy"
 
-    def __init__(self) -> None:
-        super().__init__(BUSY_MESSAGE)
+    def __init__(self, message: str = BUSY_MESSAGE, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
 
 
 def try_lock(root: Path | str) -> threading.Lock | None:
@@ -82,6 +85,32 @@ def write_lock(root: Path | str) -> Iterator[None]:
         yield
     finally:
         lock.release()
+
+
+# ---------------------------------------------------------------- 伙伴轮锁(独立于写锁)
+# say 端点复刻 /api/write 的「锁随 worker 线程」模式,但用独立字典 _partner_locks:
+# 防两次并发 say 交错写同一 .伙伴对话/当前.jsonl;绝不碰 _locks(写锁)——织章持写锁
+# 跑几分钟期间,say 完全不受影响,书房伙伴照样能聊(spec §10 锁裁量红线)。
+PARTNER_BUSY_MESSAGE = "书房伙伴这轮还在应答,等它说完再问下一句。"
+
+_partner_locks: dict[str, threading.Lock] = {}
+_partner_locks_guard = threading.Lock()
+
+
+def try_partner_lock(root: Path | str) -> threading.Lock | None:
+    """非阻塞拿这本书的伙伴对话轮锁;拿不到返回 None。独立于 try_lock(写锁)。"""
+    with _partner_locks_guard:
+        lock = _partner_locks.setdefault(str(Path(root).resolve()), threading.Lock())
+    return lock if lock.acquire(blocking=False) else None
+
+
+def acquire_partner_lock(root: Path | str) -> threading.Lock:
+    """拿伙伴轮锁或抛 ProjectBusyError(code="partner_busy")。给 say 流式场景:锁随
+    worker 线程持有,调用方自行 release。"""
+    lock = try_partner_lock(root)
+    if lock is None:
+        raise ProjectBusyError(PARTNER_BUSY_MESSAGE, code="partner_busy")
+    return lock
 
 
 # ---------------------------------------------------------------- write
