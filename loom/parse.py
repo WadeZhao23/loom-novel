@@ -223,21 +223,35 @@ def parse_journey_card(raw: str) -> dict | None:
 
 
 # ── 文本工具协议(书房伙伴对话 agent 的工具调用面) ───────────────────────────
-# 约定:`用:<工具名>` 起一个工具块,后续 `键:值` 行到空行/文末止;只认第一个块,
-# 之后的尾巴文字丢弃。沿用领航员卡解析同款手艺——`[*_#\s]*` 剥 markdown 装饰、
-# 全/半角冒号都认、`.strip(" *_")` 收尾。
-_TOOL_USE_RE = re.compile(r"^\s*[*_#\s]*用[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
+# 约定:`用:<工具名>` 起一个工具块,后续 `键:值` 行到空行/文末止;之后的尾巴文字丢弃。
+# 沿用领航员卡解析同款手艺——`[*_#\s]*` 剥 markdown 装饰、全/半角冒号都认、
+# `.strip(" *_")` 收尾、`(?:\d+[.、]\s*)?` 容忍编号前缀(与 _CARD_Q_RE 同款)。
+_TOOL_USE_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*用[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
 _TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
 
 
-def parse_tool_block(text: str) -> tuple[str, dict | None]:
+def parse_tool_block(text: str, valid_names: set[str] | None = None) -> tuple[str, dict | None]:
     """(说话段, 工具调用 | None)。工具调用 = {"name": str, "params": {键:值}}。
-    只认第一个「用:」块;之后的尾巴文字丢弃。协议行不进说话段。"""
+
+    `valid_names` 不给(默认):认第一个「用:」块,不校验名字(向后兼容旧调用点)。
+    `valid_names` 给了:扫描全文所有「用:」块,取第一个「名字 ∈ valid_names」的块;
+    名字不认识的「用:」行不算工具触发,当普通文本留在说话段里——防中文里孤立的
+    「用:xxx」说话句(名字不在注册表)被误判成工具、连带把它后面真正的工具调用当
+    尾巴静默丢弃。选中块之后的尾巴文字丢弃(设计如此)。协议行不进说话段。
+    """
     lines = text.splitlines()
-    ui = next((i for i, l in enumerate(lines) if _TOOL_USE_RE.match(l)), None)
-    if ui is None:
+    blocks: list[tuple[int, str]] = []
+    for i, l in enumerate(lines):
+        m = _TOOL_USE_RE.match(l)
+        if m:
+            blocks.append((i, m.group(1).strip(" *_").strip()))
+    if valid_names is None:
+        picked = blocks[0] if blocks else None
+    else:
+        picked = next((b for b in blocks if b[1] in valid_names), None)
+    if picked is None:
         return text.strip(), None
-    name = _TOOL_USE_RE.match(lines[ui]).group(1).strip(" *_").strip()
+    ui, name = picked
     params: dict = {}
     for l in lines[ui + 1:]:
         if not l.strip():
