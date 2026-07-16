@@ -10,13 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
-from .journey import StageSpec, _h2_body
+from .journey import StageSpec, _CARD_FIELDS, _h2_body
 from .parse import _EMPTY_ROW_RE, _PAREN_SPAN_RE, is_substantive
 
 _ROW_RE = re.compile(r"^-\s*([^:：(（]+?)\s*(?:[(（][^)）]*[)）])?\s*[:：](.*)$")
 # 捕获:键(冒号/括注前的名)、括注后冒号后的正文。hint 另取括注原文。
 _HINT_RE = re.compile(r"[(（]([^)）]*)[)）]")
-_PLATFORM_RE = re.compile(r"^平台\s*[:：]\s*(.*)$", re.M)
+_PLATFORM_RE = re.compile(r"^平台[ \t]*[:：][ \t]*(.*)$", re.M)
 
 
 def _preview(val: str) -> str:
@@ -35,7 +35,11 @@ def _row_slots(root: Path, rel: str) -> list[Slot]:
             continue
         key = m.group(1).strip()
         val = m.group(2).strip()
-        hm = _HINT_RE.search(line)
+        # hint 只从「键到冒号」的模板部分找括注,不进冒号后的用户值——用同一次 _ROW_RE 匹配
+        # 定位那个终结键的冒号(m.start(2) 前一个字符),不用字符串切分:括注内本就可能含冒号
+        # (如「核心功能(补主角哪块短板:资源…):」),按冒号切分会把这类括注切断。
+        before_colon = line[:m.start(2) - 1]
+        hm = _HINT_RE.search(before_colon)
         # 「空表单行」判定复用 is_substantive 的口径:剥括注后冒号后无实字 = 空
         filled = bool(_PAREN_SPAN_RE.sub("", line).split("：")[-1].split(":")[-1].strip()) or bool(val)
         out.append(Slot(id=f"{rel}#{key}", label=key[:10], container=rel, at="row",
@@ -66,7 +70,6 @@ def _project_slots(root: Path) -> list[Slot]:
     plat_val = pm.group(1).strip() if pm else ""
     out.append(Slot(id=f"{rel}#平台", label="平台", container=rel, at="line", key="平台",
                     hint="发哪个平台", filled=bool(plat_val), preview=_preview(plat_val)))
-    from .journey import _CARD_FIELDS
     for f in _CARD_FIELDS:
         body = _h2_body(text, f)
         out.append(Slot(id=f"{rel}#{f}", label=f, container=rel, at="h2", key=f,

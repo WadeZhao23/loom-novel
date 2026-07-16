@@ -17,9 +17,6 @@ def test_template_card_has_arc_line(project):
 from loom.slots import stage_slots, Slot
 
 
-def _ids(slots): return [s.id for s in slots]
-
-
 def test_project_stage_slots_line_and_h2(project):
     slots = stage_slots(project, _stage_spec("立项"))
     d = {s.key: s for s in slots}
@@ -43,3 +40,21 @@ def test_row_slots_carry_hint_and_fill(project):
                  if s.container.endswith("金手指.md") and "代价" in s.key)
     assert cost2.filled is True
     assert "折寿三天" in cost2.preview
+
+
+def test_emptied_platform_line_not_filled(project):
+    # 作者删空平台值 → filled=False,preview 不抓下一行标题(防跨行吞噬)
+    p = project / "外置大脑/立项卡.md"
+    p.write_text(p.read_text(encoding="utf-8").replace("平台:起点", "平台:"), encoding="utf-8")
+    plat = next(s for s in stage_slots(project, _stage_spec("立项")) if s.key == "平台")
+    assert plat.filled is False
+    assert plat.preview == ""
+
+
+def test_parens_in_user_value_not_taken_as_hint(project):
+    # 模板本无括注的行,用户值里的括号不能被当 hint
+    p = project / "外置大脑/世界观/力量体系.md"
+    p.write_text(p.read_text(encoding="utf-8").replace("- 体系名称:", "- 体系名称:五行(金木水火土)"), encoding="utf-8")
+    slot = next(s for s in stage_slots(project, _stage_spec("世界观")) if s.key == "体系名称")
+    assert slot.hint == ""
+    assert slot.filled is True
