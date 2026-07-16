@@ -24,6 +24,7 @@ from .config import load_config
 
 _SNAPSHOT_MAX = 400   # 环境快照预算(字);spec §4 常量表
 _SNAPSHOT_TOP_K = 3   # 每段展示的未填槽位数量上限(快照只给「前 K 个」,细看用「看地基」工具)
+_IDEA_MAX = 80        # 一句话设定的独立小配额(字);超了截断补「…」,绝不挤占门禁/未填槽位预算
 _TAIL_MAX = 12000     # 对话尾部预算(字);spec §4 常量表
 
 
@@ -51,15 +52,19 @@ def _system_prefix(root: Path) -> str:
 
 
 def env_snapshot(root: Path) -> str:
-    """≤400 字只读投影:书名/一句话设定/门禁完成度/未填槽位摘要/章节数。
+    """≤400 字只读投影:门禁完成度/未填槽位摘要/章节数/书名/一句话设定。
 
     与「看地基」工具共用 slots.stage_slots(单一真相,绝不建第二个扫描器)——区别在于
     快照只列每段「未填N/总数」+ 前 K 个未填槽位 id(容器#键),不带 filled/preview/hint;
     伙伴靠快照就能「直奔空格发问」,细看某格上下文靠「看地基」/「读文件」工具。
+
+    预算分配:门禁完成度+未填槽位摘要+章节数是快照核心目的,**先拼、优先保留**;
+    书名/一句话设定(idea 来自 loom.toml,作者可以写任意长)放最后、且 idea 单独
+    截到 _IDEA_MAX——避免一句长「设定」把门禁信息挤出 400 字预算之外。
     """
     cfg = load_config(root)
-    lines = [f"书名:{cfg.title}" + (f" | 设定:{cfg.idea.strip()}" if cfg.idea.strip() else "")]
 
+    lines = []
     unlocked, missing = journey.writing_unlocked(root)
     gate = "已解锁" if unlocked else f"未解锁(缺{'/'.join(missing)})"
     lines.append(f"起书门禁:{gate}")
@@ -76,7 +81,13 @@ def env_snapshot(root: Path) -> str:
         lines.append(line)
 
     lines.append(f"章节数:{len(paths.chapter_numbers(root))}")
-    return "\n".join(lines)[:_SNAPSHOT_MAX]   # 硬约束兜底;正常长度远在预算内
+
+    idea = cfg.idea.strip()
+    if len(idea) > _IDEA_MAX:
+        idea = idea[:_IDEA_MAX] + "…"
+    lines.append(f"书名:{cfg.title}" + (f" | 设定:{idea}" if idea else ""))
+
+    return "\n".join(lines)[:_SNAPSHOT_MAX]   # 硬约束兜底;书名/设定殿后,兜底优先砍掉它们而非门禁信息
 
 
 def _render_event(ev: dict) -> str:

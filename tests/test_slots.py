@@ -109,3 +109,11 @@ def test_villain_unnamed_yields_filename_slot(project):
     # 配角/反派同规则:未命名也出 filename 槽压住 row(不只主角)
     slots = [s for s in stage_slots(project, _stage_spec("人物")) if "反派·未命名" in s.container]
     assert len(slots) == 1 and slots[0].at == "filename"
+
+
+def test_cardstage_yields_chapter_row_slots(project):
+    slots = stage_slots(project, _stage_spec("卡章纲"))
+    keys = [s.key for s in slots]
+    assert any("第1章" in k for k in keys)
+    assert any("大弧" in k for k in keys)      # P1-T1 补的大弧行
+    assert all(s.at == "row" for s in slots)

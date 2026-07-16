@@ -134,4 +134,6 @@ def stage_slots(root: Path, spec: StageSpec) -> list[Slot]:
         return _dir_container_slots(root, paths.WORLD_DIR_REL, spec.slot_order, entity=False)
     if spec.key == "人物":
         return _dir_container_slots(root, paths.CHARS_DIR_REL, spec.slot_order, entity=True)
-    return []   # 卡章纲/voice:卡章纲的 row 槽在 P2 需要时再加(章行是 - 第N章: 形态,_row_slots 已能认)
+    if spec.key == "卡章纲":
+        return _row_slots(root, paths.CARD_REL)   # 章行「- 第N章:」/「- 大弧:」都是 row 形态
+    return []   # voice:P2 需要时再加

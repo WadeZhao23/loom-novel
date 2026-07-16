@@ -30,3 +30,11 @@ def test_body_change_only_touches_suffix(project):
     (project / "外置大脑/世界观/金手指.md").write_text("# 金手指\n\n吞噬万物\n", encoding="utf-8")
     s2, u2 = assemble(project, [])
     assert _sha(s1) == _sha(s2)      # 前缀不含正文/外置大脑明细
+
+
+def test_snapshot_keeps_gate_even_with_long_idea(project):
+    from loom.config import load_config, save_config
+    cfg = load_config(project); cfg.idea = "设" * 450; save_config(project, cfg)
+    snap = env_snapshot(project)
+    assert len(snap) <= 400
+    assert "门禁" in snap or "未填" in snap or "立项" in snap   # 门禁信息没被长idea挤没
