@@ -709,16 +709,21 @@ def partner_say(b: PartnerSayBody):
     q: queue.Queue = queue.Queue()
 
     def worker():
+        ts = time.strftime("%Y%m%d-%H%M%S")
         try:
             cfg = load_config(root)
-            partner.run_turn(root, b.text, get_backend(cfg), emit=q.put,
-                             ts=time.strftime("%Y%m%d-%H%M%S"))
+            partner.run_turn(root, b.text, get_backend(cfg), emit=q.put, ts=ts)
         except LoomBackendError as e:
-            q.put(events.error(str(e), code=e.code))   # code 透传,前端据此附可操作提示
+            # partner 流信封是 {"t":...,"ts":...}(非 /api/write 的 type-keyed),error 事件跟随;
+            # code 透传,前端据此附可操作提示;e.code 为 None 时不出 code 键
+            err_ev = {"t": "error", "text": str(e), "ts": ts}
+            if e.code:
+                err_ev["code"] = e.code
+            q.put(err_ev)
         except (ValueError, FileNotFoundError) as e:
-            q.put(events.error(str(e)))
+            q.put({"t": "error", "text": str(e), "ts": ts})
         except Exception as e:  # 兜底,别让流挂死
-            q.put(events.error(f"意外错误:{e}"))
+            q.put({"t": "error", "text": f"意外错误:{e}", "ts": ts})
         finally:
             lock.release()   # 锁跟着 worker 走(响应流着,轮还没完),在哨兵 None 之前放
             q.put(None)

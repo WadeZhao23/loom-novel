@@ -14,6 +14,7 @@ from starlette.testclient import TestClient  # noqa: E402
 import loom.server as server  # noqa: E402
 import loom.usecases as usecases  # noqa: E402
 from loom import partner_store as ps  # noqa: E402
+from loom.backends import LoomBackendError  # noqa: E402
 from conftest import ScriptedBackend  # noqa: E402
 
 
@@ -29,6 +30,26 @@ def test_say_streams_events(project, monkeypatch):
     assert "金手指" in assistant_ev["text"]
     # 事件也落了盘(jsonl),不只是流过去
     assert [e["t"] for e in ps.read_events(project)] == ["user", "assistant"]
+
+
+def test_say_error_event_uses_partner_envelope(project, monkeypatch):
+    """backend 抛 LoomBackendError 时,error 事件走 partner 信封({"t":"error",...}),
+    不是 /api/write 那套 type-keyed({"type":"error",...})——前端按 e["t"] 分派,信封错了会漏判。"""
+    class BoomBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise LoomBackendError("后端炸了", code="rate_limited")
+
+    monkeypatch.setattr(server, "get_backend", lambda cfg: BoomBackend())
+    client = TestClient(server.app, base_url="http://127.0.0.1")
+    r = client.post("/api/partner/say", json={"root": str(project), "text": "你好"})
+    assert r.status_code == 200
+    lines = [json.loads(line) for line in r.text.strip().splitlines() if line]
+    error_ev = next(e for e in lines if e.get("t") == "error")
+    assert error_ev["t"] == "error"
+    assert "type" not in error_ev
+    assert error_ev["text"] == "后端炸了"
+    assert error_ev["code"] == "rate_limited"
+    assert "ts" in error_ev
 
 
 def test_say_lock_blocks_concurrent_say_with_partner_busy(project, monkeypatch):
