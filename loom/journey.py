@@ -427,6 +427,21 @@ def _land_slot(root: Path, slot_id: str, answer: str) -> str:
             new = text.rstrip() + f"\n- {key}:{answer}\n"
         atomic_write_text(p, new)
         return rel
+    if slot.at == "filename":
+        from .draft import _FN_BAD
+        name = _FN_BAD.sub("·", answer.splitlines()[0].strip())[:12] or "未命名"
+        role = Path(rel).stem.split("·")[0].split("・")[0].split("•")[0]
+        target = p.with_name(f"{role}·{name}.md")
+        if target.exists() and is_substantive(target.read_text(encoding="utf-8", errors="replace")):
+            raise ValueError(f"已经有一个叫「{name}」的{role}了——换个名字,或先合并那张卡")
+        if target.exists():   # 占位残卡,让位
+            target.unlink()
+        p.rename(target)
+        return str(target.relative_to(root))
+    if slot.at == "file":
+        joiner = "\n" if text.endswith("\n") else "\n\n"
+        atomic_write_text(p, (text.rstrip() + joiner + answer + "\n") if text.strip() else f"{answer}\n")
+        return rel
     raise ValueError(f"P1 未支持的落点类型:{slot.at}(filename/file 见 Task 5)")
 
 

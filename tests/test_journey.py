@@ -395,6 +395,37 @@ def test_land_slot_card_line_does_not_nuke_file(project, monkeypatch):
     assert "- 第5章:" in text or "第5章" in text   # 其它章行还在
 
 
+def test_land_slot_filename_renames_and_unlocks(project):
+    from loom.journey import _land_slot, _protagonist_done
+    d = project / "外置大脑/人物"
+    # 先给未命名主角填点实质(否则改名后仍非实质,门禁不认)
+    unnamed = d / "主角·未命名.md"
+    unnamed.write_text(unnamed.read_text(encoding="utf-8").replace(
+        "- 核心欲望", "- 核心欲望:复仇\n- 旧核心欲望"), encoding="utf-8")
+    _land_slot(project, "外置大脑/人物/主角·未命名.md#@name", "林潜")
+    assert (d / "主角·林潜.md").is_file()
+    assert not (d / "主角·未命名.md").exists()
+    assert _protagonist_done(project) is True       # 门禁解锁
+
+
+def test_land_slot_filename_collision_refuses(project):
+    from loom.journey import _land_slot
+    import pytest
+    d = project / "外置大脑/人物"
+    (d / "主角·林潜.md").write_text("# 主角 · 林潜\n\n- 核心欲望:复仇\n", encoding="utf-8")  # 已有实质
+    with pytest.raises(ValueError):
+        _land_slot(project, "外置大脑/人物/主角·未命名.md#@name", "林潜")
+    assert (d / "主角·未命名.md").exists()           # 原文件没被吞
+
+
+def test_land_slot_file_appends(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/世界观/一句话定位.md#@body", "灵气复苏的现代都市,旧秩序崩塌")
+    text = (project / "外置大脑/世界观/一句话定位.md").read_text(encoding="utf-8")
+    assert "灵气复苏的现代都市" in text
+    assert text.index("#") < text.index("灵气复苏")   # 追加在标题之后
+
+
 # ---- goto 语义(I1/I2) ----
 
 def test_goto_refocuses_done_stage(project):
