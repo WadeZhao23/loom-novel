@@ -259,7 +259,8 @@ def _nav_trace(root: Path, *, stage: str, sig: str, why: str, backend, raw: str,
         entries = [b for b in re.split(r"(?=^## )", old, flags=re.M) if b.startswith("## ")][:19]
         quoted = "\n".join("  > " + l for l in (raw.strip() or "(无原始回复)")[:500].splitlines())
         entry = (f"## {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {stage}\n"
-                 f"- sig: {sig}\n- 结果: {why}\n- 后端: {type(backend).__name__}\n"
+                 f"- sig: {sig}\n- 结果: {why}\n"
+                 f"- 后端: {type(backend).__name__} / {getattr(backend, 'model', '') or '—'}\n"
                  + (f"- code: {code}\n" if code else "")
                  + f"- 原始回复(截断 500 字):\n{quoted}\n\n")
         head = "# 领航员留痕\n\n> 出题失败的现场记录:查「为什么降级」用。loom 只追加、不读回;整个文件可删。\n\n"

@@ -182,6 +182,15 @@ def test_trace_written_on_backend_error(project):
     assert "backend_error" in text and "deepseek_call_failed" in text
 
 
+def test_trace_records_model_name(project):
+    class BoomWithModel:
+        model = "deepseek-v4-flash"
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise LoomBackendError("联不上", code="deepseek_call_failed")
+    journey.next_card(project, BoomWithModel())
+    assert "deepseek-v4-flash" in (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+
+
 def test_no_trace_on_success(project):
     journey.next_card(project, FakeBackend(const(_CARD_RAW)))
     assert not (project / NAV_TRACE_REL).exists()   # 成功不打点(体积+隐私:raw含书的设定)

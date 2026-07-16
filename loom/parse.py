@@ -201,7 +201,7 @@ def is_substantive(text: str) -> bool:
 #   - 选项(2-4 个)      ← 容忍 * / • / 数字编号作弹头
 #   无题哨兵:全文含「【无题】」且没有问句才算(问句判定在前:句中复述格式规则不算,防模型自我降级)。
 _CARD_Q_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*(?:问题?|[Qq])[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
-_CARD_F_RE = re.compile(r"^格[:：]\s*(\S+)\s*$", re.M)
+_CARD_F_RE = re.compile(r"^\s*[*_#\s]*格[*_\s]*[:：]\s*(\S+?)[*_\s]*$", re.M)
 _CARD_OPT_RE = re.compile(r"^\s*(?:[-*•]|\d+[.、])\s+(\S.*)$")
 
 
@@ -214,9 +214,9 @@ def parse_journey_card(raw: str) -> dict | None:
             return {"exhausted": True}
         return None
     question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip(" *_").strip()
-    options = [m.group(1).strip() for l in lines[q_idx + 1:] if (m := _CARD_OPT_RE.match(l))]
+    options = [m.group(1).strip(" *_").strip() for l in lines[q_idx + 1:] if (m := _CARD_OPT_RE.match(l))]
     card: dict = {"question": question, "options": [o for o in options if o][:4]}
     f = _CARD_F_RE.search(raw)
     if f:
-        card["field"] = f.group(1).strip()
+        card["field"] = f.group(1).strip(" *_").strip()
     return card

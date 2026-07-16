@@ -74,3 +74,15 @@ def test_whole_question_decoration_stripped():
 def test_sentinel_inside_sentence_still_exhausted():
     # 哨兵嵌在句子里(模型没严格独占一行)也算无题——没问句才轮到哨兵
     assert parse_journey_card("本阶段暂时【无题】,无更多可问。") == {"exhausted": True}
+
+
+def test_decorated_field_line_parses():
+    # 格:行要跟问:行一起放宽,否则装饰过的立项卡会丢 field → 静默落错格还烧预算
+    card = parse_journey_card("**格**:分区\n**问**:发哪个分区?\n- 玄幻\n- 都市")
+    assert card["field"] == "分区"
+
+
+def test_option_decoration_stripped():
+    # 选项也要剥装饰:残留会糊在按钮上,点了还逐字写进作者的设定文件
+    card = parse_journey_card("问:选哪个?\n- **加粗候选**\n- *斜体候选*")
+    assert card["options"] == ["加粗候选", "斜体候选"]
