@@ -58,3 +58,39 @@ def test_parens_in_user_value_not_taken_as_hint(project):
     slot = next(s for s in stage_slots(project, _stage_spec("世界观")) if s.key == "体系名称")
     assert slot.hint == ""
     assert slot.filled is True
+
+
+def test_unnamed_protagonist_yields_filename_slot(project):
+    # 未命名主角:出一个 @name 槽,压住 5 个 row 槽
+    slots = [s for s in stage_slots(project, _stage_spec("人物")) if "主角" in s.container]
+    assert len(slots) == 1 and slots[0].at == "filename" and slots[0].key == "@name"
+
+
+def test_named_protagonist_yields_row_slots(project):
+    d = project / "外置大脑/人物"
+    (d / "主角·未命名.md").rename(d / "主角·林潜.md")
+    slots = [s for s in stage_slots(project, _stage_spec("人物")) if "林潜" in s.container]
+    assert all(s.at == "row" for s in slots) and len(slots) >= 4
+    assert any("林潜" in s.label for s in slots)     # 实体容器 label 带前缀
+
+
+def test_headerless_file_yields_file_slot(project):
+    # 一句话定位.md 零骨架行 → 一个 @body file 槽
+    slots = [s for s in stage_slots(project, _stage_spec("世界观")) if s.container.endswith("一句话定位.md")]
+    assert len(slots) == 1 and slots[0].at == "file" and slots[0].key == "@body"
+    assert slots[0].filled is False
+
+
+def test_prose_rewrite_degrades_to_file_slot(project):
+    # 作者把金手指改成一段散文 → 退化成 1 个 file 槽,不归零
+    p = project / "外置大脑/世界观/金手指.md"
+    p.write_text("# 金手指\n\n主角能吞噬万物,代价是每吞一次折寿。\n", encoding="utf-8")
+    slots = [s for s in stage_slots(project, _stage_spec("世界观")) if s.container.endswith("金手指.md")]
+    assert len(slots) == 1 and slots[0].at == "file" and slots[0].filled is True
+
+
+def test_round_robin_interleaves_containers(project):
+    # 前几个未填槽应跨容器交错,不是一个文件全排完
+    unfilled = [s for s in stage_slots(project, _stage_spec("世界观")) if not s.filled][:4]
+    containers = [s.container for s in unfilled]
+    assert len(set(containers)) >= 2      # 前 4 个未填槽来自 ≥2 个文件

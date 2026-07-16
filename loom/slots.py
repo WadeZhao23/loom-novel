@@ -77,14 +77,57 @@ def _project_slots(root: Path) -> list[Slot]:
     return out
 
 
+def _container_slots(root: Path, rel: str, *, entity: bool) -> list[Slot]:
+    """一个容器文件 → 槽位。entity=True(人物)时未命名出 filename 槽、压住 row。"""
+    p = root / rel
+    if not p.is_file():
+        return []
+    stem = Path(rel).stem
+    text = p.read_text(encoding="utf-8", errors="replace")
+    if entity and "未命名" in stem:
+        role = stem.split("·")[0].split("・")[0].split("•")[0]
+        return [Slot(id=f"{rel}#@name", label=f"给{role}起个名字"[:10], container=rel,
+                     at="filename", key="@name", hint="改文件名为「类型·名字」,逐字直送写手",
+                     filled=False, preview="")]
+    rows = _row_slots(root, rel)
+    if rows:
+        if entity:   # 实体容器:label 带名字前缀「林潜 · 软肋」
+            name = stem.split("·", 1)[-1] if "·" in stem else stem
+            rows = [Slot(id=s.id, label=f"{name} · {s.key}"[:10], container=s.container,
+                         at=s.at, key=s.key, hint=s.hint, filled=s.filled, preview=s.preview)
+                    for s in rows]
+        return rows
+    # 无 row、无可寻址骨架 → file 兜底
+    quote = next((l[1:].strip() for l in text.splitlines() if l.startswith(">")), "")
+    return [Slot(id=f"{rel}#@body", label=stem[:10], container=rel, at="file", key="@body",
+                 hint=quote, filled=is_substantive(text), preview=_preview(text))]
+
+
+def _dir_container_slots(root: Path, dir_rel: str, order: tuple[str, ...], *, entity: bool) -> list[Slot]:
+    """目录段(世界观/人物):按 order 收各容器槽,再 round-robin 交错未填槽。"""
+    per: list[list[Slot]] = []
+    files = [f for f in paths.brain_dir_files(root, dir_rel) if f.name != paths.GROWTH_NAME]
+    def rank(f: Path) -> int:
+        for i, stem in enumerate(order):
+            if f.stem.startswith(stem):
+                return i
+        return len(order)
+    for f in sorted(files, key=rank):
+        per.append(_container_slots(root, f"{dir_rel}/{f.name}", entity=entity))
+    # round-robin:逐容器取第 k 个,交错拼;filled 与未填分开(未填优先展示由消费方决定,这里只保稳定序)
+    out: list[Slot] = []
+    for k in range(max((len(x) for x in per), default=0)):
+        for x in per:
+            if k < len(x):
+                out.append(x[k])
+    return out
+
+
 def stage_slots(root: Path, spec: StageSpec) -> list[Slot]:
     if spec.key == "立项":
         return _project_slots(root)
     if spec.key == "世界观":
-        # 目录里每个 .md 文件按 slot_order 收 row 槽(filename/file 兜底见 Task 3)
-        slots: list[Slot] = []
-        base = paths.WORLD_DIR_REL
-        for stem in spec.slot_order:
-            slots += _row_slots(root, f"{base}/{stem}.md")
-        return slots
-    return []   # 人物/卡章纲/voice 留后续任务
+        return _dir_container_slots(root, paths.WORLD_DIR_REL, spec.slot_order, entity=False)
+    if spec.key == "人物":
+        return _dir_container_slots(root, paths.CHARS_DIR_REL, spec.slot_order, entity=True)
+    return []   # 卡章纲/voice:卡章纲的 row 槽在 P2 需要时再加(章行是 - 第N章: 形态,_row_slots 已能认)
