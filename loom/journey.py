@@ -31,6 +31,7 @@ class StageSpec:
     land: str                 # 落盘模式:field | sections | card_lines | seed
     target: str = ""          # field/card_lines 的目标文件;sections 的单文件形态
     target_dir: str = ""      # sections 的目录形态
+    slot_order: tuple[str, ...] = ()   # 槽位扫描的容器 stem 优先序(round-robin 轮转用;空=按现有顺序)
 
 
 STAGES: tuple[StageSpec, ...] = (
@@ -38,10 +39,12 @@ STAGES: tuple[StageSpec, ...] = (
               (paths.PROJECT_CARD_REL,), "field", target=paths.PROJECT_CARD_REL),
     StageSpec("世界观", "问出核心世界观:力量体系、金手指及其代价、关键地理与势力",
               (paths.WORLD_REL, paths.WORLD_DIR_REL), "sections",
-              target=paths.WORLD_REL, target_dir=paths.WORLD_DIR_REL),
+              target=paths.WORLD_REL, target_dir=paths.WORLD_DIR_REL,
+              slot_order=("一句话定位", "力量体系", "金手指", "地理与势力", "冰山真相")),
     StageSpec("人物", "问出主角与关键配角/反派:名字、动机、底牌、软肋",
               (paths.CHARS_REL, paths.CHARS_DIR_REL), "sections",
-              target=paths.CHARS_REL, target_dir=paths.CHARS_DIR_REL),
+              target=paths.CHARS_REL, target_dir=paths.CHARS_DIR_REL,
+              slot_order=("主角", "配角", "反派")),
     StageSpec("卡章纲", "问出开局钩子、前 5 章一句话章纲、全书大弧",
               (paths.CARD_REL,), "card_lines", target=paths.CARD_REL),
     StageSpec("voice", "喂 2-3 段你的真实样本让指纹像你(走 seed,不出题)",
