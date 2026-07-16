@@ -39,3 +39,27 @@ def test_preamble_bullets_not_leaked_into_options():
     raw = "- 已确认三个候选题材\n问:选哪个作主线?\n- 重生流\n- 无敌流"
     card = parse_journey_card(raw)
     assert card["options"] == ["重生流", "无敌流"]
+
+
+def test_decorated_question_parses():
+    # 模型爱加 markdown 装饰,这是今天降级的第一大来源
+    card = parse_journey_card("**问**:金手指选哪个?\n- 吞噬胃袋\n- 时间回溯")
+    assert card["question"] == "金手指选哪个?"
+
+
+def test_question_word_and_numbered_bullets_parse():
+    card = parse_journey_card("1. 问题:开局钩子走哪种?\n* 威胁逼近\n• 身世反转")
+    assert card["question"] == "开局钩子走哪种?"
+    assert card["options"] == ["威胁逼近", "身世反转"]
+
+
+def test_rule_recitation_does_not_self_degrade():
+    # 模型复述格式规则时句中出现「【无题】」——有题面就成卡,不算无题
+    raw = "若无题可出,只输出【无题】。\n问:主角的软肋是什么?\n- 亲妹妹在敌方手里\n- 灵根残缺,大道无望"
+    card = parse_journey_card(raw)
+    assert card["question"] == "主角的软肋是什么?"
+
+
+def test_bare_sentinel_line_still_exhausted():
+    # 独占一行的哨兵(前面可有闲话)仍判无题——老书 prompt 还会这么输出
+    assert parse_journey_card("这一段该问的都定好了。\n【无题】") == {"exhausted": True}

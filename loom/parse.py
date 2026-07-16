@@ -197,23 +197,24 @@ def is_substantive(text: str) -> bool:
 # ── 领航员问题卡(journey.next_card 消费;输出约定住 templates/agents/领航员.md) ──
 # 输出约定(prompt ↔ 解析器共置面):
 #   格:题材            ← 可选,仅立项阶段
-#   问:一行问题
-#   - 选项(2-4 个)
-#   无题哨兵:整段含「【无题】」。
-_CARD_Q_RE = re.compile(r"^问[:：]\s*(\S.*)$", re.M)
+#   问:一行问题         ← 容忍 markdown 装饰/编号/「问题」「Q」变体(模型常飘,飘了不该降级)
+#   - 选项(2-4 个)      ← 容忍 * / • / 数字编号作弹头
+#   无题哨兵:「【无题】」独占一行且全文无问句才算(句中复述格式规则不算,防模型自我降级)。
+_CARD_Q_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*(?:问题?|[Qq])[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
 _CARD_F_RE = re.compile(r"^格[:：]\s*(\S+)\s*$", re.M)
+_CARD_OPT_RE = re.compile(r"^\s*(?:[-*•]|\d+[.、])\s+(\S.*)$")
 
 
 def parse_journey_card(raw: str) -> dict | None:
     """领航员输出 → 问题卡;无题 {"exhausted": True};不成卡 None(调用方降级为自由输入)。"""
-    if "【无题】" in raw:
-        return {"exhausted": True}
     lines = raw.splitlines()
     q_idx = next((i for i, l in enumerate(lines) if _CARD_Q_RE.match(l.strip())), None)
     if q_idx is None:
+        if any(l.strip() == "【无题】" for l in lines):   # 独占一行才算哨兵;有题面时题面赢
+            return {"exhausted": True}
         return None
     question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip()
-    options = [l.strip()[2:].strip() for l in lines[q_idx + 1:] if l.strip().startswith("- ")]
+    options = [m.group(1).strip() for l in lines[q_idx + 1:] if (m := _CARD_OPT_RE.match(l))]
     card: dict = {"question": question, "options": [o for o in options if o][:4]}
     f = _CARD_F_RE.search(raw)
     if f:
