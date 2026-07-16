@@ -255,7 +255,7 @@ def _nav_trace(root: Path, *, stage: str, sig: str, why: str, backend, raw: str,
     from datetime import datetime
     try:
         p = root / paths.NAV_TRACE_REL
-        old = p.read_text(encoding="utf-8") if p.is_file() else ""
+        old = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""   # 人可改的文件:GBK 存回也不能让留痕从此静默全丢(读完即 UTF-8 重写,自愈)
         entries = [b for b in re.split(r"(?=^## )", old, flags=re.M) if b.startswith("## ")][:19]
         quoted = "\n".join("  > " + l for l in (raw.strip() or "(无原始回复)")[:500].splitlines())
         entry = (f"## {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {stage}\n"
