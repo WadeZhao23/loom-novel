@@ -155,6 +155,18 @@ def test_last_question_of_stage_pins_current(project):
     assert s2["card"] == out["card"]
 
 
+def test_single_option_degrades_without_burning_budget(project):
+    # 契约是 2-4 个候选:独苗/零候选不成卡——不烧预算、不进缓存、带 why 供查因
+    fake = FakeBackend(const("问:只有一个选项?\n- 独苗"))
+    out = journey.next_card(project, fake)
+    assert out["card"]["degraded"] is True
+    assert out["card"]["why"] == "few_options"
+    s = journey.journey_state(project)
+    assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 0
+    journey.next_card(project, fake)          # 降级不吃缓存 → 真重试
+    assert len(fake.calls) == 2
+
+
 # ---- 答案落盘(Task 5) ----
 
 def _prime_card(project, **extra):

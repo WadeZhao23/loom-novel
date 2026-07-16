@@ -268,11 +268,16 @@ def next_card(root: Path, backend) -> dict:
             + (premise + "\n\n" if premise else "")
             + f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
     parsed = None
+    raw = ""
+    why = ""       # 降级原因:backend_error|unparsed|few_options|false_exhausted(留痕+查因;成卡时为空)
+    err_code = ""
     try:
         raw = backend.complete(_navigator_system(root), user, max_chars=_NAV_MAX_CHARS)
         parsed = parse_journey_card(raw)
-    except LoomBackendError:
-        parsed = None   # 断网/超时 → 降级卡,旅程不卡死
+        if parsed is None:
+            why = "unparsed"
+    except LoomBackendError as e:
+        why, err_code = "backend_error", (e.code or "")   # 断网/超时 → 降级卡,旅程不卡死
 
     if parsed and parsed.get("exhausted"):
         if stage_done(root, spec):
@@ -282,7 +287,10 @@ def next_card(root: Path, backend) -> dict:
             save_state(root, st)
             return next_card(root, backend) if journey_state(root)["current"] else \
                 {"card": None, "state": journey_state(root)}
-        parsed = None   # 没做完却报无题 → 模型误判,降级卡兜底,给自由输入出口,别死锁
+        parsed, why = None, "false_exhausted"   # 没做完却报无题 → 模型误判,降级兜底,别死锁
+
+    if parsed and len(parsed["options"]) < 2:
+        parsed, why = None, "few_options"   # 契约 2-4 个候选:独苗不成卡(否则烧预算+缓存钉死+无重试钮)
 
     if parsed:
         card = {"stage": cur, "sig": sig, "question": parsed["question"],
@@ -291,7 +299,7 @@ def next_card(root: Path, backend) -> dict:
             card["field"] = parsed["field"]
         j["asked"][cur] = int(j["asked"].get(cur, 0)) + 1   # 只有成卡才烧预算
     else:
-        card = {"stage": cur, "sig": sig, "options": [], "degraded": True,
+        card = {"stage": cur, "sig": sig, "options": [], "degraded": True, "why": why,
                 "question": f"「{spec.key}」要定:{_STAGE_HINT.get(cur, spec.key)}。领航员这次没出上题,直接写你想定的。"}
     j["card"] = card
     st["journey"] = j
