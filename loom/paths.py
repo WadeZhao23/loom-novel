@@ -20,6 +20,8 @@ HISTORY_DIR = f"{BODY_DIR}/.历史"        # 单章版本历史(覆盖前快照,
 TRASH_DIR = f"{BODY_DIR}/.回收站"        # 删章的整章产物落这里,可恢复
 REVIEW_DIR = ".审稿留痕"                 # 编辑留痕 / 关卡残留 / 各类提醒(人可读可改)
 NAV_TRACE_REL = f"{REVIEW_DIR}/领航员留痕.md"   # 领航员出题失败的现场记录(人可读可删,不派生状态)
+PARTNER_DIR = ".伙伴对话"                    # 伙伴对话日志(整书一条;人可读可删,删=失忆书无恙)
+PARTNER_CUR_REL = f"{PARTNER_DIR}/当前.jsonl"
 BRAIN_DIR = "外置大脑"                   # 每本书的状态文件(人写主体 + AI 追加子块)
 FP_HISTORY_DIR = f"{BRAIN_DIR}/.指纹历史"  # learn 前的指纹备份(一键撤销)
 DECONSTRUCT_DIR = f"{BRAIN_DIR}/.拆书"    # 拆书隔离草稿区(没有任何 agent 读它)
