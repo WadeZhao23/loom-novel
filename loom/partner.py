@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 from . import journey, partner_context, partner_store, partner_tools
@@ -27,6 +28,25 @@ from .parse import _TOOL_USE_RE, parse_tool_block
 
 _MAX_TOOL_ROUNDS = 6   # 每轮工具调用上限(spec §4 常量表:每轮工具调用 ≤6 次)
 _MAX_TOOL_FAIL_STREAK = 2   # 连续「解析失败」(botched 工具调用)上限(spec §5.2)
+
+
+def _accepts_agent_mode(backend) -> bool:
+    """`backend.complete` 是否声明了 `agent_mode` 形参(或用 `**kwargs` 兜底吃掉任意关键字)。
+
+    伙伴通道要传 `agent_mode=True` 给 CLI 后端解除反 agent 护栏(spec §3),但这个关键字参数
+    是在 Backend Protocol 定稿之后才补上的——`tests/conftest.py` 里给别的模块(journey/gates 等)
+    离线测试用的极简假后端(ScriptedBackend/FakeBackend)先于这个参数存在,没有声明它,硬传
+    会直接 `TypeError` 炸掉一整批既有测试(尤其 `tests/test_partner_loop.py`)。探测后按需传:
+    真实后端(backends.py 五个类)和任何新写的、显式声明了这个参数的假后端都能吃到
+    `agent_mode=True`;没声明的旧假后端优雅退化成不传,行为与改动前完全一致。
+    """
+    try:
+        params = inspect.signature(backend.complete).parameters
+    except (TypeError, ValueError):
+        return False
+    return "agent_mode" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
 
 def _is_trigger_line(line: str) -> bool:
@@ -115,11 +135,17 @@ def run_turn(root, user_text, backend, *, emit, ts) -> None:
 
     tool_rounds = 0
     tool_fail_count = 0   # 连续「解析失败」(botched 工具调用)计数;成卡/成工具即清零
+    complete_kwargs: dict = {}
+    if _accepts_agent_mode(backend):
+        # 伙伴通道:解除 CLI 后端的反 agent 护栏——允许输出一个「用:」工具块 + 反问
+        # (spec §3)。真实工具执行始终留在 loom 服务端(见 partner_tools.run_tool),
+        # 这里传的只是 prompt 层面的护栏开关。
+        complete_kwargs["agent_mode"] = True
     while True:
         tail = partner_store.read_events(root)
         system, user = partner_context.assemble(root, tail)
         on_chunk, flush = _stream_line_relay(_preview)
-        raw = backend.complete(system, user, on_chunk=on_chunk)
+        raw = backend.complete(system, user, on_chunk=on_chunk, **complete_kwargs)
         flush()
 
         say, tool = parse_tool_block(raw, valid_names=set(partner_tools.REGISTRY))
