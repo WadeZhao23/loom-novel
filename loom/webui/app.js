@@ -20,6 +20,8 @@ let _navAutoAsked = new Set(); // 居中态自动出题去重:每段至多自动
 let PARTNER = null;            // 伙伴对话事件缓存({events:[...]}),对应当前书;null=尚未加载
 let _partnerRoot = null;       // PARTNER 所属书 root(换书判据,同 JOURNEY 缓存套路,防串书)
 let _partnerBusy = false;      // 一轮 say() 请求进行中:输入框/发送键置灰,阻止并发发送
+let _partnerGen = 0;           // 对话世代号:每轮 partnerSay 自增;归档「另起一段对话」/ 换书时同步前移,
+                                // 旧世代流里迟到的事件一律作废(比 DATA.root 更细——同一本书内新旧会话也能区分)
 let _partnerDelta = "";        // 当前轮 assistant_delta 累积预览(未落盘,权威事件一到就清空)
 let _partnerAutoOpened = new Set();   // 本次会话已自动开场过的书 root(前端侧去重;服务端空 text 双保险)
 let _pcInputEl = null;         // 当前渲染的对话输入框引用(供「改一改」把候选内容填进去)
@@ -475,7 +477,7 @@ function enterProject(d) {
   JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
   _navYield = false; _weaving = false; _navPopOpen = false;   // 换书清领航员在场态:让位/织章/浮层开合都是会话级,不跨书带
   _navAutoAsked = new Set();
-  PARTNER = null; _partnerRoot = null; _partnerBusy = false; _partnerDelta = "";   // 换书清伙伴对话缓存:过期对话绝不能渲染在另一本书上
+  PARTNER = null; _partnerRoot = null; _partnerBusy = false; _partnerDelta = ""; _partnerGen++;   // 换书清伙伴对话缓存:过期对话绝不能渲染在另一本书上;世代号前移作废旧书迟到事件
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -1013,6 +1015,7 @@ async function loadPartnerPanel() {
 async function partnerSay(text) {
   const root = DATA && DATA.root;
   if (!root || _partnerBusy) return;
+  const gen = ++_partnerGen;   // 本轮世代号:归档新会话/换书会令 _partnerGen 前移,凡 gen 对不上的迟到事件一律作废
   _partnerBusy = true;
   _partnerDelta = "";
   paintJourney();
@@ -1024,8 +1027,8 @@ async function partnerSay(text) {
       body: JSON.stringify({ root, text }),
     });
   } catch (e) {
-    _partnerBusy = false;
-    if (DATA && DATA.root === root) {
+    if (gen === _partnerGen) _partnerBusy = false;   // 世代已过期(旧轮):busy 归属新世代,不许旧轮回头清掉
+    if (gen === _partnerGen && DATA && DATA.root === root) {
       if (!PARTNER) PARTNER = { events: [] };
       PARTNER.events.push({ t: "error", text: "连接失败:" + e.message });
       paintJourney();
@@ -1037,8 +1040,8 @@ async function partnerSay(text) {
   if (!ct.includes("ndjson")) {
     // 非流式响应 = 出错(如 409 partner_busy/织章占锁),同 writeChapter() 对非 ndjson 响应的处理套路
     const d = await resp.json().catch(() => ({}));
-    _partnerBusy = false;
-    if (DATA && DATA.root === root) {
+    if (gen === _partnerGen) _partnerBusy = false;
+    if (gen === _partnerGen && DATA && DATA.root === root) {
       if (!PARTNER) PARTNER = { events: [] };
       PARTNER.events.push({ t: "error", text: (d.error || `失败 (${resp.status})`) + codeHint(d.code) });
       paintJourney();
@@ -1060,18 +1063,20 @@ async function partnerSay(text) {
         if (!line.trim()) continue;
         let ev;
         try { ev = JSON.parse(line); } catch (e) { continue; }   // 坏行跳过(同 jsonl「坏行当无」纪律),不许炸整条流
-        if (DATA && DATA.root === root) handlePartnerEvent(ev);
+        if (gen === _partnerGen && DATA && DATA.root === root) handlePartnerEvent(ev);
       }
     }
   } catch (e) {
-    if (DATA && DATA.root === root) {
+    if (gen === _partnerGen && DATA && DATA.root === root) {
       if (!PARTNER) PARTNER = { events: [] };
       PARTNER.events.push({ t: "error", text: "连接中断:" + e.message });
     }
   } finally {
-    _partnerBusy = false;
-    _partnerDelta = "";
-    if (DATA && DATA.root === root) paintJourney();
+    if (gen === _partnerGen) {   // 本世代已被「另起一段对话」/换书作废:busy/delta 归下一世代管,这里不许再碰
+      _partnerBusy = false;
+      _partnerDelta = "";
+      if (DATA && DATA.root === root) paintJourney();
+    }
   }
 }
 
@@ -1126,17 +1131,19 @@ function paintPartnerChat() {
     }
   }
 
+  // 加载 history 期间(PARTNER===null)输入框必须禁用:否则这个网络窗口内发的消息会被晚到的 history 响应整体覆盖(见 partnerSay/loadPartnerPanel 注释)
+  const loading = PARTNER === null;
   const inputRow = document.createElement("div");
   inputRow.className = "pc-input-row";
   const ta = document.createElement("textarea");
   ta.className = "pc-input";
   ta.rows = 2;
-  ta.placeholder = _partnerBusy ? "伙伴在回复,请稍候…" : "跟伙伴说点什么……";
-  ta.disabled = _partnerBusy;
+  ta.placeholder = _partnerBusy ? "伙伴在回复,请稍候…" : (loading ? "加载对话记录…" : "跟伙伴说点什么……");
+  ta.disabled = _partnerBusy || loading;
   _pcInputEl = ta;
   const doSend = () => {
     const v = ta.value.trim();
-    if (!v || _partnerBusy) return;
+    if (!v || _partnerBusy || PARTNER === null) return;
     ta.value = "";
     partnerSay(v);
   };
@@ -1146,7 +1153,7 @@ function paintPartnerChat() {
   const sendBtn = document.createElement("button");
   sendBtn.className = "jc-btn pc-send";
   sendBtn.textContent = "发送";
-  sendBtn.disabled = _partnerBusy;
+  sendBtn.disabled = _partnerBusy || loading;
   sendBtn.onclick = doSend;
   inputRow.appendChild(ta);
   inputRow.appendChild(sendBtn);
@@ -1155,6 +1162,7 @@ function paintPartnerChat() {
   const newBtn = document.createElement("button");
   newBtn.className = "jc-btn ghost pc-newthread";
   newBtn.textContent = "另起一段对话";
+  newBtn.disabled = _partnerBusy;   // 伙伴回复中不许归档,否则旧轮尾巴事件会串进刚重置的新会话(见 partnerNewThread)
   newBtn.title = "归档当前对话,伙伴重新认识这本书(书内容不受影响,旧对话仍留档可查)";
   newBtn.onclick = partnerNewThread;
   card.appendChild(newBtn);
@@ -1348,11 +1356,13 @@ async function partnerConfirm(id, btnEl) {
 async function partnerNewThread() {
   const root = DATA && DATA.root;
   if (!root) return;
+  if (_partnerBusy) { toast("伙伴还在回复,请稍候", true); return; }   // 回复中归档:旧轮 reader 循环没被中止,尾巴事件会串进刚重置的新会话
   if (!window.confirm("归档当前伙伴对话、另起一段?(书内容不受影响,旧对话仍留档可查)")) return;
   try {
     const out = await jreq("POST", "/api/partner/new", { root });
     if (!DATA || DATA.root !== root) return;
     if (out && out.error) { toast(out.error, true); return; }
+    _partnerGen++;   // 世代号前移:哪怕 busy 判断被绕过,任何仍在飞的旧世代事件也一律作废(双保险,见 partnerSay)
     PARTNER = { events: [] };
     _partnerAutoOpened.delete(root);
     _partnerRoot = null;   // 强制 loadPartnerPanel() 重新走一遍(history 应已归档为空,可能再触发开场)
