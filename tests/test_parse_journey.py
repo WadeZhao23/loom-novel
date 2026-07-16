@@ -63,3 +63,14 @@ def test_rule_recitation_does_not_self_degrade():
 def test_bare_sentinel_line_still_exhausted():
     # 独占一行的哨兵(前面可有闲话)仍判无题——老书 prompt 还会这么输出
     assert parse_journey_card("这一段该问的都定好了。\n【无题】") == {"exhausted": True}
+
+
+def test_whole_question_decoration_stripped():
+    # 模型爱把整句问题加粗,不只是「问」字;前端 textContent 不解析 markdown,残留会糊在卡面上
+    assert parse_journey_card("问：**整句加粗的问题？**\n- A\n- B")["question"] == "整句加粗的问题？"
+    assert parse_journey_card("问:*斜体整句?*\n- A\n- B")["question"] == "斜体整句?"
+
+
+def test_sentinel_inside_sentence_still_exhausted():
+    # 哨兵嵌在句子里(模型没严格独占一行)也算无题——没问句才轮到哨兵
+    assert parse_journey_card("本阶段暂时【无题】,无更多可问。") == {"exhausted": True}

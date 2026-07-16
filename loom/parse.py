@@ -199,7 +199,7 @@ def is_substantive(text: str) -> bool:
 #   格:题材            ← 可选,仅立项阶段
 #   问:一行问题         ← 容忍 markdown 装饰/编号/「问题」「Q」变体(模型常飘,飘了不该降级)
 #   - 选项(2-4 个)      ← 容忍 * / • / 数字编号作弹头
-#   无题哨兵:「【无题】」独占一行且全文无问句才算(句中复述格式规则不算,防模型自我降级)。
+#   无题哨兵:全文含「【无题】」且没有问句才算(问句判定在前:句中复述格式规则不算,防模型自我降级)。
 _CARD_Q_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*(?:问题?|[Qq])[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
 _CARD_F_RE = re.compile(r"^格[:：]\s*(\S+)\s*$", re.M)
 _CARD_OPT_RE = re.compile(r"^\s*(?:[-*•]|\d+[.、])\s+(\S.*)$")
@@ -210,10 +210,10 @@ def parse_journey_card(raw: str) -> dict | None:
     lines = raw.splitlines()
     q_idx = next((i for i, l in enumerate(lines) if _CARD_Q_RE.match(l.strip())), None)
     if q_idx is None:
-        if any(l.strip() == "【无题】" for l in lines):   # 独占一行才算哨兵;有题面时题面赢
+        if "【无题】" in raw:   # 没问句才轮到哨兵;有问句时问句赢(防模型复述规则自我降级)
             return {"exhausted": True}
         return None
-    question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip()
+    question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip(" *_").strip()
     options = [m.group(1).strip() for l in lines[q_idx + 1:] if (m := _CARD_OPT_RE.match(l))]
     card: dict = {"question": question, "options": [o for o in options if o][:4]}
     f = _CARD_F_RE.search(raw)
