@@ -220,3 +220,31 @@ def parse_journey_card(raw: str) -> dict | None:
     if f:
         card["field"] = f.group(1).strip(" *_").strip()
     return card
+
+
+# ── 文本工具协议(书房伙伴对话 agent 的工具调用面) ───────────────────────────
+# 约定:`用:<工具名>` 起一个工具块,后续 `键:值` 行到空行/文末止;只认第一个块,
+# 之后的尾巴文字丢弃。沿用领航员卡解析同款手艺——`[*_#\s]*` 剥 markdown 装饰、
+# 全/半角冒号都认、`.strip(" *_")` 收尾。
+_TOOL_USE_RE = re.compile(r"^\s*[*_#\s]*用[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
+_TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
+
+
+def parse_tool_block(text: str) -> tuple[str, dict | None]:
+    """(说话段, 工具调用 | None)。工具调用 = {"name": str, "params": {键:值}}。
+    只认第一个「用:」块;之后的尾巴文字丢弃。协议行不进说话段。"""
+    lines = text.splitlines()
+    ui = next((i for i, l in enumerate(lines) if _TOOL_USE_RE.match(l)), None)
+    if ui is None:
+        return text.strip(), None
+    name = _TOOL_USE_RE.match(lines[ui]).group(1).strip(" *_").strip()
+    params: dict = {}
+    for l in lines[ui + 1:]:
+        if not l.strip():
+            break            # 空行终止本块
+        m = _TOOL_KV_RE.match(l)
+        if not m:
+            break
+        params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
+    say = "\n".join(lines[:ui]).strip()
+    return say, {"name": name, "params": params}
