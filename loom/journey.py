@@ -395,6 +395,42 @@ def _land_field(root: Path, field: str, answer: str) -> str:
     return paths.PROJECT_CARD_REL
 
 
+_SLOT_ROW_FILL_RE_TMPL = r"^(-\s*{key}\s*(?:[(（][^)）]*[)）])?\s*[:：])(.*)$"
+
+
+def _land_slot(root: Path, slot_id: str, answer: str) -> str:
+    """按 slot 的 at 类型定址落盘。slot_id = "<容器rel>#<键>"。守落盘三铁律。
+
+    P1 覆盖 line/h2/row;filename/file 见 Task 5。slot_id 必须来自 stage_slots(防越界)。"""
+    from .slots import stage_slots
+    answer = answer.strip()
+    if not answer:
+        raise ValueError("答案不能为空")
+    rel, _, key = slot_id.partition("#")
+    # 从 slot 集合定位 at(单一真相:落点类型由扫描器说了算,不在这里重新推断)
+    slot = next((s for spec in STAGES for s in stage_slots(root, spec) if s.id == slot_id), None)
+    if slot is None:
+        raise ValueError(f"未知槽位:{slot_id}")
+    p = root / rel
+    text = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+    if slot.at == "line":       # 平台行:复用 _land_field 的整行替换裁量
+        return _land_field(root, "平台", answer)
+    if slot.at == "h2":
+        atomic_write_text(p, _replace_h2_body(text, key, answer))
+        return rel
+    if slot.at == "row":
+        pat = re.compile(_SLOT_ROW_FILL_RE_TMPL.format(key=re.escape(key)), re.M)
+        if slot.key.startswith("第") or key == "大弧":   # 卡章纲行走既有 _apply_card_lines 兜底
+            atomic_write_text(p, _apply_card_lines(root, f"- {key}:{answer}", fallback=answer))
+            return rel
+        new, n = pat.subn(lambda m: f"{m.group(1)}{answer}", text, count=1)
+        if not n:   # 骨架行不在(被作者删了)→ 文末补一行,答案绝不丢
+            new = text.rstrip() + f"\n- {key}:{answer}\n"
+        atomic_write_text(p, new)
+        return rel
+    raise ValueError(f"P1 未支持的落点类型:{slot.at}(filename/file 见 Task 5)")
+
+
 def _digest(backend, question: str, answer: str, format_ask: str) -> str:
     """一次消化调用;失败或过不了 guard 返回空串(调用方落原答案兜底)。"""
     user = f"问题:{question}\n作者的回答:{answer}\n\n{format_ask}只用作者给的信息。"

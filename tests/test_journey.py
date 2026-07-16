@@ -347,6 +347,36 @@ def test_land_answer_requires_card_and_text(project):
         journey.land_answer(project, "   ", FakeBackend(const("x")))
 
 
+def test_land_slot_line_replaces_platform(project):
+    from loom.journey import _land_slot
+    rel = _land_slot(project, "外置大脑/立项卡.md#平台", "番茄")
+    assert rel.endswith("立项卡.md")
+    assert "平台:番茄" in (project / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+
+
+def test_land_slot_h2_fills_placeholder(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/立项卡.md#题材", "重生+复仇+宗门流")
+    body = (project / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+    assert "重生+复仇+宗门流" in body
+
+
+def test_land_slot_row_fills_after_colon_keeps_paren(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/世界观/金手指.md#代价·限制", "每吞一次折寿三天")
+    text = (project / "外置大脑/世界观/金手指.md").read_text(encoding="utf-8")
+    assert "- 代价·限制(至少一种硬代价,不能无敌到没冲突):每吞一次折寿三天" in text  # 括注一字不剥
+
+
+def test_land_slot_row_refilled_replaces_line(project):
+    from loom.journey import _land_slot
+    p = project / "外置大脑/世界观/金手指.md"
+    _land_slot(project, "外置大脑/世界观/金手指.md#类型", "系统面板")
+    _land_slot(project, "外置大脑/世界观/金手指.md#类型", "随身空间")   # 回头改
+    text = p.read_text(encoding="utf-8")
+    assert "随身空间" in text and text.count("系统面板") == 0        # 整行替换,旧值不残留
+
+
 # ---- goto 语义(I1/I2) ----
 
 def test_goto_refocuses_done_stage(project):
