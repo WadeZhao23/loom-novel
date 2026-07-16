@@ -120,14 +120,23 @@ def _handle_kandiji(root: Path) -> str:
 
 
 def _handle_tishe(root: Path, 落点: str = "", 内容: str = "") -> dict:
-    """产候选卡载荷(不写盘):校验落点/内容非空,返回 {"slot", "content"} 供 run_tool 组装 proposal。"""
+    """产候选卡载荷(不写盘):校验落点/内容非空,返回 {"slot", "content", "before"} 供
+    run_tool 组装 proposal。before=落点当前 preview(现扫 stage_slots 取,找不到该槽则空串)——
+    confirm 落盘前会拿它跟当时的 preview 比对,防止「提案挂起期间作者手改了这一格」被覆盖
+    (P1 快照守卫,见 usecases.partner_confirm 的详细注释)。"""
     slot = str(落点 or "").strip()
     content = str(内容 or "").strip()
     if not slot:
         raise ValueError("提设定缺少「落点」参数(格式:容器#键,如 外置大脑/立项卡.md#题材)。")
     if not content:
         raise ValueError("提设定缺少「内容」参数。")
-    return {"slot": slot, "content": content}
+    before = ""
+    for spec in journey.STAGES:
+        found = next((s for s in slots.stage_slots(root, spec) if s.id == slot), None)
+        if found is not None:
+            before = found.preview
+            break
+    return {"slot": slot, "content": content, "before": before}
 
 
 REGISTRY: dict[str, ToolSpec] = {

@@ -19,7 +19,7 @@ from typing import Callable, Iterator
 
 from . import chapters as chap
 from . import journey as journey_mod
-from . import ledger, partner_store, paths
+from . import ledger, partner_store, paths, slots as slots_mod
 from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
 from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
@@ -370,13 +370,32 @@ def partner_history(root: Path | str, *, tail: int | None = None) -> dict:
     return {"events": partner_store.read_events(Path(root), tail=tail)}
 
 
+def _slot_preview(root: Path, slot_id: str) -> str | None:
+    """现扫 stage_slots 取 slot_id 当前 preview;槽已不存在(改名/删除)返回 None。"""
+    for spec in journey_mod.STAGES:
+        found = next((s for s in slots_mod.stage_slots(root, spec) if s.id == slot_id), None)
+        if found is not None:
+            return found.preview
+    return None
+
+
 def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
-    """拍板落盘:找 proposal → 按其 slot 定址落盘 → 记一条 confirm 事件。
+    """拍板落盘:找 proposal → 快照比对 → 按其 slot 定址落盘 → 记一条 confirm 事件。
 
     幂等(防双击/重发对 file 类落点二次追加):jsonl 里已有该 pid 的 confirm 事件,
     直接返已落盘结果,不重跑 _land_slot。proposal 过期(find_proposal 返 None)或
     落点冲突/未知(_land_slot 抛 ValueError,如 filename 撞车、槽位不存在)都不崩,
     返 {"error": ...}——两种情况都不追加 confirm 事件,原 proposal 仍可重试。
+
+    快照守卫(收敛范围,详见 docs/superpowers/sdd/task-1-report.md):proposal 产生时
+    (partner_tools._handle_tishe)记落点当时的 preview 到 "before";这里落盘前重新扫一次
+    现在的 preview,不一致就当这一格在提案挂起期间被作者手改过,拒绝落盘、不追加 confirm
+    事件(拍板可重试——领航员会重新看一眼再提)。preview 只取前 24 字,能可靠检测 row/line/
+    h2 这类「替换型」落点的改动(现实中的破坏性场景:作者手改覆盖了旧值,双方值都短);
+    对 file 型「追加型」落点(如世界观小节正文),占位模板文案常年 ≥24 字、preview 早已
+    饱和,快照测不出「作者又追加了别的」——这是已知的低危缺口,故意不堵:追加型双落盘
+    最坏后果只是重复内容(非数据丢失),且要触发它需要「提案挂起期间、精确在扫描后落盘前
+    这个窄窗口内」手改同一格,概率极低,不值得为它换更贵的整段内容快照。
     """
     root = Path(root)
     with write_lock(root):
@@ -387,8 +406,21 @@ def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
         proposal = partner_store.find_proposal(root, pid)
         if proposal is None:
             return {"error": "提案已过期,重新问一次"}
+        # .get() 取字段:proposal 损坏/缺字段(旧版本残留、手改 jsonl)一律当过期处理,
+        # 不许 KeyError 崩(slot/content 是 _land_slot 的必需参数,缺一都没法落盘)。
+        slot_id = proposal.get("slot")
+        content = proposal.get("content")
+        if not slot_id or not content:
+            return {"error": "提案已过期,重新问一次"}
+        before = proposal.get("before")   # 无此字段(旧 proposal)→ 向后兼容,跳过快照比对
+        if before is not None:
+            current = _slot_preview(root, slot_id)
+            # current is None:槽已不存在(改名/删除),留给下面 _land_slot 报「未知槽位」,
+            # 不在这里误判成 stale——两种失败原因不同,措辞不该混在一起。
+            if current is not None and current != before:
+                return {"error": "这一格刚改过,我重新看看再给你提", "stale": True}
         try:
-            landed = journey_mod._land_slot(root, proposal["slot"], proposal["content"])
+            landed = journey_mod._land_slot(root, slot_id, content)
         except ValueError as e:
             return {"error": str(e)}
         partner_store.append_event(root, {"t": "confirm", "id": pid, "ts": ts, "landed": landed})

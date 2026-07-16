@@ -65,6 +65,44 @@ def test_partner_confirm_unknown_slot_returns_error_without_crashing(project):
     assert "error" in out
 
 
+def test_confirm_rejects_when_row_slot_changed_since_proposal(project):
+    # row/line 型落点(平台行):proposal 之后作者手改了这一格 → confirm 必须拒绝(stale),
+    # 不覆盖手改。平台的值短(几个字),不会撞上 preview 24 字的饱和上限,能被快照守卫检测到。
+    slot_id = "外置大脑/立项卡.md#平台"
+    ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "p1",
+                               "slot": slot_id, "content": "番茄", "before": "起点"})
+    p = project / "外置大脑/立项卡.md"
+    p.write_text(p.read_text(encoding="utf-8").replace("平台:起点", "平台:七猫"), encoding="utf-8")
+    out = usecases.partner_confirm(project, "p1", ts="t2")
+    assert out == {"error": "这一格刚改过,我重新看看再给你提", "stale": True}
+    assert "平台:七猫" in p.read_text(encoding="utf-8")   # 手改没被覆盖
+    assert [e for e in ps.read_events(project) if e.get("t") == "confirm"] == []
+
+
+def test_confirm_tolerates_malformed_proposal(project):
+    # proposal 缺 content(损坏/旧版本残留)→ 返 error,不许 KeyError 崩
+    ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "p1",
+                               "slot": "外置大脑/立项卡.md#平台"})
+    out = usecases.partner_confirm(project, "p1", ts="t2")
+    assert "error" in out
+    assert [e for e in ps.read_events(project) if e.get("t") == "confirm"] == []
+
+
+def test_confirm_idempotent_still_first(project):
+    # 快照守卫不破坏现有幂等:confirm 事件先拦,即便落盘后该格 preview 已经不等于 before
+    # (落盘本身就会让 before 过期),第二次 confirm 仍走幂等分支返已落盘结果,不误判 stale。
+    slot_id = "外置大脑/立项卡.md#平台"
+    ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "p1",
+                               "slot": slot_id, "content": "番茄", "before": "起点"})
+    out1 = usecases.partner_confirm(project, "p1", ts="t2")
+    assert "error" not in out1
+    out2 = usecases.partner_confirm(project, "p1", ts="t3")   # 重发(双击/重试)
+    assert out2["landed"] == out1["landed"]
+    assert "error" not in out2
+    confirms = [e for e in ps.read_events(project) if e.get("t") == "confirm"]
+    assert len(confirms) == 1
+
+
 def test_partner_new_archives_current_conversation(project):
     ps.append_event(project, {"t": "user", "ts": "1", "text": "你好"})
     out = usecases.partner_new(project, stamp="20260716-000000")
