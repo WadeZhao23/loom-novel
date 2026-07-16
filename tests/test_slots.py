@@ -94,3 +94,18 @@ def test_round_robin_interleaves_containers(project):
     unfilled = [s for s in stage_slots(project, _stage_spec("世界观")) if not s.filled][:4]
     containers = [s.container for s in unfilled]
     assert len(set(containers)) >= 2      # 前 4 个未填槽来自 ≥2 个文件
+
+
+def test_entity_label_prefix_handles_all_separators(project):
+    # 三种专名分隔符命名的实体,row 槽 label 都该带纯名字前缀(不含类型和分隔符)
+    d = project / "外置大脑/人物"
+    (d / "反派·未命名.md").rename(d / "反派•影渊.md")   # 用 • 分隔符
+    slots = [s for s in stage_slots(project, _stage_spec("人物")) if "影渊" in s.container]
+    assert all(s.at == "row" for s in slots)
+    assert slots and all(s.label.startswith("影渊") for s in slots)   # 名字前缀,不是「反派•影渊」
+
+
+def test_villain_unnamed_yields_filename_slot(project):
+    # 配角/反派同规则:未命名也出 filename 槽压住 row(不只主角)
+    slots = [s for s in stage_slots(project, _stage_spec("人物")) if "反派·未命名" in s.container]
+    assert len(slots) == 1 and slots[0].at == "filename"

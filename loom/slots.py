@@ -92,7 +92,11 @@ def _container_slots(root: Path, rel: str, *, entity: bool) -> list[Slot]:
     rows = _row_slots(root, rel)
     if rows:
         if entity:   # 实体容器:label 带名字前缀「林潜 · 软肋」
-            name = stem.split("·", 1)[-1] if "·" in stem else stem
+            name = stem
+            for sep in ("·", "・", "•"):
+                if sep in name:
+                    name = name.split(sep, 1)[-1]
+                    break
             rows = [Slot(id=s.id, label=f"{name} · {s.key}"[:10], container=s.container,
                          at=s.at, key=s.key, hint=s.hint, filled=s.filled, preview=s.preview)
                     for s in rows]
