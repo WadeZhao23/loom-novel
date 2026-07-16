@@ -19,6 +19,7 @@ OUTLINE_DIR = f"{BODY_DIR}/.细纲"        # 每章分镜细纲(可看可改,WYS
 HISTORY_DIR = f"{BODY_DIR}/.历史"        # 单章版本历史(覆盖前快照,后悔药)
 TRASH_DIR = f"{BODY_DIR}/.回收站"        # 删章的整章产物落这里,可恢复
 REVIEW_DIR = ".审稿留痕"                 # 编辑留痕 / 关卡残留 / 各类提醒(人可读可改)
+NAV_TRACE_REL = f"{REVIEW_DIR}/领航员留痕.md"   # 领航员出题失败的现场记录(人可读可删,不派生状态)
 BRAIN_DIR = "外置大脑"                   # 每本书的状态文件(人写主体 + AI 追加子块)
 FP_HISTORY_DIR = f"{BRAIN_DIR}/.指纹历史"  # learn 前的指纹备份(一键撤销)
 DECONSTRUCT_DIR = f"{BRAIN_DIR}/.拆书"    # 拆书隔离草稿区(没有任何 agent 读它)

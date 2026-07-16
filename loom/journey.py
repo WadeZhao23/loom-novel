@@ -246,6 +246,28 @@ def _premise(root: Path, spec: StageSpec) -> str:
     return "\n\n".join(parts)
 
 
+def _nav_trace(root: Path, *, stage: str, sig: str, why: str, backend, raw: str, code: str = "") -> None:
+    """出题降级才留痕(.审稿留痕/领航员留痕.md):现场证据,新条目在前,保最近 20 条。
+
+    三条硬边界:绝不进 .loom_state.json(游标要薄且可丢弃,ADR 0013);绝不进外置大脑
+    (会被 agent 读到污染设定);绝不被读回来派生状态(题从文件现状推导,不从问答历史推导)。
+    留痕失败绝不影响出题(fire-and-forget,同 events 纪律)。"""
+    from datetime import datetime
+    try:
+        p = root / paths.NAV_TRACE_REL
+        old = p.read_text(encoding="utf-8") if p.is_file() else ""
+        entries = [b for b in re.split(r"(?=^## )", old, flags=re.M) if b.startswith("## ")][:19]
+        quoted = "\n".join("  > " + l for l in (raw.strip() or "(无原始回复)")[:500].splitlines())
+        entry = (f"## {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {stage}\n"
+                 f"- sig: {sig}\n- 结果: {why}\n- 后端: {type(backend).__name__}\n"
+                 + (f"- code: {code}\n" if code else "")
+                 + f"- 原始回复(截断 500 字):\n{quoted}\n\n")
+        head = "# 领航员留痕\n\n> 出题失败的现场记录:查「为什么降级」用。loom 只追加、不读回;整个文件可删。\n\n"
+        atomic_write_text(p, head + entry + "".join(entries))
+    except Exception:
+        pass
+
+
 def next_card(root: Path, backend) -> dict:
     view = journey_state(root)
     cur = view["current"]
@@ -301,6 +323,7 @@ def next_card(root: Path, backend) -> dict:
     else:
         card = {"stage": cur, "sig": sig, "options": [], "degraded": True, "why": why,
                 "question": f"「{spec.key}」要定:{_STAGE_HINT.get(cur, spec.key)}。领航员这次没出上题,直接写你想定的。"}
+        _nav_trace(root, stage=cur, sig=sig, why=why, backend=backend, raw=raw, code=err_code)
     j["card"] = card
     st["journey"] = j
     save_state(root, st)

@@ -1,6 +1,7 @@
 """创作旅程状态机:阶段谓词/游标推进/跳段回跳/坏游标降级(ADR 0013:游标可丢弃、文件现状为准)。"""
 from loom import journey
-from loom.paths import CARD_REL, PROJECT_CARD_REL
+from loom.backends import LoomBackendError
+from loom.paths import CARD_REL, PROJECT_CARD_REL, NAV_TRACE_REL
 from conftest import FakeBackend, const
 
 
@@ -165,6 +166,32 @@ def test_single_option_degrades_without_burning_budget(project):
     assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 0
     journey.next_card(project, fake)          # 降级不吃缓存 → 真重试
     assert len(fake.calls) == 2
+
+
+class BoomBackend:
+    """一调用就炸的假后端:模拟断网/没key。"""
+    def complete(self, system, user, *, max_chars=None, on_chunk=None):
+        raise LoomBackendError("联不上", code="deepseek_call_failed")
+
+
+def test_trace_written_on_backend_error(project):
+    out = journey.next_card(project, BoomBackend())
+    assert out["card"]["why"] == "backend_error"
+    text = (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+    assert "backend_error" in text and "deepseek_call_failed" in text
+
+
+def test_no_trace_on_success(project):
+    journey.next_card(project, FakeBackend(const(_CARD_RAW)))
+    assert not (project / NAV_TRACE_REL).exists()   # 成功不打点(体积+隐私:raw含书的设定)
+
+
+def test_trace_keeps_last_20(project):
+    import re as _re
+    for _ in range(23):
+        journey.next_card(project, BoomBackend())
+    text = (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+    assert len(_re.findall(r"^## ", text, _re.M)) == 20
 
 
 # ---- 答案落盘(Task 5) ----
