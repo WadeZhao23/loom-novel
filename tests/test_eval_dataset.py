@@ -156,3 +156,22 @@ def test_discover_cases_returns_sorted_paths(tmp_path):
 
 def test_discover_cases_empty_dir_returns_empty_list(tmp_path):
     assert discover_cases(tmp_path) == []
+
+
+# ---- Task 2:rubric.md 文档-代码一致性(8 维标题逐字对齐 + 六节齐备 + 不打分红线) ----
+
+def test_rubric_covers_every_dimension_verbatim():
+    # rubric.md 的 8 个「## 维度名」标题必须与 DIMENSIONS 逐字一致(文档-代码单一来源)
+    rubric = Path("evals/dataset/rubric.md").read_text(encoding="utf-8")
+    for dim in DIMENSIONS:
+        assert f"## {dim}" in rubric, f"rubric.md 缺维度小节:{dim}"
+    for banned in ("总体文学分", "综合评分", "打分"):
+        assert banned not in rubric, f"rubric 不许出现「{banned}」(ADR-0002 不打分红线)"
+
+
+def test_rubric_each_dimension_has_required_parts():
+    rubric = Path("evals/dataset/rubric.md").read_text(encoding="utf-8")
+    for dim in DIMENSIONS:
+        section = rubric.split(f"## {dim}")[1].split("\n## ")[0]
+        for part in ("定义", "该抓(正例)", "不该抓(反例)", "边界例", "严重度", "证据要求"):
+            assert part in section, f"{dim} 小节缺「{part}」"
