@@ -12,14 +12,23 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import tempfile
+import time
 from pathlib import Path
 
 from loom.evalapi import (
+    get_backend,
     load_config,
     save_config,
     scaffold_init,
+    run_pipeline,
 )
+
+from .harness import run_case
+from .metering import MeteringBackend
 
 HERE = Path(__file__).resolve().parent
 GEN_CASES_DIR = HERE / "gen_cases"
@@ -53,3 +62,71 @@ def prepare_project(case_dir: Path, case: dict, workdir: Path) -> Path:
     cfg.continuity_scan = False   # 附赠扫描是额外模型调用;评测口径固定为关(与 golden 同口径)
     save_config(project, cfg)
     return project
+
+
+def _grade_candidate(run_dir: Path, case: dict, chapter_text: str):
+    """候选正文落成 run 目录里的 quality case,完整复用 harness.run_case 评分(零重复逻辑)。"""
+    (run_dir / "chapter.md").write_text(chapter_text, encoding="utf-8")
+    grading_case = {
+        "id": case["id"], "title": case.get("title", case["id"]),
+        "chapter_chars": case["chapter_chars"], "fixture": "chapter.md",
+        "fingerprint_anchors": case.get("fingerprint_anchors", []),
+        "expect": case.get("expect", {}),
+    }
+    (run_dir / "case.json").write_text(
+        json.dumps(grading_case, ensure_ascii=False, indent=2), encoding="utf-8")
+    return run_case(run_dir)
+
+
+def _git_sha() -> str:
+    out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                         capture_output=True, text=True, cwd=HERE)
+    return out.stdout.strip() or "nogit"
+
+
+def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
+                 provider: str | None = None, model: str | None = None,
+                 runs_dir: Path | None = None, workdir: Path | None = None) -> Path:
+    """跑一个 gen case:固定输入 → 真调五 Agent → 候选落 runs/<run_id>/ → 评分。返回 run 目录。
+
+    backend 显式给了就用它(测试注入 ScriptedBackend,mode 记为 injected);
+    否则按 backend_mode:demo → LOOM_DEMO=1 占位后端(零 key 链路冒烟);
+    configured → 项目配置后端(要 key,--provider/--model 可覆写)。
+    """
+    case = load_gen_case(case_dir)
+    runs_dir = runs_dir or RUNS_DIR
+    workdir = Path(tempfile.mkdtemp(prefix="loomgen_")) if workdir is None else workdir
+    project = prepare_project(case_dir, case, workdir)
+    cfg = load_config(project)
+    if provider:
+        cfg.provider = provider
+    if model:
+        cfg.model = model
+
+    if backend is not None:
+        backend_mode = "injected(测试)"
+    else:
+        if backend_mode == "demo":
+            os.environ["LOOM_DEMO"] = "1"
+        backend = get_backend(cfg)
+    metered = MeteringBackend(backend)
+
+    git_sha = _git_sha()
+    base = f"{time.strftime('%Y%m%d-%H%M%S')}_{case['id']}_{git_sha}"
+    run_id, n = base, 1
+    while (runs_dir / run_id).exists():
+        n += 1
+        run_id = f"{base}-{n}"
+    run_dir = runs_dir / run_id
+    run_dir.mkdir(parents=True)
+
+    t0 = time.perf_counter()
+    _path, final = run_pipeline(project, case["chapter_n"], metered, cfg, resume=False)
+    total_s = round(time.perf_counter() - t0, 3)
+
+    result = _grade_candidate(run_dir, case, final)
+    (run_dir / "report.json").write_text(
+        json.dumps(result.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    # manifest 由 Task 5 挂进来(write_manifest 调用点在此)
+    _ = (backend_mode, metered, total_s, git_sha)   # Task 5 消费;先占住变量防 lint 误删
+    return run_dir

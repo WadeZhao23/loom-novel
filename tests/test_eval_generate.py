@@ -6,7 +6,9 @@ import pytest
 
 from loom import evalapi
 from loom.evalapi import load_config
-from evals.generate import load_gen_case, prepare_project
+from evals.generate import load_gen_case, prepare_project, generate_one
+from loom.parse import EDIT_NOTE_CLOSE, EDIT_NOTE_OPEN
+from conftest import ScriptedBackend
 
 _GEN_SEAM = ("run_pipeline", "scaffold_init", "load_config", "save_config",
              "Config", "get_backend", "outline_path")
@@ -50,3 +52,36 @@ def test_prepare_project_applies_overlay_and_config(tmp_path):
     cfg = load_config(project)
     assert cfg.chapter_chars == 200                                  # case 的字数进了 config
     assert cfg.continuity_scan is False                              # 评测口径固定关(省一次调用)
+
+
+# 7 调脚本(细纲 overlay 旁路大纲师):设定/写手/编辑/质检"通过"/润色/去AI味"通过"/标题。
+# 产出文本 ≥40 字过终稿最短闸(200×12%=24,地板40);避开翻转句与禁词,含"矿灯"喂 must_include。
+_SETTER = "本章设定锚点:主角沈砚在废弃矿场;境界凡境;金手指为重生记忆。"
+_DRAFT = "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀。"
+_EDITED = (_DRAFT + "\n" + EDIT_NOTE_OPEN + "\n《本章改动留痕》\n- 钩子更硬。\n" + EDIT_NOTE_CLOSE)
+_POLISHED = "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。"
+_GEN_RUN_7 = [_SETTER, _DRAFT, _EDITED, "通过", _POLISHED, "通过", "矿灯"]
+
+
+def test_generate_one_end_to_end_offline(tmp_path):
+    case_dir = _write_gen_case(tmp_path)
+    be = ScriptedBackend(list(_GEN_RUN_7))
+    run_dir = generate_one(case_dir, backend=be,
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    assert be.replies == []                                        # 恰好 7 调(调用数契约)
+    text = (run_dir / "chapter.md").read_text(encoding="utf-8")
+    assert "矿灯" in text and EDIT_NOTE_OPEN not in text           # 终稿落盘且无哨兵残留
+    report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+    assert report["case_id"] == "gen_test"
+    assert any(g["name"] == "关键要素" for g in report["graders"])  # 复用既有 grader 真跑了
+    assert not (case_dir / "chapter.md").exists()                  # 金标数据集目录零写入
+
+
+def test_generate_one_runs_never_collide(tmp_path):
+    case_dir = _write_gen_case(tmp_path)
+    kw = dict(runs_dir=tmp_path / "runs")
+    r1 = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                      workdir=tmp_path / "w1", **kw)
+    r2 = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                      workdir=tmp_path / "w2", **kw)
+    assert r1 != r2 and r1.exists() and r2.exists()                # 两次运行两个目录,零覆盖
