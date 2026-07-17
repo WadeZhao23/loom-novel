@@ -18,7 +18,9 @@ def test_keywords_clean_passes():
 
 
 def test_aitell_flip_sentence_caught():
-    # AI 翻转句(「不是…而是…」式)该被抓
+    # AI 翻转句(「不是…而是…」式)该被抓。
+    # 注:×3 的重复句经 detect_aitell 按证据去重后仍只算 1 条命中——断言只依赖「≥1 命中」,
+    # 不是在测「多次命中撞阈值」。
     flip = "他不是不想说,而是不敢说。" * 3
     g = grade_aitell(flip, anchors=[], max_hits=0)
     assert g.passed is False and g.score < 1.0

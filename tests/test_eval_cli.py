@@ -30,8 +30,9 @@ def test_baseline_and_gate_together_runs_gate(tmp_path, capsys):
 
 
 def test_gate_returns_1_on_regression(tmp_path):
-    # 退出码 1(质量回归)路径的单测覆盖(brief 缺、Task7 才验;这里补上,与 infra 的 2 区分)。
-    # baseline 里塞一个当前数据集已无的 case → compare 反向遍历报「消失」→ 回归 → 1。
+    # 退出码 1(质量回归)路径的单测覆盖,与 infra 的 2 区分。
+    # baseline 与数据集完全错位:3 个真 case 各报「未固化」+ phantom_gone 报「消失」→ regs 非空 → 1。
+    # (「消失」路径的隔离验证在 test_eval_harness.py 的 test_deleted_baseline_case_flagged。)
     bf = tmp_path / "b.json"
     bf.write_text(json.dumps({"cases": {"phantom_gone": {"score": 1.0, "passed": True}}}),
                   encoding="utf-8")
