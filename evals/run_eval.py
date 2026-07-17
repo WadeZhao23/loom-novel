@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     results = run_suite(args.cases, backend=backend, judge=args.judge)
     if not results:
         print(f"✗ 在 {args.cases} 下没找到任何 case(需要 <case>/case.json)。")
-        return 1
+        return 2   # infra:数据集缺失,不是质量回归
 
     _print_table(results)
     summ = aggregate(results)
@@ -81,19 +81,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline:
         save_baseline(args.baseline_file, results)
         print(f"\n✓ 已写入基线:{args.baseline_file}")
-        return 0
+        if not args.gate:
+            return 0
+        # --baseline --gate 同传:固化后照常跑门禁,不静默跳过
 
     if args.gate:
         baseline = load_baseline(args.baseline_file)
         if baseline is None:
             print(f"\n✗ 没有基线可比对({args.baseline_file})。先跑一次 --baseline。")
-            return 1
+            return 2   # infra:基线文件缺失,不是质量回归
         regs = compare_to_baseline(results, baseline, tol=args.tol)
         if regs:
             print("\n❌ 检测到回归:")
             for x in regs:
                 print(f"   · {x['case']}:{x['kind']}(基线 {x['was']} → 现在 {x['now']})")
-            return 1
+            return 1   # 质量回归
         print("\n✅ 无回归(与基线一致或更好)。")
     return 0
 
