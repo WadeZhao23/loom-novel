@@ -1,0 +1,13 @@
+{
+  "id": "gen_01_mine_rebirth",
+  "title": "废矿重生·首章(生成型)",
+  "chapter_n": 1,
+  "chapter_chars": 600,
+  "expect": {
+    "must_include": ["沈砚", "矿"],
+    "must_not_include": ["二中", "一阶0级"],
+    "max_aitell_hits": 0,
+    "len_tolerance": 0.6
+  },
+  "note": "Generation suite 首例:固定细纲(overlay)旁路大纲师,其余上下文用 scaffold 模板缺省(同样是固定输入)。expect 断言细纲要素落进正文(沈砚/矿)+ 禁设定漂移词。demo 模式跑它只证链路,报告可能 ❌(罐头文本不含细纲要素)——这不是坏,是 demo 的诚实边界;真机(--backend configured)才评生成质量。"
+}
