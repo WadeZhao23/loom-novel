@@ -1,0 +1,15 @@
+{
+  "case_id": "",
+  "annotator_id": "",
+  "annotated_at": "",
+  "labels": [
+    {"dimension": "人物OOC", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "设定漂移", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "断钩子", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "无爽点", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "信息边界", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "物品状态连续性", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "时间连续性", "present": null, "severity": null, "evidence": null, "note": null},
+    {"dimension": "AI腔", "present": null, "severity": null, "evidence": null, "note": null}
+  ]
+}

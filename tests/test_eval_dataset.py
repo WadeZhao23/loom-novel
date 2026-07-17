@@ -204,3 +204,12 @@ def test_dataset_v1_balance():
     assert all(n >= 1 for n in by_dim_pos.values()), f"每个维度至少 1 个正例:{by_dim_pos}"
     assert clean_cases >= 2, "至少 2 个干净难负例(压误报)"
     assert splits == set(SPLITS), f"三个 split 都要非空:{splits}"
+
+
+# ---- Task 6:第二标注者空白工作表——诚实性钉死(present 不预填,由真人填) ----
+
+def test_annotation_worksheet_template_structure():
+    t = json.loads(Path("evals/dataset/annotations/worksheet_template.json").read_text(encoding="utf-8"))
+    assert t["case_id"] == "" and t["annotator_id"] == ""
+    assert [l["dimension"] for l in t["labels"]] == list(DIMENSIONS)
+    assert all(l["present"] is None for l in t["labels"])      # 留给真人填,不预填

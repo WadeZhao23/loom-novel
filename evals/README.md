@@ -226,6 +226,46 @@ gitignore(`.gitignore` 里 `evals/runs/` 那一行),不会进版本库,也不会
 这是当前 Backend 协议的现实,不是缺陷。判断「这次 prompt 改动到底有没有让生成变好」,
 应该看**多次运行的分数分布**(比如同一 case 连续跑 5 次的区间),而不是拿单次结果定生死。
 
+## Judge 校准数据集(Phase 2)
+
+`evals/` 下其实是**三套**数据,不是两套:
+
+| | Fixture(`evals/cases/`) | Generation(`evals/gen_cases/`) | **Judge 校准(`evals/dataset/`)** |
+|---|---|---|---|
+| 测的是什么 | grader 本身准不准 | 流水线生成质量 | **LLM judge(质检/去AI味复审)本身判得准不准** |
+| 输入 | 固定 `chapter.md` | 固定 overlay,真调流水线 | 固定 `chapter.md` + 8 维显式标注(`case.json` 的 `labels`) |
+| 金标来源 | 人写的期望值(`must_include` 等) | 无金标,只看分数回归 | **构造性**:先决定注入什么缺陷,再照注入清单填标签 |
+
+第三套的数据结构、8 维定义(`DIMENSIONS`,与 `loom/gates.py` 里 `CRITIC_质检`/`CRITIC_去AI味`
+硬伤原文一一对应)、rubric 操作化(`evals/dataset/rubric.md`)、schema 校验器
+(`evals/dataset.py`)都已就位,详见 `evals/dataset/rubric.md` 开头的说明和
+`evals/dataset.py` 顶部 docstring。这一节只讲这套数据的**含义与局限**,以及第三方读者
+（或未来的你)如何把它用起来。
+
+### 构造性金标的含义与局限
+
+`evals/dataset/cases/<id>/case.json` 里的 `labels` 是**造出来的**,不是标出来的:每条
+case 先由造数据的人决定"这一章要注入哪个硬伤",再照着注入清单反填 8 维标签。这保证了
+标签内部自洽(校验器能核验 evidence 是不是正文子串、absence 型缺陷不许带引文),但
+**这不能代替人工校准**——没有任何独立于构造过程的人,单纯读 context + chapter.md,
+在不知道"这里被故意造了什么"的前提下,重新做出同样的 8 维判断。换句话说:标签为真是
+因为缺陷是造的,不是因为有人真的认为它是硬伤。
+
+这套构造性金标现在能做的事,是验证**校验器 / harness 管线没坏**(schema 对不对、
+evidence 子串核验有没有生效)。它现在还不能做的事,是回答"这套 rubric 在真实/更模糊的
+文本上,是否还能让两个不同的人做出一致判断"——这就是为什么还需要人工标注:
+`evals/dataset/annotations/README.md` 如实记录了现状(零人工标注)和 Phase 3 的预注册
+指标(人-人一致性 Cohen's κ,目标 ≥0.70,要在两名标注者独立标注 `calibration` split
+之后才存在)。
+
+### 如何开始标注
+
+需要第二个人(不了解本仓库也没关系)按 `evals/dataset/ANNOTATION_GUIDE.md` 的流程,
+对 `calibration` split 的 case 独立标注,产出 `evals/dataset/annotations/<case_id>.
+<annotator_id>.json`。指南是自包含的:标注单位、标注纪律(只依据 rubric、不脑补、
+不看他人结果、不看 `case.json` 里的金标 `labels`)、边界情形怎么记 note、工作表命名
+和优先标注哪个 split,都写在那份文档里,这里不重复。
+
 ## 为什么要有它(写给作者自己)
 
 你已经有了 eval 的**零件**(aitell / gates 复审 / fatigue),缺的是把它们**组织成可回归的度量**。有了这层:① 调 prompt 不再「凭感觉变好了」,有数;② 换模型能一眼看出哪类质量掉了;③ 这套「数据集 + 复用检测器打分 + 回归门禁」本身,就是一份能讲的 eval engineering 实证。
