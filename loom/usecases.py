@@ -457,8 +457,20 @@ def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
 
 
 def partner_new(root: Path | str, *, stamp: str) -> dict:
-    """归档当前伙伴对话,另起一段(不动书内容,只挪 jsonl 文件)。"""
+    """归档当前伙伴对话,另起一段(不动书内容,只挪 jsonl 文件)。
+
+    先拿伙伴轮锁再归档(blocker 修复,spec §10.2):say worker 从头到尾持轮锁,
+    「停」在前端提前清 _partnerBusy 后 worker 可能仍在写尾巴事件——此时归档若改名
+    当前.jsonl,worker 的 append 会重建一个没有 user 事件的孤儿文件,旧轮尾巴串进
+    新会话。轮锁被占 → 409 partner_busy,挡住归档直到 worker 收尾放锁。
+    """
     root = Path(root)
-    with write_lock(root):
-        partner_store.archive_current(root, stamp)
-        return {"ok": True}
+    guard = try_partner_lock(root)
+    if guard is None:
+        raise ProjectBusyError(PARTNER_BUSY_MESSAGE, code="partner_busy")
+    try:
+        with write_lock(root):
+            partner_store.archive_current(root, stamp)
+            return {"ok": True}
+    finally:
+        guard.release()

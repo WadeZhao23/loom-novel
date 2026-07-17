@@ -124,3 +124,22 @@ def test_partner_history_tail_limits(project):
         ps.append_event(project, {"t": "user", "ts": str(i), "text": f"m{i}"})
     out = usecases.partner_history(project, tail=2)
     assert [e["text"] for e in out["events"]] == ["m3", "m4"]
+
+
+def test_partner_new_blocked_while_partner_lock_held(project):
+    import pytest
+    # 模拟 say worker 正持轮锁(「停」之后 worker 尚在收尾的窗口)
+    guard = usecases.try_partner_lock(project)
+    assert guard is not None
+    try:
+        with pytest.raises(usecases.ProjectBusyError) as ei:
+            usecases.partner_new(project, stamp="t")
+        assert ei.value.code == "partner_busy"   # 归档被轮锁挡住,不改名当前.jsonl
+    finally:
+        guard.release()
+
+
+def test_partner_new_succeeds_when_partner_lock_free(project):
+    # 轮锁空闲(worker 已收尾)→ 正常归档
+    out = usecases.partner_new(project, stamp="t2")
+    assert out["ok"] is True
