@@ -58,3 +58,19 @@ def test_no_false_regression_when_matched(tmp_path):
     base = {"cases": {"old": {"score": 1.0, "passed": True}}}
     results = [_cr("old", True, 1.0)]
     assert compare_to_baseline(results, base) == []            # 对齐时零回归
+
+
+def test_baseline_stores_per_grader_and_version(tmp_path):
+    from evals.harness import save_baseline, CaseResult
+    from evals.graders import GraderResult
+    g = GraderResult("关键要素", 0.5, False, 1.0, True)
+    r = CaseResult("c", "c", 0.5, False, [g], case_type="detector_contract", contract_ok=True)
+    p = tmp_path / "b.json"
+    save_baseline(p, [r])
+    import json
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["schema_version"] == 1
+    c = data["cases"]["c"]
+    assert c["case_type"] == "detector_contract"
+    assert c["graders"]["关键要素"] == {"score": 0.5, "passed": False, "gating": True}
+    assert c["score"] == 0.5 and c["passed"] is False   # 旧键仍在(向后兼容 compare)

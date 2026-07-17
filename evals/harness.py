@@ -129,8 +129,15 @@ def aggregate(results: list[CaseResult]) -> dict:
 # ───────────────────────────── 回归门禁(和基线比对)─────────────────────────────
 
 def save_baseline(path: Path, results: list[CaseResult]) -> None:
-    payload = {"cases": {r.case_id: {"score": r.score, "passed": r.passed} for r in results},
-               "summary": aggregate(results)}
+    payload = {
+        "schema_version": 1,
+        "cases": {r.case_id: {
+            "score": r.score, "passed": r.passed, "case_type": r.case_type,
+            "graders": {g.name: {"score": g.score, "passed": g.passed, "gating": g.gating}
+                        for g in r.graders},
+        } for r in results},
+        "summary": aggregate(results),
+    }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
