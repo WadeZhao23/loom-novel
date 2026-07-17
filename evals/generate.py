@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -79,9 +80,54 @@ def _grade_candidate(run_dir: Path, case: dict, chapter_text: str):
 
 
 def _git_sha() -> str:
-    out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                         capture_output=True, text=True, cwd=HERE)
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, cwd=HERE)
+    except (OSError, subprocess.SubprocessError):
+        return "nogit"
     return out.stdout.strip() or "nogit"
+
+
+def _hash_dir(d: Path) -> str:
+    """目录内容指纹:相对路径+字节流一起进 hash,文件名序固定。"""
+    h = hashlib.sha256()
+    for p in sorted(d.rglob("*")):
+        if p.is_file():
+            h.update(p.relative_to(d).as_posix().encode("utf-8"))
+            h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def write_manifest(run_dir: Path, case_dir: Path, case: dict, cfg, backend_mode: str,
+                   backend_class: str, metered: MeteringBackend, total_s: float,
+                   git_sha: str) -> None:
+    prompts = sorted({r.system_prompt for r in metered.records})
+    manifest = {
+        "run_id": run_dir.name,
+        "git_commit": git_sha,
+        "backend_mode": backend_mode,
+        "backend_class": backend_class,   # 实际后端类名:demo 模式下 provider 字段是配置残影,以此为准
+        "provider": cfg.provider,
+        "model": cfg.model,
+        "prompt_hash": hashlib.sha256("\n\x00".join(prompts).encode("utf-8")).hexdigest()[:16],
+        "dataset_hash": _hash_dir(case_dir),
+        "params": {"chapter_n": case["chapter_n"], "chapter_chars": case["chapter_chars"],
+                   "gate_rounds": cfg.gate_rounds, "continuity_scan": cfg.continuity_scan},
+        "calls": [{"system_sha": hashlib.sha256(r.system_prompt.encode("utf-8")).hexdigest()[:12],
+                   "user_chars": r.user_chars, "output_chars": r.output_chars,
+                   "max_chars": r.max_chars, "elapsed_s": r.elapsed_s}
+                  for r in metered.records],
+        "n_calls": len(metered.records),
+        "total_elapsed_s": total_s,
+        "tokens": None,
+        "cost": None,
+        "retries": 0,
+        "notes": ("tokens/cost=null:Backend 协议不回传 usage(backends.py 丢弃 resp.usage),"
+                  "字符数为唯一代理指标;retries=0:run_pipeline 无内建重试(失败即 raise),"
+                  "断点续跑是跨进程机制;无 seed 通道,单次结果不承诺可复现,稳定性用多次运行分布观测。"),
+    }
+    (run_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
@@ -127,6 +173,6 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     result = _grade_candidate(run_dir, case, final)
     (run_dir / "report.json").write_text(
         json.dumps(result.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    # manifest 由 Task 5 挂进来(write_manifest 调用点在此)
-    _ = (backend_mode, metered, total_s, git_sha)   # Task 5 消费;先占住变量防 lint 误删
+    write_manifest(run_dir, case_dir, case, cfg, backend_mode,
+                   type(metered.inner).__name__, metered, total_s, git_sha)
     return run_dir

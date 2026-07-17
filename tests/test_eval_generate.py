@@ -69,6 +69,7 @@ def test_generate_one_end_to_end_offline(tmp_path):
     run_dir = generate_one(case_dir, backend=be,
                            runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
     assert be.replies == []                                        # 恰好 7 调(调用数契约)
+    assert len(be.calls) == 7                                      # 耗尽不证「恰7调」,calls 钉死精确值
     text = (run_dir / "chapter.md").read_text(encoding="utf-8")
     assert "矿灯" in text and EDIT_NOTE_OPEN not in text           # 终稿落盘且无哨兵残留
     report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
@@ -85,3 +86,38 @@ def test_generate_one_runs_never_collide(tmp_path):
     r2 = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
                       workdir=tmp_path / "w2", **kw)
     assert r1 != r2 and r1.exists() and r2.exists()                # 两次运行两个目录,零覆盖
+
+
+def test_manifest_traceability_fields(tmp_path):
+    case_dir = _write_gen_case(tmp_path)
+    run_dir = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    m = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert m["run_id"] == run_dir.name
+    assert m["git_commit"] and m["git_commit"] != "nogit"          # 本仓是 git 仓,必有 sha
+    assert m["backend_mode"] == "injected(测试)"
+    assert m["backend_class"] == "ScriptedBackend"                 # 实际后端类名,不撒谎
+    assert m["n_calls"] == 7 and len(m["calls"]) == 7              # 7 调契约进档
+    assert all(c["elapsed_s"] >= 0 and c["output_chars"] > 0 for c in m["calls"][:3])
+    assert m["tokens"] is None and m["cost"] is None               # 不造数
+    assert m["retries"] == 0
+    assert "usage" in m["notes"] or "代理指标" in m["notes"]        # 置空原因写明
+
+
+def test_manifest_hashes_stable_and_sensitive(tmp_path):
+    case_dir = _write_gen_case(tmp_path)
+    kw = dict(runs_dir=tmp_path / "runs")
+    m1 = json.loads((generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                                  workdir=tmp_path / "w1", **kw) / "manifest.json").read_text(encoding="utf-8"))
+    m2 = json.loads((generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                                  workdir=tmp_path / "w2", **kw) / "manifest.json").read_text(encoding="utf-8"))
+    assert m1["prompt_hash"] == m2["prompt_hash"]                  # 同输入同 prompt → hash 稳定
+    assert m1["dataset_hash"] == m2["dataset_hash"]
+    # 数据集变一个字 → dataset_hash 必变(细纲走大纲师旁路直接落盘,需过 STEP 最短闸 min_chars=8,
+    # 故内容比"改了的细纲"更长,只为不触发无关的过短校验,不改变本测试意图)
+    (case_dir / "overlay" / "正文" / ".细纲" / "第1章.md").write_text(
+        "改动后的细纲:分镜一如常。\n", encoding="utf-8")
+    m3 = json.loads((generate_one(case_dir, backend=ScriptedBackend(
+        [_SETTER, _DRAFT, _EDITED, "通过", _POLISHED, "通过", "矿灯"]),
+        workdir=tmp_path / "w3", **kw) / "manifest.json").read_text(encoding="utf-8"))
+    assert m3["dataset_hash"] != m1["dataset_hash"]
