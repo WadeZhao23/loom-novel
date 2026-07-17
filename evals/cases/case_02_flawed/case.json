@@ -3,6 +3,8 @@
   "title": "废矿·逆息觉醒(注入缺陷·验证检测器)",
   "chapter_chars": 600,
   "fixture": "chapter.md",
+  "case_type": "detector_contract",
+  "expect_fail_graders": ["关键要素", "去AI味·确定性"],
   "setting": "(同 case_01)灵气复苏第三年,逆息体质,濒死爆发折寿。地名:少年时在「一中」读书。力量体系 F~SSS。人物:师姐。章末钩=师姐登场。",
   "fingerprint": "## anchor 例句\n> 他没说话。",
   "fingerprint_anchors": ["他没说话。"],

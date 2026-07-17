@@ -36,10 +36,13 @@ class CaseResult:
     score: float
     passed: bool
     graders: list[GraderResult] = field(default_factory=list)
+    case_type: str = "quality"        # "quality" | "detector_contract"
+    contract_ok: bool = True          # detector_contract:声明必须命中缺陷的 grader 是否都如约失败
 
     def as_dict(self) -> dict:
         return {"case_id": self.case_id, "title": self.title, "score": self.score,
-                "passed": self.passed, "graders": [g.as_dict() for g in self.graders]}
+                "passed": self.passed, "case_type": self.case_type,
+                "contract_ok": self.contract_ok, "graders": [g.as_dict() for g in self.graders]}
 
 
 def _weighted(graders: list[GraderResult]) -> float:
@@ -68,8 +71,18 @@ def run_case(case_dir: Path, *, backend=None, judge: bool = False) -> CaseResult
         graders.append(grade_quality_llm(text, case.get("setting", ""), backend))
         graders.append(grade_deslop_llm(text, case.get("fingerprint", ""), backend))
 
+    case_type = case.get("case_type", "quality")
+    if case_type == "detector_contract":
+        want_fail = set(case.get("expect_fail_graders", []))
+        by_name = {g.name: g for g in graders}
+        # 契约成立 = 每个声明必须命中缺陷的 grader 都存在且 passed=False
+        contract_ok = bool(want_fail) and all(
+            (name in by_name) and (by_name[name].passed is False) for name in want_fail)
+        return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders),
+                          contract_ok, graders, case_type=case_type, contract_ok=contract_ok)
     passed = all(g.passed for g in graders if g.gating)
-    return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders), passed, graders)
+    return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders),
+                      passed, graders, case_type=case_type)
 
 
 def _run_style_ab_case(case_dir: Path, case: dict, exp: dict) -> CaseResult:
