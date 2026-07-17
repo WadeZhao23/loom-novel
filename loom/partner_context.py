@@ -55,8 +55,12 @@ def env_snapshot(root: Path) -> str:
     """≤400 字只读投影:门禁完成度/未填槽位摘要/章节数/书名/一句话设定。
 
     与「看地基」工具共用 slots.stage_slots(单一真相,绝不建第二个扫描器)——区别在于
-    快照只列每段「未填N/总数」+ 前 K 个未填槽位 id(容器#键),不带 filled/preview/hint;
+    快照只列每段「未填N/总数」+ 前 K 个未填槽位 id(容器#键),不带 filled/preview;
     伙伴靠快照就能「直奔空格发问」,细看某格上下文靠「看地基」/「读文件」工具。
+
+    唯一例外:**当前工作段**(=按 STAGES 顺序第一个还有未填槽的段)的未填槽位带 hint
+    (`id(hint)`),让模型当下就知道这格填什么(如「分区」不是「平台」)——其余段仍是光秃
+    id。400 字预算带不起「每段都带 hint」,只给当前决策相关的那段够用、也够省。
 
     预算分配:门禁完成度+未填槽位摘要+章节数是快照核心目的,**先拼、优先保留**;
     书名/一句话设定(idea 来自 loom.toml,作者可以写任意长)放最后、且 idea 单独
@@ -69,13 +73,20 @@ def env_snapshot(root: Path) -> str:
     gate = "已解锁" if unlocked else f"未解锁(缺{'/'.join(missing)})"
     lines.append(f"起书门禁:{gate}")
 
+    current_stage_marked = False   # 只有第一个「有未填槽」的段算当前工作段,才带 hint
     for spec in journey.STAGES:
         stage_slot_list = slots.stage_slots(root, spec)
         if not stage_slot_list:
             continue
         unfilled = [s for s in stage_slot_list if not s.filled]
         line = f"{spec.key} 未填{len(unfilled)}/{len(stage_slot_list)}"
-        top = "、".join(s.id for s in unfilled[:_SNAPSHOT_TOP_K])
+        is_current = bool(unfilled) and not current_stage_marked
+        if unfilled:
+            current_stage_marked = True
+        if is_current:
+            top = "、".join(f"{s.id}({s.hint})" if s.hint else s.id for s in unfilled[:_SNAPSHOT_TOP_K])
+        else:
+            top = "、".join(s.id for s in unfilled[:_SNAPSHOT_TOP_K])
         if top:
             line += f":{top}"
         lines.append(line)

@@ -114,7 +114,11 @@ def _handle_kandiji(root: Path) -> str:
         filled_n = sum(1 for s in stage_slot_list if s.filled)
         lines.append(f"【{spec.key}】共 {len(stage_slot_list)} 槽,已填 {filled_n}/未填 {len(stage_slot_list) - filled_n}")
         for s in stage_slot_list:
-            mark = f"已填：{s.preview}" if s.filled else "未填"
+            if s.filled:
+                mark = f"已填：{s.preview}"
+            else:
+                # 未填槽附 hint(如「不是平台」),让模型知道这格填什么——已填槽 preview 已够说明,不重复附
+                mark = f"未填 — {s.hint}" if s.hint else "未填"
             lines.append(f"  {s.id}：{mark}")
     return "\n".join(lines) if lines else "(暂无可扫描的槽位)"
 

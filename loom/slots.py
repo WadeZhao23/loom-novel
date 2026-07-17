@@ -18,6 +18,16 @@ _ROW_RE = re.compile(r"^-\s*([^:：(（]+?)\s*(?:[(（][^)）]*[)）])?\s*[:：]
 _HINT_RE = re.compile(r"[(（]([^)）]*)[)）]")
 _PLATFORM_RE = re.compile(r"^平台[ \t]*[:：][ \t]*(.*)$", re.M)
 
+# 立项卡四个 H2 格的 hint(素材来自模板占位 loom/templates/外置大脑/立项卡.md,提炼成短句):
+# 模板本身对这四格没有像 row 槽那样的行内括注可抓,之前一直是空 hint——真机暴露的缺陷正是
+# 由此而来(模型不知道「分区」是什么,把平台名塞进分区槽)。
+_CARD_FIELD_HINTS = {
+    "分区": "投稿分区/题材归类(如玄幻·东方玄幻),不是平台",
+    "题材": "核心题材标签,如重生+复仇+宗门流",
+    "对标意图": "想写成哪本书那种爽感节奏",
+    "为什么选它": "选这个定位的理由/初心备忘",
+}
+
 
 def _preview(val: str) -> str:
     return val.strip()[:24]
@@ -73,7 +83,7 @@ def _project_slots(root: Path) -> list[Slot]:
     for f in _CARD_FIELDS:
         body = _h2_body(text, f)
         out.append(Slot(id=f"{rel}#{f}", label=f, container=rel, at="h2", key=f,
-                        hint="", filled=is_substantive(body), preview=_preview(body)))
+                        hint=_CARD_FIELD_HINTS.get(f, ""), filled=is_substantive(body), preview=_preview(body)))
     return out
 
 

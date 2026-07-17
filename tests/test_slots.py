@@ -25,6 +25,17 @@ def test_project_stage_slots_line_and_h2(project):
     assert d["题材"].container == "外置大脑/立项卡.md"
 
 
+def test_project_h2_slots_have_real_hints(project):
+    # 立项四格(分区/题材/对标意图/为什么选它)要有非空 hint,分区尤其要点明「不是平台」
+    # (真机暴露的缺陷:模型不知道「分区」是什么,把平台名塞进分区槽)
+    slots = stage_slots(project, _stage_spec("立项"))
+    d = {s.key: s for s in slots}
+    assert d["分区"].hint and "不是平台" in d["分区"].hint
+    assert d["题材"].hint.strip()
+    assert d["对标意图"].hint.strip()
+    assert d["为什么选它"].hint.strip()
+
+
 def test_row_slots_carry_hint_and_fill(project):
     # 金手指 8 行 row,hint 取括注原文,填了才 filled
     p = project / "外置大脑/世界观/金手指.md"

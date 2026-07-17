@@ -55,6 +55,15 @@ def test_read_rejects_whitelist_boundary(project):
         assert ev.get("error"), f"{bad} 应被拒(不在白名单)"
 
 
+def test_kandiji_shows_hint_for_unfilled_slot(project):
+    # 未填的立项分区槽:看地基全量明细要带 hint,让模型知道「分区」不是平台
+    ev = pt.run_tool(project, "看地基", {}, ts="t")
+    assert "分区" in ev["text"]
+    lines = [l for l in ev["text"].splitlines() if "立项卡.md#分区" in l]
+    assert lines, "分区槽应出现在看地基明细里"
+    assert "不是平台" in lines[0]
+
+
 def test_kandiji_shows_filled_and_preview(project):
     # 看地基是全量明细:填一格后能看到该格 filled + preview
     p = project / "外置大脑/立项卡.md"

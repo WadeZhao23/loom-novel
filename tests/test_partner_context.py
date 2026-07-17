@@ -32,6 +32,15 @@ def test_body_change_only_touches_suffix(project):
     assert _sha(s1) == _sha(s2)      # 前缀不含正文/外置大脑明细
 
 
+def test_snapshot_current_stage_unfilled_slots_carry_hint(project):
+    # 当前工作段(新书=立项)未填槽带 hint,让模型知道每格含义;预算仍守 400 字,门禁信息不丢
+    snap = env_snapshot(project)
+    assert "分区" in snap
+    assert "不是平台" in snap        # 分区 hint 的关键字眼透出来了
+    assert len(snap) <= 400
+    assert "门禁" in snap or "未填" in snap
+
+
 def test_snapshot_keeps_gate_even_with_long_idea(project):
     from loom.config import load_config, save_config
     cfg = load_config(project); cfg.idea = "设" * 450; save_config(project, cfg)
