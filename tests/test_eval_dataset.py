@@ -24,15 +24,23 @@ def _blank_labels(**overrides):
     return labels
 
 
-def _write_case(tmp_path, *, labels=None, split="dev", chapter="矿灯昏黄,沈砚验伤。他把旧矿牌收进怀里。"):
+_DEFAULT_CONTEXT = {
+    "setting": "灵气复苏,逆息体质忌讳外泄。", "characters": "沈砚:寡言,谋定后动。",
+    "prev_hook": "上一章末:矿道尽头传来提灯脚步声。", "chapter_goal": "接钩+验伤+埋矿牌线。",
+}
+
+
+def _write_case(tmp_path, *, labels=None, split="dev", version=1, case_id="ds_x",
+                 context=None, chapter="矿灯昏黄,沈砚验伤。他把旧矿牌收进怀里。"):
     d = tmp_path / "ds_x"; d.mkdir()
     case = {
-        "id": "ds_x", "split": split, "version": 1,
+        "split": split, "version": version,
         "source": {"origin": "constructed", "license": "self-authored", "deidentified": True},
-        "context": {"setting": "灵气复苏,逆息体质忌讳外泄。", "characters": "沈砚:寡言,谋定后动。",
-                    "prev_hook": "上一章末:矿道尽头传来提灯脚步声。", "chapter_goal": "接钩+验伤+埋矿牌线。"},
+        "context": context if context is not None else dict(_DEFAULT_CONTEXT),
         "labels": labels if labels is not None else _blank_labels(),
     }
+    if case_id is not None:
+        case["id"] = case_id
     (d / "case.json").write_text(json.dumps(case, ensure_ascii=False, indent=2), encoding="utf-8")
     (d / "chapter.md").write_text(chapter, encoding="utf-8")
     return d
@@ -90,3 +98,61 @@ def test_clean_label_must_not_carry_severity(tmp_path):
                                       "annotator": "构造注入(gold-by-construction)"})
     with pytest.raises(DatasetError, match="present=False"):
         load_case(_write_case(tmp_path, labels=labels))
+
+
+# ---- Fix 轮补测试:version bool 洞 / id 缺失洞 / ctx 四键契约 / labels 项类型防御 / discover_cases ----
+
+def test_version_bool_rejected(tmp_path):
+    with pytest.raises(DatasetError, match="version"):
+        load_case(_write_case(tmp_path, version=True))
+
+
+def test_missing_id_rejected(tmp_path):
+    with pytest.raises(DatasetError, match="id"):
+        load_case(_write_case(tmp_path, case_id=None))
+
+
+def test_context_extra_key_ignored_on_load(tmp_path):
+    context = {**_DEFAULT_CONTEXT, "extra_count": 5}
+    case = load_case(_write_case(tmp_path, context=context))
+    assert case["id"] == "ds_x"
+
+
+def test_context_evidence_from_extra_key_rejected(tmp_path):
+    context = {**_DEFAULT_CONTEXT, "extra_note": "额外线索:小张的钥匙"}
+    labels = _blank_labels(信息边界={"present": True, "severity": "中",
+                                    "evidence_type": "context", "evidence": "小张的钥匙",
+                                    "note": "注入:引用了四键之外的额外上下文"})
+    with pytest.raises(DatasetError, match="子串"):
+        load_case(_write_case(tmp_path, context=context, labels=labels))
+
+
+def test_context_evidence_positive_path_loads(tmp_path):
+    labels = _blank_labels(信息边界={"present": True, "severity": "中",
+                                    "evidence_type": "context", "evidence": "矿道尽头传来提灯脚步声",
+                                    "note": "示例:context 型 evidence 取自 prev_hook 子串"})
+    case = load_case(_write_case(tmp_path, labels=labels))
+    hit = [l for l in case["labels"] if l["present"]]
+    assert len(hit) == 1 and hit[0]["dimension"] == "信息边界"
+
+
+def test_label_item_must_be_object(tmp_path):
+    labels = _blank_labels()
+    labels[0] = "字符串坏项"
+    with pytest.raises(DatasetError, match="对象"):
+        load_case(_write_case(tmp_path, labels=labels))
+
+
+def test_discover_cases_returns_sorted_paths(tmp_path):
+    dataset_dir = tmp_path / "dataset"
+    for cid in ("case_b", "case_a"):
+        d = dataset_dir / "cases" / cid
+        d.mkdir(parents=True)
+        (d / "case.json").write_text("{}", encoding="utf-8")
+    found = discover_cases(dataset_dir)
+    assert found == sorted(found)
+    assert [p.name for p in found] == ["case_a", "case_b"]
+
+
+def test_discover_cases_empty_dir_returns_empty_list(tmp_path):
+    assert discover_cases(tmp_path) == []

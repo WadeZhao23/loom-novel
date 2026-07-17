@@ -31,7 +31,7 @@ class DatasetError(ValueError):
 
 
 def discover_cases(dataset_dir: Path | None = None) -> list[Path]:
-    root = (dataset_dir or DATASET_DIR) / "cases" if dataset_dir else CASES_DIR
+    root = (dataset_dir / "cases") if dataset_dir else CASES_DIR
     if not root.is_dir():
         return []
     return sorted(p.parent for p in root.glob("*/case.json"))
@@ -52,10 +52,13 @@ def _fail(cid: str, msg: str) -> None:
 
 
 def validate_case(case: dict, chapter: str) -> None:
-    cid = case.get("id", "<无id>")
+    cid = case.get("id")
+    if not isinstance(cid, str) or not cid.strip():
+        _fail("<无id>", "id 必填非空")
     if case.get("split") not in SPLITS:
         _fail(cid, f"split 非法:{case.get('split')}(须 {SPLITS} 之一)")
-    if not isinstance(case.get("version"), int) or case["version"] < 1:
+    version = case.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         _fail(cid, "version 须为 ≥1 的整数")
     if not isinstance(case.get("source"), dict) or not case["source"].get("origin"):
         _fail(cid, "source.origin 必填")
@@ -68,15 +71,20 @@ def validate_case(case: dict, chapter: str) -> None:
     labels = case.get("labels")
     if not isinstance(labels, list):
         _fail(cid, "labels 必填")
+    for l in labels:
+        if not isinstance(l, dict):
+            _fail(cid, "labels 每项须为对象")
     dims = [l.get("dimension") for l in labels]
     if sorted(dims) != sorted(DIMENSIONS):
         _fail(cid, f"labels 维度必须恰好覆盖 8 维不重不漏,现为:{dims}")
-    ctx_blob = "\n".join(ctx.values())
+    # 只锚定四个必填键的内容:额外键(任意类型)被忽略,既不裸炸也不扩大证据面
+    ctx_blob = "\n".join(ctx[k] for k in ("setting", "characters", "prev_hook", "chapter_goal"))
     for l in labels:
         dim = l["dimension"]
         if not isinstance(l.get("present"), bool):
             _fail(cid, f"{dim}: present 须为 bool")
-        if not l.get("annotator", "").strip():
+        annotator = l.get("annotator")
+        if not isinstance(annotator, str) or not annotator.strip():
             _fail(cid, f"{dim}: annotator 必填")
         if l["present"]:
             if l.get("severity") not in SEVERITIES:
@@ -84,9 +92,12 @@ def validate_case(case: dict, chapter: str) -> None:
             et = l.get("evidence_type")
             if et not in EVIDENCE_TYPES:
                 _fail(cid, f"{dim}: evidence_type 须为 {EVIDENCE_TYPES} 之一")
-            if not l.get("note", "").strip():
+            note = l.get("note")
+            if not isinstance(note, str) or not note.strip():
                 _fail(cid, f"{dim}: present=True 必须写 note(注入了什么)")
             ev = l.get("evidence", "")
+            if not isinstance(ev, str):
+                _fail(cid, f"{dim}: evidence 须为字符串")
             if et == "chapter" and (not ev or ev not in chapter):
                 _fail(cid, f"{dim}: chapter 型 evidence 必须是正文子串,现引文核验失败")
             if et == "context" and (not ev or ev not in ctx_blob):
