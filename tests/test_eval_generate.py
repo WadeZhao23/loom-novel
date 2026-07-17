@@ -1,12 +1,13 @@
 """Generation suite:evalapi 生成接缝 + 固定输入生成链路。零真实模型。"""
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from loom import evalapi
 from loom.evalapi import load_config
-from evals.generate import load_gen_case, prepare_project, generate_one
+from evals.generate import load_gen_case, prepare_project, generate_one, main
 from loom.parse import EDIT_NOTE_CLOSE, EDIT_NOTE_OPEN
 from conftest import ScriptedBackend
 
@@ -121,3 +122,30 @@ def test_manifest_hashes_stable_and_sensitive(tmp_path):
         [_SETTER, _DRAFT, _EDITED, "通过", _POLISHED, "通过", "矿灯"]),
         workdir=tmp_path / "w3", **kw) / "manifest.json").read_text(encoding="utf-8"))
     assert m3["dataset_hash"] != m1["dataset_hash"]
+
+
+def test_cli_unknown_case_is_infra_2(tmp_path):
+    (tmp_path / "gc").mkdir()
+    assert main(["--case", "不存在", "--cases-dir", str(tmp_path / "gc"),
+                 "--runs-dir", str(tmp_path / "runs")]) == 2
+
+
+def test_cli_empty_cases_dir_is_infra_2(tmp_path):
+    (tmp_path / "gc").mkdir()
+    assert main(["--cases-dir", str(tmp_path / "gc"), "--runs-dir", str(tmp_path / "runs")]) == 2
+
+
+def test_cli_demo_mode_end_to_end(tmp_path, monkeypatch):
+    # demo 模式离线冒烟:证明 CLI→generate_one→DemoBackend 链路通(不证明生成质量)。
+    # monkeypatch 先设 LOOM_DEMO,保证 teardown 复原、不串染其它测试。
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    src = _write_gen_case(tmp_path)
+    gc = tmp_path / "gc"; gc.mkdir()
+    shutil.copytree(src, gc / "gen_test")
+    code = main(["--cases-dir", str(gc), "--runs-dir", str(tmp_path / "runs")])
+    assert code == 0
+    runs = list((tmp_path / "runs").iterdir())
+    assert len(runs) == 1
+    assert (runs[0] / "manifest.json").is_file() and (runs[0] / "report.json").is_file()
+    m = json.loads((runs[0] / "manifest.json").read_text(encoding="utf-8"))
+    assert m["backend_class"] == "DemoBackend"        # 罐头后端如实入档

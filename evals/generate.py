@@ -176,3 +176,45 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     write_manifest(run_dir, case_dir, case, cfg, backend_mode,
                    type(metered.inner).__name__, metered, total_s, git_sha)
     return run_dir
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="loom Generation suite(真调五 Agent 生成再评;手动/定时跑,不进 PR CI)")
+    ap.add_argument("--case", help="gen case id(gen_cases/ 下目录名);缺省跑全部")
+    ap.add_argument("--backend", choices=["demo", "configured"], default="demo",
+                    help="demo=占位后端零 key 链路冒烟(不能证明 prompt 变化);configured=项目配置后端(要 key)")
+    ap.add_argument("--provider", help="configured 模式覆写 provider")
+    ap.add_argument("--model", help="configured 模式覆写 model")
+    ap.add_argument("--cases-dir", type=Path, default=GEN_CASES_DIR)
+    ap.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
+    args = ap.parse_args(argv)
+
+    if not args.cases_dir.is_dir():
+        print(f"✗ 没有 gen case 目录:{args.cases_dir}")
+        return 2
+    if args.case:
+        target = args.cases_dir / args.case
+        if not (target / "case.json").is_file():
+            print(f"✗ 找不到 gen case:{args.case}(于 {args.cases_dir})")
+            return 2
+        case_dirs = [target]
+    else:
+        case_dirs = sorted(p.parent for p in args.cases_dir.glob("*/case.json"))
+        if not case_dirs:
+            print(f"✗ {args.cases_dir} 下没有任何 gen case(需要 <case>/case.json)")
+            return 2
+
+    for d in case_dirs:
+        run_dir = generate_one(d, backend_mode=args.backend, provider=args.provider,
+                               model=args.model, runs_dir=args.runs_dir)
+        report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+        flag = "✅" if report["passed"] else "❌"
+        print(f"{flag} {report['case_id']}  score={report['score']}  → {run_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
