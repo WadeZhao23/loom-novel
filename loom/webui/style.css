@@ -665,6 +665,13 @@ body.typing .nav-ball, body.typing .nav-popover { display: none; }
 .pc-result summary { cursor: pointer; }
 .pc-result.err summary { color: var(--danger); }
 .pc-result-text { margin-top: 4px; white-space: pre-wrap; word-break: break-word; color: var(--text-soft); }
+.pc-tool-active { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs);
+  color: var(--text-mute); padding: 1px 4px; }
+.pc-spinner { flex: none; width: 10px; height: 10px; border-radius: 50%;
+  border: 1.5px solid var(--line); border-top-color: var(--text-soft);
+  animation: pc-spin 0.7s linear infinite; }
+@keyframes pc-spin { to { transform: rotate(360deg); } }
+.pc-tool-done { font-size: var(--fs-xs); color: var(--text-soft); padding: 1px 4px; }
 .pc-error { font-size: var(--fs-sm); color: var(--danger); background: var(--danger-tint);
   border-radius: var(--radius-sm); padding: 6px 9px; }
 /* 候选卡:虚线边 + 「候选」角标——挡 AI 文字混进书的唯一结构性保证(spec §6.1) */

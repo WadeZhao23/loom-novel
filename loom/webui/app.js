@@ -1223,6 +1223,59 @@ function pcResult(ev) {
   return det;
 }
 
+// 工具名 → 三态文案(spec §4.3)。〈basename〉取 params.路径 末段文件名。
+// 每个工具每条路径都有定义,无 undefined:提设定成功走 proposal(tool 行被压)、
+// 参数错走 result(error) 用 .err;done 仅极端边角兜底。
+function partnerToolVerb(name, params) {
+  const base = (params && params.路径) ? String(params.路径).split("/").pop() : "";
+  switch (name) {
+    case "看地基": return { active: "正在看地基…", done: "看了地基", err: "查地基没成功" };
+    case "读文件": return { active: `正在读${base}…`, done: `读了${base}`, err: `读${base}没成功` };
+    case "提设定": return { active: "正在拟一条设定…", done: "拟了一条设定", err: "拟设定没成功" };
+    default: {
+      const n = name || "工具";
+      return { active: `正在用${n}…`, done: `用了${n}`, err: `用${n}没成功` };
+    }
+  }
+}
+
+// 活动行:旋转指示器 + 「正在看地基…」(spec §4.2 dangling+busy)
+function pcToolActive(ev) {
+  const row = document.createElement("div");
+  row.className = "pc-tool-active";
+  const spin = document.createElement("span");
+  spin.className = "pc-spinner";
+  row.appendChild(spin);
+  const label = document.createElement("span");
+  label.textContent = partnerToolVerb(ev.name, ev.params).active;
+  row.appendChild(label);
+  return row;
+}
+
+// 静态 done 行:轮末残留 / [tool,error] 兜底 / 非 busy(spec §4.2 后两档)
+function pcToolDone(ev) {
+  const row = document.createElement("div");
+  row.className = "pc-tool-done";
+  row.textContent = partnerToolVerb(ev.name, ev.params).done;
+  return row;
+}
+
+// 合并折叠行:tool + 其 result 配一行(spec §4.2)。summary 用配对 tool 的 done/err 文案,
+// 沿用 pcResult 的 .pc-result 折叠骨架 + .err 样式。
+function pcToolResult(toolEv, resultEv) {
+  const verb = partnerToolVerb(toolEv.name, toolEv.params);
+  const det = document.createElement("details");
+  det.className = "pc-result" + (resultEv.error ? " err" : "");
+  const sum = document.createElement("summary");
+  sum.textContent = resultEv.error ? verb.err : verb.done;
+  det.appendChild(sum);
+  const body = document.createElement("div");
+  body.className = "pc-result-text";
+  body.textContent = resultEv.error || resultEv.text || "";
+  det.appendChild(body);
+  return det;
+}
+
 function pcError(ev) {
   const row = document.createElement("div");
   row.className = "pc-error";
