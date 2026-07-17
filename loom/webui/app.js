@@ -1034,7 +1034,7 @@ async function partnerSay(text) {
     });
   } catch (e) {
     if (e && e.name === "AbortError") {   // 用户点了停止(fetch 阶段就 abort),不是连接失败——不落 error
-      if (gen === _partnerGen) { _partnerBusy = false; _partnerStopped = true; }
+      if (gen === _partnerGen) { _partnerBusy = false; _partnerStopped = true; _partnerAbort = null; }
       if (gen === _partnerGen && DATA && DATA.root === root) paintJourney();
       return;
     }
