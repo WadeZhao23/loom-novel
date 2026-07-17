@@ -1,0 +1,25 @@
+{
+  "id": "ds_02_drift",
+  "split": "dev",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。此界从未现世任何飞行法宝,也无御空之术——修为再高也只能踏实地而行,这是铁律。逆息体质者会被清脉司缉拿去当炉鼎。",
+    "characters": "沈砚:逆息体质,寡言谨慎,遇险先探清底细再动;来袭者:清脉司缉拿队,身份可由袖口双蛇纹认出。",
+    "prev_hook": "上一章末:矿道口的铜钟毫无预兆炸响,沈砚攥紧矿牌冲向井口。",
+    "chapter_goal": "接住警钟钩;沈砚探明来袭者是清脉司,确认缉拿逼近,埋下逃亡线。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": true, "severity": "高", "evidence_type": "chapter",
+     "evidence": "为首那人足尖在矿壁上虚点一下,整个人凌空拔起三丈,踏着一柄青芒长剑,掠过塌方的矿坑落下。",
+     "note": "注入:setting 写死『此界从未现世飞行法宝、无御空之术,只能踏地而行,这是铁律』,正文却让来袭者踏剑凌空御空而行——直接推翻世界观核心硬规则,判设定漂移。",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

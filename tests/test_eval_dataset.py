@@ -175,3 +175,18 @@ def test_rubric_each_dimension_has_required_parts():
         section = rubric.split(f"## {dim}")[1].split("\n## ")[0]
         for part in ("定义", "该抓(正例)", "不该抓(反例)", "边界例", "严重度", "证据要求"):
             assert part in section, f"{dim} 小节缺「{part}」"
+
+
+# ---- Task 3:全数据集校验(一次写好,覆盖本任务与后续所有发货 case) ----
+
+def test_shipped_dataset_all_cases_validate():
+    # 仓库里实际发货的每个 case 都必须过校验器(含证据子串机械核验)
+    dirs = discover_cases()
+    assert dirs, "evals/dataset/cases 下还没有任何 case"
+    for d in dirs:
+        case = load_case(d)                            # 校验失败会抛,即测试红
+        positives = [l for l in case["labels"] if l["present"]]
+        assert positives, f"{case['id']}: v1 正例集每例至少 1 维 present=True(clean 负例在 Task 5 加入后本断言调整)"
+    # 断言演进说明:Task 5 加入 clean 负例时,允许且必须把最后一条断言改为
+    # 「正例数 ≥0 且整集平衡校验移交 balance 测试」——这是计划内的断言演进,
+    # 届时按 Task 5 的 Step 指令改,不算违反「既有断言禁改」。

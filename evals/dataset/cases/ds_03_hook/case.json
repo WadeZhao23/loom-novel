@@ -1,0 +1,25 @@
+{
+  "id": "ds_03_hook",
+  "split": "calibration",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者身份暴露会被清脉司缉拿为炉鼎——真名与体质是活命死穴。矿场按矿脉分成结算工钱。",
+    "characters": "沈砚:逆息体质,寡言谨慎,谋定后动;赵矿头:三号矿道工头,惯于克扣分成。",
+    "prev_hook": "上一章末:矿道尽头亮起一盏提灯,一个陌生声音在黑暗里清清楚楚喊出了沈砚的真名。",
+    "chapter_goal": "接住提灯人喊破真名的强钩——沈砚循声查探、或至少对身份暴露作出反应,把生死悬念往前推。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": true, "severity": "高", "evidence_type": "absence",
+     "evidence": "",
+     "note": "上一章钩=矿道尽头提灯人在黑暗里喊破沈砚真名,直指身份暴露的生死悬念(主线强钩)。本章通篇写次日白天矿场里与赵矿头争分成,从头到尾无一句提及提灯、真名、矿道尽头,也无任何人物对那声呼喊的反应、追查或回避——主线强钩零回应,判断钩子。(注:本章另有争分成的爽点,无爽点维度不误伤。)",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}
