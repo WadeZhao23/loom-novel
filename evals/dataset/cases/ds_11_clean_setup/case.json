@@ -1,0 +1,23 @@
+{
+  "id": "ds_11_clean_setup",
+  "split": "calibration",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "construction_note": "本例为压 OOC/断钩误报的干净难负例(calibration)。表面可挑两处,均按 rubric 护栏放行:① 人物 OOC 误报——寡言谨慎、几乎不搭话的沈砚,本章一反常态主动陪笑、巴结、递茶,表面像性格突变;但 context.characters/chapter_goal 已写明这是『谋定后动者刻意接近敌人的伪装』,正文结尾『慢慢收了脸上的笑』亦点破是装的——有动机、有铺垫的破例不算 OOC(rubric OOC 反例),故 present=False。② 断钩误报——prev_hook 是『明日查体质、沈砚排头一个』的生死强钩,本章并未正面化解危机,表面像把钩子悬着;但沈砚正面对该钩作出反应(伪装接近查验官,探清时辰/次序/名册记法),并写明『今夜先探清换岗、明日辰时前动手』的推进意图,埋下『名册按矿道编号排、有可钻空子』的映衬线——有正面回应与推进意图的延迟接钩不判(rubric 断钩边界例),故 present=False。其余六维亦干净:世界观按既定清脉司验查规则(无漂移);沈砚摸清验查流程与名册漏洞,有实质信息增量(非无爽点);情报全部来自现场亲历观察与王主事亲口所言、无越界认知(信息边界干净);无已耗物品复现、无时间粒度冲突;正文为常规网文叙述,无空洞万能词/情绪点名/『不是…而是』翻转句(非 AI 腔)。",
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者一经查实即被清脉司缉为炉鼎;矿场每季由清脉司派主事按名册逐一验体质,名册照矿道编号排,验一个勾一个。",
+    "characters": "沈砚:逆息体质,寡言谨慎,平日几乎不与人攀谈;为躲过查验,他本章刻意反常——放下寡言、主动陪笑巴结,是谋定后动者接近敌人的伪装,非性情突变;王主事:清脉司查验官,好被人捧,嘴上没把门。",
+    "prev_hook": "上一章末:周楠慌慌张张递话『清脉司的王主事明日就到,这季的体质验查,名册上头一个排的就是你』。",
+    "chapter_goal": "延迟接住『明日查体质、沈砚排头一个』的强钩:本章不正面化解查验危机,而让沈砚一反寡言、伪装陪笑接近王主事,探清验查的时辰、次序与名册记法,埋下『名册按矿道编号排、存在可动手脚的空子』这条映衬线,并写明他今夜摸清换岗、明日辰时前动手的推进意图——脱险落到下一章,本章只作铺垫。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

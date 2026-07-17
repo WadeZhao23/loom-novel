@@ -180,13 +180,27 @@ def test_rubric_each_dimension_has_required_parts():
 # ---- Task 3:全数据集校验(一次写好,覆盖本任务与后续所有发货 case) ----
 
 def test_shipped_dataset_all_cases_validate():
-    # 仓库里实际发货的每个 case 都必须过校验器(含证据子串机械核验)
+    # 仓库里实际发货的每个 case 都必须过校验器(含证据子串机械核验)。
+    # Task 5 计划内断言演进:clean 负例加入后,「每例至少 1 维正例」不再成立,
+    # 本测试退回纯 load 遍历(抛错即红);集级平衡由 test_dataset_v1_balance 钉死。
     dirs = discover_cases()
     assert dirs, "evals/dataset/cases 下还没有任何 case"
     for d in dirs:
-        case = load_case(d)                            # 校验失败会抛,即测试红
-        positives = [l for l in case["labels"] if l["present"]]
-        assert positives, f"{case['id']}: v1 正例集每例至少 1 维 present=True(clean 负例在 Task 5 加入后本断言调整)"
-    # 断言演进说明:Task 5 加入 clean 负例时,允许且必须把最后一条断言改为
-    # 「正例数 ≥0 且整集平衡校验移交 balance 测试」——这是计划内的断言演进,
-    # 届时按 Task 5 的 Step 指令改,不算违反「既有断言禁改」。
+        load_case(d)                                   # 逐例过校验器(抛错即红)
+
+
+def test_dataset_v1_balance():
+    cases = [load_case(d) for d in discover_cases()]
+    by_dim_pos = {dim: 0 for dim in DIMENSIONS}
+    clean_cases = 0
+    splits = set()
+    for c in cases:
+        splits.add(c["split"])
+        pos = [l for l in c["labels"] if l["present"]]
+        if not pos:
+            clean_cases += 1
+        for l in pos:
+            by_dim_pos[l["dimension"]] += 1
+    assert all(n >= 1 for n in by_dim_pos.values()), f"每个维度至少 1 个正例:{by_dim_pos}"
+    assert clean_cases >= 2, "至少 2 个干净难负例(压误报)"
+    assert splits == set(SPLITS), f"三个 split 都要非空:{splits}"
