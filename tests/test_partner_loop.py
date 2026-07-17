@@ -87,3 +87,29 @@ def test_empty_text_noop_when_history_exists(project):
     be = ScriptedBackend(["不该被调用"])
     run_turn(project, "", be, emit=lambda e: None, ts="t2")
     assert be.calls == []   # 模型没被调
+
+
+def test_should_cancel_returns_before_any_complete(project):
+    evs, emit = _collect()
+    be = ScriptedBackend(["不该被调用"])
+    run_turn(project, "你好", be, emit=emit, ts="t", should_cancel=lambda: True)
+    assert be.calls == []                       # 顶部即取消,complete 从未调用
+    assert any(e["t"] == "user" for e in evs)   # user 事件在循环前已落(不丢)
+
+
+def test_should_cancel_stops_at_round_boundary(project):
+    evs, emit = _collect()
+    be = ScriptedBackend(["用:看地基"] * 10)     # 不取消会跑满 6 轮工具
+    n = {"i": 0}
+    def sc():
+        n["i"] += 1
+        return n["i"] > 2                        # 前两轮顶放行,第三轮顶取消
+    run_turn(project, "x", be, emit=emit, ts="t", should_cancel=sc)
+    assert len(be.calls) == 2                     # 只跑两轮 complete,第三轮顶提前 return
+
+
+def test_should_cancel_none_is_unchanged(project):
+    evs, emit = _collect()
+    be = ScriptedBackend(["用:看地基"] * 10)
+    run_turn(project, "x", be, emit=emit, ts="t", should_cancel=None)
+    assert sum(1 for e in evs if e["t"] == "tool") <= 6   # 与 test_tool_rounds_capped 一致,行为不变

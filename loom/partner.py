@@ -114,10 +114,15 @@ def _stream_line_relay(sink):
     return on_chunk, flush
 
 
-def run_turn(root, user_text, backend, *, emit, ts) -> None:
+def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
     """一轮:追加 user 事件 → assemble → complete(流式行缓冲) → 解析说话+工具 →
     有工具则执行+回喂再 complete(≤6 次) → 无工具则终结。emit(event) 转发给调用方(P3 的 ndjson)。
-    两轮之间零挂起。ts 由调用方给(无 Date.now)。"""
+    两轮之间零挂起。ts 由调用方给(无 Date.now)。
+
+    should_cancel(可选,spec §10.3):无参可调,返回 True 则在**轮边界**(while 顶)提前
+    return——「停」的落点。正跑的 `backend.complete()` 不在此处中断(不碰 Protocol);取消
+    在下一次 complete 前生效。**只在本地判定,绝不传给 `backend.complete()`**(测试替身/CLI
+    后端签名里没这参数,传了会 TypeError)。默认 None → 行为与加此参数前逐字一致。"""
     root = Path(root)
 
     def _persist(event: dict) -> None:
@@ -150,6 +155,8 @@ def run_turn(root, user_text, backend, *, emit, ts) -> None:
         # 这里传的只是 prompt 层面的护栏开关。
         complete_kwargs["agent_mode"] = True
     while True:
+        if should_cancel is not None and should_cancel():
+            return   # 轮边界取消(spec §10.3):user 事件已落,正跑的 complete 不在此处
         tail = partner_store.read_events(root)
         system, user = partner_context.assemble(root, tail)
         on_chunk, flush = _stream_line_relay(_preview)

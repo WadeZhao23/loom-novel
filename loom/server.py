@@ -707,12 +707,14 @@ def partner_say(b: PartnerSayBody):
     lock = usecases.acquire_partner_lock(root)   # 拿不到 → ProjectBusyError(partner_busy) → 409
 
     q: queue.Queue = queue.Queue()
+    cancel = threading.Event()
 
     def worker():
         ts = time.strftime("%Y%m%d-%H%M%S")
         try:
             cfg = load_config(root)
-            partner.run_turn(root, b.text, get_backend(cfg), emit=q.put, ts=ts)
+            partner.run_turn(root, b.text, get_backend(cfg), emit=q.put, ts=ts,
+                             should_cancel=cancel.is_set)
         except LoomBackendError as e:
             # partner 流信封是 {"t":...,"ts":...}(非 /api/write 的 type-keyed),error 事件跟随;
             # code 透传,前端据此附可操作提示;e.code 为 None 时不出 code 键
@@ -731,11 +733,16 @@ def partner_say(b: PartnerSayBody):
     threading.Thread(target=worker, daemon=True).start()
 
     def stream():
-        while True:
-            ev = q.get()
-            if ev is None:
-                break
-            yield json.dumps(ev, ensure_ascii=False) + "\n"
+        try:
+            while True:
+                ev = q.get()
+                if ev is None:
+                    break
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+        finally:
+            # 客户端断连(前端 abort)→ 生成器被关闭 → 置取消旗,worker 下一轮边界停并放锁。
+            # 正常收尾(哨兵 None break)时 worker 已 return,置旗是无副作用的 no-op(spec §10.3)。
+            cancel.set()
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
 
