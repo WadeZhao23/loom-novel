@@ -1099,6 +1099,13 @@ function handlePartnerEvent(ev) {
 function paintPartnerChat() {
   const card = journeyHost();
   if (!card || !DATA) return;
+  // sticky-bottom(spec §5):重画前量旧容器是否贴底 + 当前位置,重画后据此决定滚动。
+  const oldScroll = card.querySelector(".pc-scroll");
+  let stickBottom = true, prevTop = 0;
+  if (oldScroll) {
+    prevTop = oldScroll.scrollTop;
+    stickBottom = (oldScroll.scrollHeight - oldScroll.scrollTop - oldScroll.clientHeight) < 40;
+  }
   card.innerHTML = "";
 
   const scroll = document.createElement("div");
@@ -1171,7 +1178,8 @@ function paintPartnerChat() {
   newBtn.onclick = partnerNewThread;
   card.appendChild(newBtn);
 
-  scroll.scrollTop = scroll.scrollHeight;
+  // 贴底则跟读到底,否则维持作者停留位置(不被新事件拽走,spec §5)
+  scroll.scrollTop = stickBottom ? scroll.scrollHeight : prevTop;
 }
 
 // 单遍配对扫描(spec §4.2):tool 按【下一事件类型】配对——绝不按工具名,
