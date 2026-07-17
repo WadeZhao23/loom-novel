@@ -38,3 +38,23 @@ def test_detector_contract_fails_when_detector_broke(tmp_path):
     r = harness.run_case(d)
     assert r.contract_ok is False         # 本该命中缺陷的grader却通过=检测器失灵
     assert r.passed is False              # 契约违约 → 该红
+
+
+def test_new_case_not_in_baseline_flagged(tmp_path):
+    base = {"cases": {"old": {"score": 1.0, "passed": True}}}
+    results = [_cr("old", True, 1.0), _cr("new", True, 0.9)]   # new 不在 baseline
+    regs = compare_to_baseline(results, base)
+    assert any(x["case"] == "new" and "未固化" in x["kind"] for x in regs)
+
+
+def test_deleted_baseline_case_flagged(tmp_path):
+    base = {"cases": {"old": {"score": 1.0, "passed": True}, "gone": {"score": 1.0, "passed": True}}}
+    results = [_cr("old", True, 1.0)]                          # gone 从数据集删了
+    regs = compare_to_baseline(results, base)
+    assert any(x["case"] == "gone" and "消失" in x["kind"] for x in regs)
+
+
+def test_no_false_regression_when_matched(tmp_path):
+    base = {"cases": {"old": {"score": 1.0, "passed": True}}}
+    results = [_cr("old", True, 1.0)]
+    assert compare_to_baseline(results, base) == []            # 对齐时零回归

@@ -141,17 +141,22 @@ def load_baseline(path: Path) -> dict | None:
 
 
 def compare_to_baseline(results: list[CaseResult], baseline: dict, tol: float = 0.05) -> list[dict]:
-    """返回回归项:某 case 在基线里通过、现在不通过,或分数比基线低超过 tol。"""
+    """回归项:通过→失败 / 分数下滑超 tol / 新 case 未固化 / baseline case 消失。"""
     base = baseline.get("cases", {})
+    seen = {r.case_id for r in results}
     regressions: list[dict] = []
     for r in results:
         b = base.get(r.case_id)
         if not b:
-            continue  # 新增 case,不算回归
+            regressions.append({"case": r.case_id, "kind": "未固化(新case未进baseline)",
+                                "was": None, "now": r.score})
+            continue
         if b["passed"] and not r.passed:
-            regressions.append({"case": r.case_id, "kind": "通过→失败",
-                                "was": b["score"], "now": r.score})
+            regressions.append({"case": r.case_id, "kind": "通过→失败", "was": b["score"], "now": r.score})
         elif r.score + tol < b["score"]:
-            regressions.append({"case": r.case_id, "kind": f"分数下滑 >{tol}",
-                                "was": b["score"], "now": r.score})
+            regressions.append({"case": r.case_id, "kind": f"分数下滑 >{tol}", "was": b["score"], "now": r.score})
+    for cid in base:
+        if cid not in seen:
+            regressions.append({"case": cid, "kind": "case消失(baseline有现无)",
+                                "was": base[cid]["score"], "now": None})
     return regressions
