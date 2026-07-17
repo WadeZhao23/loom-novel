@@ -1,0 +1,25 @@
+{
+  "id": "ds_05_infoleak",
+  "split": "calibration",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。清脉司缉拿队昨夜在谷口扎营,帐门落锁,重兵把守,外人近不得帐边三丈。逆息体质者一旦被验明,即被锁走充作炉鼎。",
+    "characters": "沈砚:逆息体质,寡言谨慎,吸灵反噬时眼底泛青;此刻困在矿道深处,身边无斥候、无眼线、无任何传讯之法,其体质只带来反噬、并无感知或探听之能。周楠:矿场医师,替沈砚打探消息,但只探得到明面动静。",
+    "prev_hook": "上一章末:周楠钻进矿道,低声报『谷口那队人扎了帐,守得铁桶一样,不知在合计什么』。",
+    "chapter_goal": "接住『不知在合计什么』的疑问钩——两人合计缉拿队动向、定下逃亡准备,把生死悬念往前推。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": true, "severity": "高", "evidence_type": "chapter",
+     "evidence": "明日辰时收网,先拿三号矿道那个眼底泛青的,验明就地锁了。",
+     "note": "注入⑤a款:沈砚整章困在矿道深处(见setting/characters:缉拿队帐在谷口、帐门落锁、外人近不得,沈砚无斥候无眼线无传讯之法,体质只反噬、无感知探听之能),却在对话里一字不差复述此刻锁着的帐内为首者与副手的原话及『明日辰时收网』的密令——知道他物理上不在场、且无任何渠道可获知之事;正文通篇无一句来源交代(无金手指/情报/前世记忆归因),末句『那帐门始终锁着,没人进也没人出』更坐实无渠道。命中⑤a。此为信息边界而非设定漂移:未赋予也未推翻任何既定能力,纯是缺来源的越界知晓,且直接改变本章走向(围绕辰时收网定逃路),故判高。",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

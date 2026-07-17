@@ -1,0 +1,25 @@
+{
+  "id": "ds_06_item",
+  "split": "dev",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。矿场缺医少药。沈砚仅有的一瓶金创药,上一章为救周楠的伤已全数用尽,空瓶随手丢在了塌方的乱石堆里,他身上再无半点伤药。",
+    "characters": "沈砚:逆息体质,寡言谨慎,遇险先护同伴;周楠:矿场医师,与沈砚同陷塌方矿道。",
+    "prev_hook": "上一章末:塌方的余震未停,头顶又一道裂缝渗下细石,沈砚拽着周楠往支撑木下躲。",
+    "chapter_goal": "接住余震避险的钩——两人躲过余震、处理伤口,喘定后合计出路。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": true, "severity": "高", "evidence_type": "chapter",
+     "evidence": "沈砚从怀里掏出那瓶金创药,拧开塞子,倒出一撮",
+     "note": "context.setting 明确沈砚仅有的一瓶金创药已在上一章全数用尽、空瓶丢弃在塌方乱石堆里、身上再无伤药;本章正文却让他从怀里掏出同一瓶金创药、倒药敷伤——已标『耗尽+丢弃』的核心保命物原样复现,且『从怀里掏出』与前情『丢在乱石堆』、『倒出一撮』与前情『全数用尽』直接冲突,正文未交代任何新药来源(非同名不同物)。命中物品状态连续性,违反前情账本明确记录的保命物,判高。",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}
