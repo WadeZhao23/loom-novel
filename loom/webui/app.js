@@ -1111,7 +1111,7 @@ function paintPartnerChat() {
     wait.textContent = "加载对话记录…";
     scroll.appendChild(wait);
   } else {
-    const rendered = (PARTNER.events || []).map(renderPartnerEvent).filter(Boolean);
+    const rendered = renderPartnerEvents(PARTNER.events || []);
     if (!rendered.length && !_partnerBusy) {
       const empty = document.createElement("div");
       empty.className = "pc-empty";
@@ -1122,8 +1122,12 @@ function paintPartnerChat() {
   }
 
   if (_partnerBusy) {
+    // 末尾事件是 tool ⟺ dangling(已被扫描渲染成活动行,它本身即 busy 指示器)——
+    // 此时不再叠通用「伙伴在想…」,免双指示器(spec §4.4)。
+    const evs = (PARTNER && PARTNER.events) || [];
+    const danglingTool = evs.length > 0 && evs[evs.length - 1].t === "tool";
     if (_partnerDelta) scroll.appendChild(pcBubble("assistant", _partnerDelta, true));
-    else {
+    else if (!danglingTool) {
       const think = document.createElement("div");
       think.className = "pc-thinking";
       think.textContent = "伙伴在想…";
@@ -1170,6 +1174,36 @@ function paintPartnerChat() {
   scroll.scrollTop = scroll.scrollHeight;
 }
 
+// 单遍配对扫描(spec §4.2):tool 按【下一事件类型】配对——绝不按工具名,
+// 否则提设定 result(error) 会被当 proposal 渲染成假候选卡(评审 finding #2)。
+// 任何配不到 result/proposal 的 tool 都落 active 或 done,绝不消失(finding #7)。
+function renderPartnerEvents(events) {
+  const out = [];
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev && ev.t === "tool") {
+      const next = events[i + 1];
+      if (next && next.t === "result") {
+        out.push(pcToolResult(ev, next));
+        i++;                                  // 连同 result 一起消费
+        continue;
+      }
+      if (next && next.t === "proposal") {
+        continue;                             // 压掉 tool 行;proposal 下一轮迭代自渲染
+      }
+      if (i === events.length - 1 && _partnerBusy) {
+        out.push(pcToolActive(ev));           // 末尾 + busy → 活动行
+      } else {
+        out.push(pcToolDone(ev));             // 轮末残留 / [tool,error] / 非 busy → 静态 done
+      }
+      continue;
+    }
+    const el = renderPartnerEvent(ev);
+    if (el) out.push(el);
+  }
+  return out;
+}
+
 function renderPartnerEvent(ev) {
   switch (ev && ev.t) {
     // 空 text 的 user 事件(开场触发的 say{text:""})不上屏:防御性处理——服务端理应
@@ -1177,7 +1211,6 @@ function renderPartnerEvent(ev) {
     // 这里的判断天然是 no-op,不会因此显示重复/多余内容。
     case "user": return ev.text && ev.text.trim() ? pcBubble("user", ev.text) : null;
     case "assistant": return pcBubble("assistant", ev.text);
-    case "tool": return pcTool(ev);
     case "result": return pcResult(ev);
     case "proposal": return pcProposal(ev);
     case "error": return pcError(ev);
@@ -1198,16 +1231,6 @@ function pcBubble(role, text, live) {
   wrap.appendChild(av);
   wrap.appendChild(b);
   return wrap;
-}
-
-function pcTool(ev) {
-  const row = document.createElement("div");
-  row.className = "pc-tool";
-  const params = ev.params || {};
-  const paramTxt = Object.keys(params).length
-    ? "(" + Object.entries(params).map(([k, v]) => `${k}:${v}`).join(" · ") + ")" : "";
-  row.textContent = `伙伴查了${ev.name || "工具"}${paramTxt}`;
-  return row;
 }
 
 function pcResult(ev) {
