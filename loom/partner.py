@@ -139,9 +139,12 @@ def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
     user_text = (user_text or "").strip()
     if not user_text:
         # spec §2 开场幂等(第二道保险,前端 _partnerAutoOpened 是第一道):空 text 绝不
-        # 落一条永久空 user 事件——真开场(jsonl 尚无事件)仍要往下跑,让伙伴开场发言;
-        # 已有事件时说明是重复触发(前端保险失效或竞态),按 no-op 早退,不调模型。
-        if partner_store.read_events(root):
+        # 落一条永久空 user 事件——真开场(jsonl 尚无事件)仍要往下跑,让伙伴开场发言。
+        # bug4下一步:落盘后(末事件=confirm)的空 text 是「自动引下一格」,放行让领航员接着
+        # 按固定顺序引导(不落假 user 气泡);其余「已有事件」的空 text 才是重复触发 → no-op。
+        events = partner_store.read_events(root)
+        last = events[-1] if events else None
+        if events and not (last and last.get("t") == "confirm"):
             return
     else:
         _persist({"t": "user", "text": user_text})

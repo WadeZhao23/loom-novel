@@ -89,6 +89,19 @@ def test_empty_text_noop_when_history_exists(project):
     assert be.calls == []   # 模型没被调
 
 
+def test_empty_text_advances_after_confirm(project):
+    # bug4下一步:落盘(confirm)后空 text 放行,领航员自动引下一格(不再 no-op、不需假user气泡)
+    from loom import partner_store as ps
+    ps.append_event(project, {"t": "user", "ts": "t0", "text": "定题材"})
+    ps.append_event(project, {"t": "confirm", "ts": "t1", "id": "p1", "landed": "外置大脑/立项卡.md"})
+    evs, emit = _collect()
+    be = ScriptedBackend(["好,题材定了,接下来定世界观?"])
+    run_turn(project, "", be, emit=emit, ts="t2")
+    assert be.calls                                    # 模型被调了(没 no-op)
+    assert any(e["t"] == "assistant" for e in evs)     # 领航员接着说了下一步
+    assert not any(e["t"] == "user" for e in evs)      # 空 text 不落假 user 事件
+
+
 def test_should_cancel_returns_before_any_complete(project):
     evs, emit = _collect()
     be = ScriptedBackend(["不该被调用"])

@@ -801,14 +801,8 @@ function paintNavCenterChrome() {
   const gist = missing.length ? `距开写还差 ${missing.length} 项:${missing.join("、")}` : "地基快齐了";
   // 副标题带上「现在这段要定什么」——立项/世界观等的具体指示,别让用户对着空题干瞪眼
   $("nav-center-sub").textContent = cur && cur.hint ? `${gist} · 现在定「${cur.key}」:${cur.hint}` : gist;
-  const strip = $("nav-center-strip"); strip.innerHTML = "";
-  ((JOURNEY && JOURNEY.stages) || []).forEach((s) => {
-    const seg = document.createElement("span");
-    seg.className = "ns-seg" + (s.done ? " done" : "") + (JOURNEY && s.key === JOURNEY.current ? " next" : "");
-    seg.textContent = (s.done ? "✓ " : s.skipped ? "– " : "○ ") + s.key;
-    seg.onclick = () => postJourneyGoto(s.key, false);
-    strip.appendChild(seg);
-  });
+  // bug3:撤掉分段进度条(✓立项 ○世界观…)——对话式领航员自会按固定顺序引导,分段 chip 是老卡机遗留、无必要
+  const strip = $("nav-center-strip"); strip.innerHTML = ""; strip.classList.add("hidden");
 }
 
 // 球未读点:有值就说明球浮层里有条领航员想说的话
@@ -1457,6 +1451,9 @@ async function partnerConfirm(id, btnEl) {
     paintJourney();
     if (navMode() === "center") paintNavCenterChrome();
     refresh();
+    // bug4下一步:落盘后自动接一轮,领航员按固定顺序引下一格(空 text→后端见末事件=confirm 放行,
+    // 不落假 user 气泡)。不 await:确认路径立即返回,引导轮自行流式上屏。
+    if (!_partnerBusy) partnerSay("");
   } catch (e) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
