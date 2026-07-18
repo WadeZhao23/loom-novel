@@ -38,21 +38,9 @@ function navMode() {
 function journeyHost() {
   return navMode() === "center" ? $("nav-center-card") : $("nav-pop-card");
 }
-// 对话 UI / 老版问答卡切换(本机偏好,不跨书):默认走对话,留一条路退回卡片机自查。
-function partnerUiMode() {
-  return localStorage.getItem("loom_partner_ui") === "card" ? "card" : "chat";
-}
-function togglePartnerUiMode() {
-  localStorage.setItem("loom_partner_ui", partnerUiMode() === "chat" ? "card" : "chat");
-  paintModeToggleLabel();
-  if (partnerUiMode() === "chat") loadPartnerPanel(); else paintJourney();
-}
-function paintModeToggleLabel() {
-  const label = partnerUiMode() === "chat" ? "老版问答卡" : "回到对话";
-  const a = $("nav-mode-toggle"), b = $("nav-pop-mode-toggle");
-  if (a) a.textContent = label;
-  if (b) b.textContent = label;
-}
+// 对话式是伙伴面板的唯一形态(老版问答卡已下线,不再提供切回入口)——恒返回 chat,
+// 哪怕旧 localStorage 残留 "card" 也忽略,免把用户困在没有出口的卡片机里。
+function partnerUiMode() { return "chat"; }
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -279,9 +267,6 @@ function bind() {
   $("diag-cancel").onclick = () => $("diagnose-overlay").classList.add("hidden");
   $("nav-ball").onclick = () => { _navPopOpen = !_navPopOpen; renderJourney(); if (_navPopOpen) paintNavPopList(); };
   $("nav-browse").onclick = () => { _navYield = true; renderJourney(); };
-  $("nav-mode-toggle").onclick = togglePartnerUiMode;
-  $("nav-pop-mode-toggle").onclick = togglePartnerUiMode;
-  paintModeToggleLabel();
 
   // 编辑器:实时字数 + 自动保存 + 搜索联动 + 输入退场
   $("editor").addEventListener("input", () => {
