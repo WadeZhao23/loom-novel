@@ -104,6 +104,19 @@ def test_multi_tishe_emits_multiple_proposals(project):
     assert kinds.index("assistant") < kinds.index("proposal")    # 引子在卡之前(顺序正)
 
 
+def test_orphan_kv_from_botched_block_not_leaked(project):
+    # FB-B审(#1):名字打错的「用:」块【带参数】、排在真工具前 → 孤儿参数行绝不许漏进 assistant(spec §5.2)
+    evs, emit = _collect()
+    be = ScriptedBackend([
+        "引子\n用:提XX\n落点:外置大脑/立项卡.md#题材\n内容:玄幻\n"
+        "用:提设定\n落点:外置大脑/立项卡.md#题材\n内容:玄幻修仙",
+        "好了"])
+    run_turn(project, "x", be, emit=emit, ts="t")
+    for e in evs:
+        if e["t"] == "assistant":
+            assert "落点:" not in e["text"] and "内容:" not in e["text"]   # 孤儿参数不漏到作者屏
+
+
 def test_multi_tools_capped_per_message(project):
     # 一条消息里超过 3 个「提设定」→ 只执行前 3(护栏防刷屏)
     evs, emit = _collect()

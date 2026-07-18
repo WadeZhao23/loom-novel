@@ -24,7 +24,7 @@ import inspect
 from pathlib import Path
 
 from . import journey, partner_context, partner_store, partner_tools
-from .parse import _TOOL_USE_RE, parse_tool_blocks
+from .parse import _TOOL_KV_RE, _TOOL_USE_RE, parse_tool_blocks
 
 _MAX_TOOL_ROUNDS = 6   # 每轮工具调用上限(spec §4 常量表:每轮工具调用 ≤6 次)
 _MAX_TOOL_FAIL_STREAK = 2   # 连续「解析失败」(botched 工具调用)上限(spec §5.2)
@@ -72,13 +72,23 @@ def _strip_protocol_lines(text: str) -> tuple[str, bool]:
 
     返回 `(过滤后文本, 是否剥掉过至少一行)`:后者是「模型想调工具但名字没认出来」的判据,
     供调用方决定要不要走「解析失败回喂」(spec §5.2)。
+
+    FB-B审(#1):剥掉一个「用:」行后,还要连它下面**紧跟的 `键:值` 参数行**一起剥——否则
+    名字打错的块(带参数、排在真工具前)的孤儿参数行(`落点:…`/`内容:…`)会漏进作者屏幕。
+    参数块到 空行 / 非kv行 / 下一个「用:」行 止(与 parse_tool_blocks 的块终止规则同口径)。
     """
     kept: list[str] = []
     dropped = False
+    skipping_params = False   # 刚剥了一个「用:」行 → 连它的参数行一起剥
     for line in text.splitlines():
         if _TOOL_USE_RE.match(line):
             dropped = True
+            skipping_params = True
             continue
+        if skipping_params:
+            if line.strip() and _TOOL_KV_RE.match(line):
+                continue          # 仍是被剥块的参数行 → 丢弃
+            skipping_params = False   # 空行/非kv行:参数块到此为止,本行是真内容,正常保留
         kept.append(line)
     return "\n".join(kept).strip(), dropped
 
