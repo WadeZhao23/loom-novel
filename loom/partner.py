@@ -24,10 +24,11 @@ import inspect
 from pathlib import Path
 
 from . import journey, partner_context, partner_store, partner_tools
-from .parse import _TOOL_USE_RE, parse_tool_block
+from .parse import _TOOL_USE_RE, parse_tool_blocks
 
 _MAX_TOOL_ROUNDS = 6   # 每轮工具调用上限(spec §4 常量表:每轮工具调用 ≤6 次)
 _MAX_TOOL_FAIL_STREAK = 2   # 连续「解析失败」(botched 工具调用)上限(spec §5.2)
+_MAX_TOOLS_PER_MSG = 3   # FB-B:一条消息里最多执行几个「用:」块(多候选护栏,防刷屏)
 
 
 def _accepts_agent_mode(backend) -> bool:
@@ -166,22 +167,26 @@ def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
         raw = backend.complete(system, user, on_chunk=on_chunk, **complete_kwargs)
         flush()
 
-        say, tool = parse_tool_block(raw, valid_names=set(partner_tools.REGISTRY))
+        say, tools = parse_tool_blocks(raw, valid_names=set(partner_tools.REGISTRY))
         # critical(spec §5.2):say 里可能混入未被选中的「用:」协议行(工具名瞎编、或
         # 误触发块排在真工具前)——落盘/emit 前必须过滤掉,绝不许漏到作者屏幕。
         say, botched = _strip_protocol_lines(say)
         if say:
             _persist({"t": "assistant", "text": say})
 
-        if tool is not None:
+        if tools:
+            # FB-B 多候选:一条消息可连发多个「用:提设定」,逐个执行、各 emit 一张卡(引子 say
+            # 已在上面先落,故顺序=话在前、卡在后)。超 _MAX_TOOLS_PER_MSG 截断防刷屏;
+            # 每个工具计入 tool_rounds,撞 _MAX_TOOL_ROUNDS 立即收尾(总量上界不变)。
             tool_fail_count = 0
-            tool_rounds += 1
-            _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
-            result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
-                                                ts=f"{ts}-{tool_rounds}")
-            _persist(result_ev)
-            if tool_rounds >= _MAX_TOOL_ROUNDS:
-                return
+            for tool in tools[:_MAX_TOOLS_PER_MSG]:
+                tool_rounds += 1
+                _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
+                result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
+                                                    ts=f"{ts}-{tool_rounds}")
+                _persist(result_ev)
+                if tool_rounds >= _MAX_TOOL_ROUNDS:
+                    return
             continue
 
         if say:

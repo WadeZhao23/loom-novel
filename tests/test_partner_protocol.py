@@ -1,4 +1,33 @@
-from loom.parse import parse_tool_block
+from loom.parse import parse_tool_block, parse_tool_blocks
+
+
+def test_multi_blocks_two_proposals():
+    # FB-B:一条消息连发两个「提设定」→ 解析出两个工具(各自 params 到下一个用:止),say=引子
+    say, tools = parse_tool_blocks(
+        "我给你两个方向:\n\n用:提设定\n落点:立项卡#分区\n内容:玄幻\n\n用:提设定\n落点:立项卡#分区\n内容:都市",
+        valid_names={"提设定"})
+    assert say == "我给你两个方向:"
+    assert [t["params"]["内容"] for t in tools] == ["玄幻", "都市"]
+
+
+def test_multi_blocks_next_用_terminates_params():
+    # 第二个「用:」行必须终止前一块的 params(否则被 _TOOL_KV_RE 当 用=提设定 吞掉)
+    say, tools = parse_tool_blocks("用:提设定\n落点:a\n用:提设定\n落点:b", valid_names={"提设定"})
+    assert len(tools) == 2
+    assert tools[0]["params"] == {"落点": "a"} and "用" not in tools[0]["params"]
+    assert tools[1]["params"] == {"落点": "b"}
+
+
+def test_multi_blocks_filters_invalid_names():
+    # 名字不在注册表的「用:」块不算,只收有效块
+    _, tools = parse_tool_blocks("用:瞎编\n\n用:看地基", valid_names={"看地基", "提设定"})
+    assert [t["name"] for t in tools] == ["看地基"]
+
+
+def test_singular_wrapper_returns_first():
+    # 薄兼容层:parse_tool_block 仍返回第一个(既有调用点/测试不受影响)
+    _, tool = parse_tool_block("用:提设定\n落点:a\n\n用:提设定\n落点:b", valid_names={"提设定"})
+    assert tool == {"name": "提设定", "params": {"落点": "a"}}
 
 
 def test_speech_only():

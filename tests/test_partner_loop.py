@@ -89,6 +89,30 @@ def test_empty_text_noop_when_history_exists(project):
     assert be.calls == []   # 模型没被调
 
 
+def test_multi_tishe_emits_multiple_proposals(project):
+    # FB-B:一条消息连发多个「提设定」→ 一轮内 emit 多张 proposal(唯一 id),引子(say)在卡前
+    evs, emit = _collect()
+    be = ScriptedBackend([
+        "我给你两个方向挑:\n用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:玄幻\n"
+        "用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:都市",
+        "两个方向都提了,你挑一个。"])
+    run_turn(project, "定分区", be, emit=emit, ts="t")
+    proposals = [e for e in evs if e["t"] == "proposal"]
+    assert [p["content"] for p in proposals] == ["玄幻", "都市"]   # 两张卡都出
+    assert proposals[0]["id"] != proposals[1]["id"]               # 唯一 id
+    kinds = [e["t"] for e in evs]
+    assert kinds.index("assistant") < kinds.index("proposal")    # 引子在卡之前(顺序正)
+
+
+def test_multi_tools_capped_per_message(project):
+    # 一条消息里超过 3 个「提设定」→ 只执行前 3(护栏防刷屏)
+    evs, emit = _collect()
+    blocks = "\n".join(f"用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:方向{i}" for i in range(5))
+    be = ScriptedBackend(["给你几个:\n" + blocks, "提完了。"])
+    run_turn(project, "x", be, emit=emit, ts="t")
+    assert len([e for e in evs if e["t"] == "proposal"]) == 3     # ≤3 卡/消息
+
+
 def test_empty_text_advances_after_confirm(project):
     # bug4下一步:落盘(confirm)后空 text 放行,领航员自动引下一格(不再 no-op、不需假user气泡)
     from loom import partner_store as ps

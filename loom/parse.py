@@ -230,35 +230,43 @@ _TOOL_USE_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*用[*_\s]*[:：]\s*(\S.
 _TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
 
 
-def parse_tool_block(text: str, valid_names: set[str] | None = None) -> tuple[str, dict | None]:
-    """(说话段, 工具调用 | None)。工具调用 = {"name": str, "params": {键:值}}。
+def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[str, list[dict]]:
+    """(说话段, [工具调用...])。工具调用 = {"name": str, "params": {键:值}}。FB-B 多候选:
+    一条消息里可连发多个「用:」块,逐块解析成一个工具(领航员想给作者几个方向挑时用)。
 
-    `valid_names` 不给(默认):认第一个「用:」块,不校验名字(向后兼容旧调用点)。
-    `valid_names` 给了:扫描全文所有「用:」块,取第一个「名字 ∈ valid_names」的块;
-    名字不认识的「用:」行不算工具触发,当普通文本留在说话段里——防中文里孤立的
-    「用:xxx」说话句(名字不在注册表)被误判成工具、连带把它后面真正的工具调用当
-    尾巴静默丢弃。选中块之后的尾巴文字丢弃(设计如此)。协议行不进说话段。
+    `valid_names` 不给(默认):收全文所有「用:」块;给了:只收「名字 ∈ valid_names」的块——
+    名字不认识的「用:」行不算触发,当普通文本(防中文里孤立的「用:xxx」说话句被误判)。
+    每块 params 从块行下一行起,到 **空行 / 非kv行 / 下一个「用:」触发行** 止(下一个触发行
+    必须终止上一块,否则 `用:提设定` 会被 `_TOOL_KV_RE` 当成 `用=提设定` 吞进 params)。
+    say=第一个【有效】块之前的文本;有效块之间/之后的散文丢弃(协议行由调用方 _strip 清)。
     """
     lines = text.splitlines()
-    blocks: list[tuple[int, str]] = []
+    triggers: list[tuple[int, str]] = []          # 所有「用:」行(有效+无效)
     for i, l in enumerate(lines):
         m = _TOOL_USE_RE.match(l)
         if m:
-            blocks.append((i, m.group(1).strip(" *_").strip()))
-    if valid_names is None:
-        picked = blocks[0] if blocks else None
-    else:
-        picked = next((b for b in blocks if b[1] in valid_names), None)
-    if picked is None:
-        return text.strip(), None
-    ui, name = picked
-    params: dict = {}
-    for l in lines[ui + 1:]:
-        if not l.strip():
-            break            # 空行终止本块
-        m = _TOOL_KV_RE.match(l)
-        if not m:
-            break
-        params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
-    say = "\n".join(lines[:ui]).strip()
-    return say, {"name": name, "params": params}
+            triggers.append((i, m.group(1).strip(" *_").strip()))
+    valid = [(i, n) for (i, n) in triggers if valid_names is None or n in valid_names]
+    if not valid:
+        return text.strip(), []
+    trigger_lines = {i for (i, _) in triggers}    # 任一「用:」行都终止上一块的 params
+    say = "\n".join(lines[:valid[0][0]]).strip()
+    tools: list[dict] = []
+    for (ui, name) in valid:
+        params: dict = {}
+        for j in range(ui + 1, len(lines)):
+            if not lines[j].strip() or j in trigger_lines:
+                break                              # 空行 / 撞到下一个「用:」块 → 本块 params 止
+            m = _TOOL_KV_RE.match(lines[j])
+            if not m:
+                break
+            params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
+        tools.append({"name": name, "params": params})
+    return say, tools
+
+
+def parse_tool_block(text: str, valid_names: set[str] | None = None) -> tuple[str, dict | None]:
+    """(说话段, 第一个工具调用 | None)。`parse_tool_blocks` 的薄兼容层——既有单工具调用点
+    (流式预览裁剪、旧测试)不受 FB-B 多候选影响;多块场景走 `parse_tool_blocks`。"""
+    say, tools = parse_tool_blocks(text, valid_names)
+    return say, (tools[0] if tools else None)
