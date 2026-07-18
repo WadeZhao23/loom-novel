@@ -33,7 +33,9 @@ def test_tishe_before_empty_for_placeholder_slot(project):
 
 def test_tishe_captures_before_preview(project):
     # 提设定产 proposal 时带 before=落点当前 preview(快照守卫用它比对手改);
-    # 立项卡「平台」骨架落点默认值是「起点」,line 型 preview 不饱和,能原样比对。
+    # line 型 preview 不饱和,能原样比对。FB-平台后模板不预填,这里显式填平台=起点验 line 型 before。
+    card = project / "外置大脑/立项卡.md"
+    card.write_text(card.read_text(encoding="utf-8").replace("平台:\n", "平台:起点\n", 1), encoding="utf-8")
     ev = pt.run_tool(project, "提设定", {"落点": "外置大脑/立项卡.md#平台", "内容": "番茄"}, ts="t")
     assert ev["t"] == "proposal"
     assert ev["before"] == "起点"

@@ -20,9 +20,10 @@ from loom.slots import stage_slots, Slot
 def test_project_stage_slots_line_and_h2(project):
     slots = stage_slots(project, _stage_spec("立项"))
     d = {s.key: s for s in slots}
-    assert d["平台"].at == "line" and d["平台"].filled is True       # 模板预填「起点」
+    assert d["平台"].at == "line" and d["平台"].filled is False      # FB-平台:建书不再预填平台
     assert d["题材"].at == "h2" and d["题材"].filled is False        # 占位不算实质
     assert d["题材"].container == "外置大脑/立项卡.md"
+    assert slots[-1].key == "平台"                                   # FB-平台:平台降级到立项最后一格(可选可跳)
 
 
 def test_project_h2_slots_have_real_hints(project):

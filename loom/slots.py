@@ -76,14 +76,16 @@ def _project_slots(root: Path) -> list[Slot]:
     p = root / rel
     text = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
     out: list[Slot] = []
-    pm = _PLATFORM_RE.search(text)
-    plat_val = pm.group(1).strip() if pm else ""
-    out.append(Slot(id=f"{rel}#平台", label="平台", container=rel, at="line", key="平台",
-                    hint="发哪个平台", filled=bool(plat_val), preview=_preview(plat_val)))
     for f in _CARD_FIELDS:
         body = _h2_body(text, f)
         out.append(Slot(id=f"{rel}#{f}", label=f, container=rel, at="h2", key=f,
                         hint=_CARD_FIELD_HINTS.get(f, ""), filled=is_substantive(body), preview=_preview(body)))
+    # 平台挪到立项最后一格(FB-平台):建书不再逼选/预填平台,领航员先聊分区/题材/对标(创作的),
+    # 平台留最后、可选可跳(它只影响违禁词自检松紧,非阻断;作者不填就用默认档)。
+    pm = _PLATFORM_RE.search(text)
+    plat_val = pm.group(1).strip() if pm else ""
+    out.append(Slot(id=f"{rel}#平台", label="平台", container=rel, at="line", key="平台",
+                    hint="发哪个平台(可选)", filled=bool(plat_val), preview=_preview(plat_val)))
     return out
 
 

@@ -364,7 +364,7 @@ async function createProject() {
   try {
     const d = await jreq("POST", "/api/project/create",
       { name, parent: $("new-parent").value.trim(), genre: $("new-genre").value || null,
-        idea, platform: $("new-platform").value || "" });
+        idea });   // FB-平台:建书不再选平台(平台降级为立项里可选可跳的最后一格);server 端 platform 默认空
     $("create-overlay").classList.add("hidden");
     enterProject(d);
     // 填了设定=明确意图:模型就绪就直接铺底稿(仅建书这一次;draftBrain 自带就绪检查与 toast)

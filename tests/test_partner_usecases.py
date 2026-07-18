@@ -69,9 +69,10 @@ def test_confirm_rejects_when_row_slot_changed_since_proposal(project):
     # row/line 型落点(平台行):proposal 之后作者手改了这一格 → confirm 必须拒绝(stale),
     # 不覆盖手改。平台的值短(几个字),不会撞上 preview 24 字的饱和上限,能被快照守卫检测到。
     slot_id = "外置大脑/立项卡.md#平台"
+    p = project / "外置大脑/立项卡.md"   # FB-平台后模板不预填,显式填平台=起点验 line 型 stale 守卫
+    p.write_text(p.read_text(encoding="utf-8").replace("平台:\n", "平台:起点\n", 1), encoding="utf-8")
     ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "p1",
                                "slot": slot_id, "content": "番茄", "before": "起点"})
-    p = project / "外置大脑/立项卡.md"
     p.write_text(p.read_text(encoding="utf-8").replace("平台:起点", "平台:七猫"), encoding="utf-8")
     out = usecases.partner_confirm(project, "p1", ts="t2")
     assert out == {"error": "这一格刚改过,我重新看看再给你提", "stale": True}
@@ -92,6 +93,8 @@ def test_confirm_idempotent_still_first(project):
     # 快照守卫不破坏现有幂等:confirm 事件先拦,即便落盘后该格 preview 已经不等于 before
     # (落盘本身就会让 before 过期),第二次 confirm 仍走幂等分支返已落盘结果,不误判 stale。
     slot_id = "外置大脑/立项卡.md#平台"
+    p = project / "外置大脑/立项卡.md"   # FB-平台后模板不预填,显式填平台=起点(before=起点 才对得上)
+    p.write_text(p.read_text(encoding="utf-8").replace("平台:\n", "平台:起点\n", 1), encoding="utf-8")
     ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "p1",
                                "slot": slot_id, "content": "番茄", "before": "起点"})
     out1 = usecases.partner_confirm(project, "p1", ts="t2")
