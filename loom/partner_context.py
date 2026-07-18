@@ -118,12 +118,16 @@ def _render_event(ev: dict) -> str:
         return f"你:{ev.get('text', '')}"
     if t == "tool":
         params = ev.get("params") or {}
-        args = "、".join(f"{k}:{v}" for k, v in params.items())
-        return f"[调用工具]{ev.get('name', '')}" + (f"({args})" if args else "")
+        # 不渲成「[调用工具]名(键:值)」——那正是 persona 禁止模型写的形状,历史里却这么显示,
+        # 模型会照抄它当协议(真机实测:漏出「[调用工具]提设定(…)」裸文字、根本不出卡)。改过去时
+        # 叙述,读类工具带上路径供上下文;真正的协议只有 `用:工具名` 那一种,历史里绝不示范它。
+        hint = f"(读了 {params['路径']})" if params.get("路径") else ""
+        return f"(我调用了工具「{ev.get('name', '')}」{hint})"
     if t == "result":
         return f"[工具结果]{ev.get('text') or ev.get('error', '')}"
     if t == "proposal":
-        return f"[候选卡 {ev.get('id', '')}]{ev.get('slot', '')} → {ev.get('content', '')}"
+        # 明确「已提、已在作者界面、等他拍板」,不给可照抄的协议形状——防重提、防照抄
+        return f"(我已提候选卡:{ev.get('slot', '')} → {ev.get('content', '')};已显示给作者、等他拍板)"
     if t == "confirm":
         return f"[已拍板]{ev.get('id', '')}"
     if t == "summary":
