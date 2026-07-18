@@ -400,11 +400,15 @@ def partner_history(root: Path | str, *, tail: int | None = None) -> dict:
 
 
 def _slot_preview(root: Path, slot_id: str) -> str | None:
-    """现扫 stage_slots 取 slot_id 当前 preview;槽已不存在(改名/删除)返回 None。"""
+    """现扫 stage_slots 取 slot_id 当前 preview;槽已不存在(改名/删除)返回 None。
+
+    占位模板算「空」("" 非 None):与 partner_tools._handle_tishe 的 before 同口径(filled
+    门)——否则占位落点的 before="" 会和这里的 current(占位preview)对不上,误判 stale。
+    "" = 存在但无实质内容;None = 槽已消失,两者语义不同(guard 分别处理)。"""
     for spec in journey_mod.STAGES:
         found = next((s for s in slots_mod.stage_slots(root, spec) if s.id == slot_id), None)
         if found is not None:
-            return found.preview
+            return found.preview if found.filled else ""
     return None
 
 

@@ -24,6 +24,13 @@ def test_tishe_produces_proposal(project):
     assert ev["t"] == "proposal" and ev["id"] and ev["slot"].endswith("题材")
 
 
+def test_tishe_before_empty_for_placeholder_slot(project):
+    # bug4:占位符不算已有值 → before 空 → 卡按钮「就这么定」不是「替换」、不显「现在是:占位」
+    ev = pt.run_tool(project, "提设定", {"落点": "外置大脑/立项卡.md#题材", "内容": "重生复仇流"}, ts="t")
+    assert ev["t"] == "proposal"
+    assert ev["before"] == ""   # 题材是占位模板(非实质)→ before 空
+
+
 def test_tishe_captures_before_preview(project):
     # 提设定产 proposal 时带 before=落点当前 preview(快照守卫用它比对手改);
     # 立项卡「平台」骨架落点默认值是「起点」,line 型 preview 不饱和,能原样比对。

@@ -138,7 +138,10 @@ def _handle_tishe(root: Path, 落点: str = "", 内容: str = "") -> dict:
     for spec in journey.STAGES:
         found = next((s for s in slots.stage_slots(root, spec) if s.id == slot), None)
         if found is not None:
-            before = found.preview
+            # bug4:占位模板不算「已有值」——只有实质内容(filled)才算 before。占位当 before
+            # 会让候选卡显「现在是:(占位示例…)」+ 按钮变「替换」(误导)。必须与 usecases.
+            # _slot_preview 的 filled 门同口径,否则 confirm 时 current!=before 误判 stale。
+            before = found.preview if found.filled else ""
             break
     return {"slot": slot, "content": content, "before": before}
 

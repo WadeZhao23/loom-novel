@@ -126,6 +126,16 @@ def test_partner_history_tail_limits(project):
     assert [e["text"] for e in out["events"]] == ["m3", "m4"]
 
 
+def test_confirm_placeholder_before_empty_not_stale(project):
+    # bug4 连带:占位落点 before="" 与 confirm 时 current="" 必须一致,否则误判 stale 拒绝落盘
+    ps.append_event(project, {"t": "proposal", "ts": "t1", "id": "pph",
+                              "slot": "外置大脑/立项卡.md#题材", "content": "重生复仇流", "before": ""})
+    out = usecases.partner_confirm(project, "pph", ts="t2")
+    assert "error" not in out and out.get("landed")   # 正常落盘,不误判 stale
+    assert "题材:重生复仇流" in (project / "外置大脑/立项卡.md").read_text(encoding="utf-8") \
+        or "重生复仇流" in (project / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+
+
 def test_partner_new_blocked_while_partner_lock_held(project):
     import pytest
     # 模拟 say worker 正持轮锁(「停」之后 worker 尚在收尾的窗口)
