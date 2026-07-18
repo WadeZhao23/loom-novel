@@ -30,6 +30,27 @@ def test_singular_wrapper_returns_first():
     assert tool == {"name": "提设定", "params": {"落点": "a"}}
 
 
+def test_parenthesized_trigger_still_parsed():
+    # 真机:模型把 用:提设定 包进括号「(用:提设定)」(照抄历史叙述的括号壳)——parser 必须认,否则漏字不出卡
+    _, tools = parse_tool_blocks(
+        "好,给你:\n(用:提设定)\n落点:外置大脑/立项卡.md#分区\n内容:玄幻", valid_names={"提设定"})
+    assert [t["name"] for t in tools] == ["提设定"]
+    assert tools[0]["params"]["内容"] == "玄幻"
+
+
+def test_bracketed_trigger_still_parsed():
+    # 方括号/全角括号壳一样认
+    _, t1 = parse_tool_blocks("【用:看地基】", valid_names={"看地基"})
+    _, t2 = parse_tool_blocks("（用:看地基）", valid_names={"看地基"})
+    assert [t["name"] for t in t1] == ["看地基"] and [t["name"] for t in t2] == ["看地基"]
+
+
+def test_non_trigger_paren_prose_not_matched():
+    # 「(用不着提设定)」这类散文不是触发(用后面不是冒号)——别误吞
+    _, tools = parse_tool_blocks("(用不着提设定)吧", valid_names={"提设定", "看地基"})
+    assert tools == []
+
+
 def test_speech_only():
     say, tool = parse_tool_block("我觉得这本书的金手指可以走系统流。")
     assert say == "我觉得这本书的金手指可以走系统流。"
