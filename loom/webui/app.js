@@ -1130,7 +1130,12 @@ function paintPartnerChat() {
     else if (!danglingTool) {
       const think = document.createElement("div");
       think.className = "pc-thinking";
-      think.textContent = "伙伴在想…";
+      // 「曌」加载图标:日(实心)+ 月(空心环)绕中心轮转——日月当空,时光流转=在思考。currentColor 随主题。
+      think.innerHTML = '<svg class="pc-zhao" viewBox="0 0 24 24" aria-hidden="true">'
+        + '<g class="pc-zhao-spin">'
+        + '<circle cx="12" cy="4.6" r="3" fill="currentColor"/>'
+        + '<circle cx="12" cy="19.4" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+        + '</g></svg><span>伙伴在想…</span>';
       scroll.appendChild(think);
     }
   }
