@@ -117,6 +117,19 @@ def test_orphan_kv_from_botched_block_not_leaked(project):
             assert "落点:" not in e["text"] and "内容:" not in e["text"]   # 孤儿参数不漏到作者屏
 
 
+def test_turn_ends_after_proposals_no_recomplete(project):
+    # 真机实测根因:提了候选卡就交给作者拍板、本轮终结,不再 re-complete——否则模型会在下一轮
+    # 「二次质疑格式、重提同样的卡」,产生重复候选卡(真 DeepSeek 实测:3 张变 6 张)。
+    evs, emit = _collect()
+    be = ScriptedBackend([
+        "我给你两个方向:\n用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:玄幻\n"
+        "用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:都市",
+        "不该被调用——提了卡就该终结,别重提"])
+    run_turn(project, "定分区", be, emit=emit, ts="t")
+    assert len(be.calls) == 1                                     # 只 complete 一次(提完卡即终结,不重来)
+    assert len([e for e in evs if e["t"] == "proposal"]) == 2    # 两张卡,不重复
+
+
 def test_multi_tools_capped_per_message(project):
     # 一条消息里超过 3 个「提设定」→ 只执行前 3(护栏防刷屏)
     evs, emit = _collect()

@@ -49,10 +49,11 @@ def test_demo_partner_proposes_slot_candidate_on_third_turn(project):
     assert proposal_ev["slot"] == "外置大脑/立项卡.md#题材"
     assert "(demo" in proposal_ev["content"]
 
-    # 提设定是 mutates 工具、不终结本轮:demo 紧接着回喂再 complete 一次收尾,
-    # 一次 run_turn 调用里应看到两条 assistant(候选卡说明 + 收尾)。
+    # 提设定=交给作者拍板,提完卡本轮即终结、不再 re-complete(persona 调优:真机实测重新
+    # complete 会让模型二次质疑、重提重复卡)。故一次 run_turn 里只有一条 assistant(候选卡说明),
+    # 没有「收尾」那条。
     assistant_texts = [e["text"] for e in evs if e["t"] == "assistant"]
-    assert len(assistant_texts) == 2
+    assert len(assistant_texts) == 1
     assert all("(demo)" in t for t in assistant_texts)
 
 

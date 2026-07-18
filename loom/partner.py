@@ -189,14 +189,23 @@ def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
             # 已在上面先落,故顺序=话在前、卡在后)。超 _MAX_TOOLS_PER_MSG 截断防刷屏;
             # 每个工具计入 tool_rounds,撞 _MAX_TOOL_ROUNDS 立即收尾(总量上界不变)。
             tool_fail_count = 0
+            emitted_proposal = False
             for tool in tools[:_MAX_TOOLS_PER_MSG]:
                 tool_rounds += 1
                 _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
                 result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
                                                     ts=f"{ts}-{tool_rounds}")
                 _persist(result_ev)
+                if result_ev.get("t") == "proposal":
+                    emitted_proposal = True
                 if tool_rounds >= _MAX_TOOL_ROUNDS:
                     return
+            if emitted_proposal:
+                # 提了候选卡=交给作者拍板,本轮到此终结,不再 re-complete。真机实测:若继续
+                # 重新 complete,模型会「二次质疑自己的格式、重提同样的卡」→ 重复候选卡(3→6)。
+                # 读类工具(看地基/读文件)出的是 result 不是 proposal,不触发终结,仍 continue
+                # 让模型据结果继续(如看完地基再提设定)。
+                return
             continue
 
         if say:
