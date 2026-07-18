@@ -1372,6 +1372,16 @@ function pcProposal(ev) {
     return card;
   }
 
+  // FB-B 模型A:这一格已被同轮兄弟候选落盘 → 本卡变灰、不留死键(点了必撞 stale「这一格刚改过」)
+  if (slotTakenBySibling(ev)) {
+    card.classList.add("pc-proposal-moot");
+    const moot = document.createElement("div");
+    moot.className = "pc-proposal-mootnote";
+    moot.textContent = "这一格已选了其他方向(想换就跟我说)";
+    card.appendChild(moot);
+    return card;
+  }
+
   const actions = document.createElement("div");
   actions.className = "pc-proposal-actions";
   const confirmBtn = document.createElement("button");
@@ -1424,6 +1434,26 @@ function findConfirmLanded(id) {
   return hit ? (hit.landed || "已落盘") : null;
 }
 
+// FB-B 模型A:这一格是否已被【同轮兄弟候选】落盘(同槽备选选了一个,其余变灰,不留点了必撞 stale 的死键)
+function slotTakenBySibling(ev) {
+  const events = (PARTNER && PARTNER.events) || [];
+  for (const e of events) {
+    if (e && e.t === "confirm" && e.id !== ev.id) {
+      const prop = events.find((x) => x && x.t === "proposal" && x.id === e.id);
+      if (prop && prop.slot === ev.slot) return true;
+    }
+  }
+  return false;
+}
+
+// 还有没有【可点】的候选卡(自己没确认、且这一格没被兄弟占)——落盘后自动接一轮的门(FB-B #3):
+// 同槽挑一个 → 其余变灰、无 pending → 前进;异槽逐个决 → 还有卡没决就不前进,等决完。
+function hasActionableProposal() {
+  const events = (PARTNER && PARTNER.events) || [];
+  return events.some((ev) => ev && ev.t === "proposal"
+    && !findConfirmLanded(ev.id) && !slotTakenBySibling(ev));
+}
+
 function fillPartnerInput(text) {
   if (!_pcInputEl) return;
   _pcInputEl.value = text || "";
@@ -1453,7 +1483,8 @@ async function partnerConfirm(id, btnEl) {
     refresh();
     // bug4下一步:落盘后自动接一轮,领航员按固定顺序引下一格(空 text→后端见末事件=confirm 放行,
     // 不落假 user 气泡)。不 await:确认路径立即返回,引导轮自行流式上屏。
-    if (!_partnerBusy) partnerSay("");
+    // FB-B #3:仅当没有还能点的候选卡时才前进——同槽挑完(兄弟变灰)就走,异槽还有卡没决就等决完。
+    if (!_partnerBusy && !hasActionableProposal()) partnerSay("");
   } catch (e) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);

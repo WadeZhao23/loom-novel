@@ -674,6 +674,8 @@ body.typing .nav-ball, body.typing .nav-popover { display: none; }
 .pc-tool-done { font-size: var(--fs-xs); color: var(--text-soft); padding: 1px 4px; }
 .pc-stopped { text-align: center; font-size: var(--fs-xs); color: var(--text-mute);
   font-style: italic; padding: 2px 0; }
+.pc-proposal.pc-proposal-moot { opacity: .55; }   /* FB-B 模型A:同轮兄弟候选已落盘,本卡变灰 */
+.pc-proposal-mootnote { font-size: var(--fs-xs); color: var(--text-mute); font-style: italic; margin-top: 4px; }
 .pc-error { font-size: var(--fs-sm); color: var(--danger); background: var(--danger-tint);
   border-radius: var(--radius-sm); padding: 6px 9px; }
 /* 候选卡:虚线边 + 「候选」角标——挡 AI 文字混进书的唯一结构性保证(spec §6.1) */
