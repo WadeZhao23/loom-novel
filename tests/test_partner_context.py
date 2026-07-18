@@ -38,6 +38,21 @@ def test_snapshot_current_stage_unfilled_slots_carry_hint(project):
     assert "分区" in snap
     assert "不是平台" in snap        # 分区 hint 的关键字眼透出来了
     assert len(snap) <= 400
+
+
+def test_snapshot_surfaces_filled_立项_values(project):
+    # bug1a:已填的立项值(平台/分区…)必须进上下文,否则模型把已定说成空白(真实事故)
+    card = project / "外置大脑/立项卡.md"
+    card.write_text(
+        "# 立项卡\n\n平台:番茄\n\n## 分区\n轻小说·衍生同人（对标《龙族》粉丝向）\n\n"
+        "## 题材\n(占位示例:重生流)\n\n## 对标意图\n\n## 为什么选它\n",
+        encoding="utf-8")
+    snap = env_snapshot(project)
+    assert "立项已定" in snap          # 有「已定」段
+    assert "番茄" in snap              # 已填的平台值透进快照
+    assert "衍生同人" in snap          # 已填的分区值也透进
+    _, user = assemble(project, [])
+    assert "番茄" in user              # assemble 的 user 段(模型实际读到的现状)含已填值
     assert "门禁" in snap or "未填" in snap
 
 
@@ -45,5 +60,5 @@ def test_snapshot_keeps_gate_even_with_long_idea(project):
     from loom.config import load_config, save_config
     cfg = load_config(project); cfg.idea = "设" * 450; save_config(project, cfg)
     snap = env_snapshot(project)
-    assert len(snap) <= 400
+    assert len(snap) <= 600   # 硬约束兜底(bug1a 后放宽到 600 容「立项已定」)
     assert "门禁" in snap or "未填" in snap or "立项" in snap   # 门禁信息没被长idea挤没

@@ -22,7 +22,7 @@ from pathlib import Path
 from . import journey, partner_tools, paths, slots
 from .config import load_config
 
-_SNAPSHOT_MAX = 400   # 环境快照预算(字);spec §4 常量表
+_SNAPSHOT_MAX = 600   # 环境快照预算(字);spec §4 常量表(bug1a 后放宽:多带一行「立项已定」的已填值)
 _SNAPSHOT_TOP_K = 3   # 每段展示的未填槽位数量上限(快照只给「前 K 个」,细看用「看地基」工具)
 _IDEA_MAX = 80        # 一句话设定的独立小配额(字);超了截断补「…」,绝不挤占门禁/未填槽位预算
 _TAIL_MAX = 12000     # 对话尾部预算(字);spec §4 常量表
@@ -90,6 +90,14 @@ def env_snapshot(root: Path) -> str:
         if top:
             line += f":{top}"
         lines.append(line)
+        # 立项已定(bug1a):把已填的立项值(平台/分区/…)塞进快照。立项这几格短、定义
+        # 全书身份、每轮都相关——只列未填会让模型把「已定」瞎说成「空白」(真实事故:
+        # 平台已=番茄却被说成没定)。其余段太大,已填明细仍靠「看地基」工具按需拉。
+        if spec.key == "立项":
+            filled_vals = [s for s in stage_slot_list if s.filled]
+            if filled_vals:
+                parts = [f"{s.id.split('#')[-1]}={s.preview}" for s in filled_vals]
+                lines.append("立项已定:" + " · ".join(parts))
 
     lines.append(f"章节数:{len(paths.chapter_numbers(root))}")
 
