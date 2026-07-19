@@ -266,8 +266,11 @@ class OpenAICompatBackend:
         return LoomBackendError(render(self._empty_code, detail=f"model={self.model}"), code=self._empty_code)
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
+                 on_chunk: OnChunk | None = None, on_reasoning: OnChunk | None = None,
+                 agent_mode: bool = False) -> str:
         # agent_mode 对 HTTP 后端无意义(没有 CLI 反 agent 护栏这回事)——接受、忽略,只为对齐协议签名。
+        # on_reasoning(v2 思考层):思考型模型(DeepSeek)的思维链走独立字段 reasoning_content,
+        # 与正文 content 分开流式;给了就 relay 思考流(不进正文 parts、不落盘,纯 UI 灰字)。
         max_tokens = _budget_tokens(self.provider, max_chars)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
@@ -276,9 +279,21 @@ class OpenAICompatBackend:
                     model=self.model, messages=messages, max_tokens=max_tokens,
                     temperature=0.9, stream=True, timeout=self._stream_timeout,
                 )
-                parts, buf = [], ""
+                parts, buf, rbuf = [], "", ""
                 for ev in stream:
-                    delta = (ev.choices[0].delta.content or "") if ev.choices else ""
+                    if not ev.choices:
+                        continue
+                    d = ev.choices[0].delta
+                    # 思考流:必须在 content 空守卫【之前】读——思考帧 content=None,否则整帧被下面
+                    # continue 丢掉。getattr 兜底:非思考型供应商的 delta 没这属性(直接取会 AttributeError)。
+                    if on_reasoning is not None:
+                        rc = getattr(d, "reasoning_content", None)
+                        if rc:
+                            rbuf += rc
+                            if len(rbuf) >= 12 or rbuf[-1] in "。\n!?!?…,，、":  # 攒几字再发,别一 token 一次(免前端抖)
+                                on_reasoning(rbuf)
+                                rbuf = ""
+                    delta = d.content or ""
                     if not delta:
                         continue
                     parts.append(delta)
@@ -286,6 +301,8 @@ class OpenAICompatBackend:
                     if len(buf) >= 8 or buf[-1] in "。\n!?!?…":  # 攒几字/到句末再发,别一 token 一行
                         on_chunk(buf)
                         buf = ""
+                if rbuf and on_reasoning is not None:
+                    on_reasoning(rbuf)
                 if buf:
                     on_chunk(buf)
                 text = "".join(parts).strip()

@@ -117,6 +117,38 @@ def test_orphan_kv_from_botched_block_not_leaked(project):
             assert "落点:" not in e["text"] and "内容:" not in e["text"]   # 孤儿参数不漏到作者屏
 
 
+def test_reasoning_delta_emitted_but_transient(project):
+    # v2 思考层:声明 on_reasoning 的后端,思维链 → emit reasoning_delta(纯 UI),但不落盘、不进正文
+    from loom import partner_store as ps
+
+    class ThinkingBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None,
+                     on_reasoning=None, agent_mode=False):
+            if on_reasoning:
+                on_reasoning("嗯,我想想这本书的分区…")
+            reply = "好,分区你想走玄幻还是都市?"
+            if on_chunk:
+                on_chunk(reply)
+            return reply
+
+    evs = []
+    run_turn(project, "帮我定分区", ThinkingBackend(), emit=evs.append, ts="t")
+    assert any(e["t"] == "reasoning_delta" and "想想" in e["text"] for e in evs)   # 思考流 emit 出来了
+    persisted = [e.get("t") for e in ps.read_events(project)]
+    assert "reasoning_delta" not in persisted          # transient:不落盘
+    assert "assistant" in persisted                    # 正文正常落盘
+    assistant_text = next(e["text"] for e in evs if e["t"] == "assistant")
+    assert "想想" not in assistant_text                 # 思考绝不混进正文
+
+
+def test_scripted_backend_without_on_reasoning_unaffected(project):
+    # 没声明 on_reasoning 的旧假后端(ScriptedBackend)不受影响(内省守卫不硬传)
+    evs = []
+    run_turn(project, "你好", ScriptedBackend(["你好呀"]), emit=evs.append, ts="t")
+    assert any(e["t"] == "assistant" for e in evs)
+    assert not any(e["t"] == "reasoning_delta" for e in evs)
+
+
 def test_turn_ends_after_proposals_no_recomplete(project):
     # 真机实测根因:提了候选卡就交给作者拍板、本轮终结,不再 re-complete——否则模型会在下一轮
     # 「二次质疑格式、重提同样的卡」,产生重复候选卡(真 DeepSeek 实测:3 张变 6 张)。

@@ -654,6 +654,13 @@ body.typing .nav-ball, body.typing .nav-popover { display: none; }
 .pc-zhao { flex: none; width: 17px; height: 17px; color: var(--seal); }
 .pc-zhao-spin { transform-origin: 12px 12px; animation: pc-zhao-turn 2.6s linear infinite; }
 @keyframes pc-zhao-turn { to { transform: rotate(360deg); } }
+/* v2 思考层:思考流灰字折叠块(思考中展开实时流 / 出正文后收成「已思考 ▸」) */
+.pc-reasoning { border-left: 2px solid var(--line-soft); padding: 1px 0 1px 9px; margin: 2px 0; }
+.pc-reasoning > summary { display: flex; align-items: center; gap: 7px; cursor: pointer;
+  color: var(--text-mute); font-size: var(--fs-sm); font-style: italic; list-style: none; }
+.pc-reasoning > summary::-webkit-details-marker { display: none; }
+.pc-reasoning-body { margin-top: 4px; max-height: 30vh; overflow-y: auto; white-space: pre-wrap;
+  word-break: break-word; line-height: 1.55; font-size: var(--fs-xs); color: var(--text-soft); }
 .pc-row { display: flex; gap: var(--space-2); align-items: flex-start; }
 .pc-row.pc-user { flex-direction: row-reverse; }
 .pc-avatar { flex: none; width: 24px; height: 24px; border-radius: 50%; display: flex;
