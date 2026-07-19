@@ -75,6 +75,8 @@ def validate_case(case: dict, chapter: str) -> None:
         if not isinstance(l, dict):
             _fail(cid, "labels 每项须为对象")
     dims = [l.get("dimension") for l in labels]
+    if not all(isinstance(d, str) for d in dims):
+        _fail(cid, f"labels 每项 dimension 须为字符串,现为:{dims}")
     if sorted(dims) != sorted(DIMENSIONS):
         _fail(cid, f"labels 维度必须恰好覆盖 8 维不重不漏,现为:{dims}")
     # 只锚定四个必填键的内容:额外键(任意类型)被忽略,既不裸炸也不扩大证据面
