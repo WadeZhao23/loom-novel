@@ -104,6 +104,32 @@ def load_rubric() -> str:
     return RUBRIC_PATH.read_text(encoding="utf-8")
 
 
+def reproducibility_meta(backend, rubric_text: str) -> dict:
+    """校准 κ 的可复现元数据:哪个 prompt/rubric/模型/commit 产生的。temperature 只记录不修改。"""
+    import hashlib
+    import subprocess
+
+    # system prompt 不依赖 context/chapter(固定模板),用占位构建即可
+    system, _ = build_judge_prompt({"setting": "", "characters": "", "prev_hook": "", "chapter_goal": ""},
+                                   "", rubric_text)
+
+    def _sha(s):
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True,
+                            cwd=Path(__file__).resolve().parent.parent).stdout.strip() or "nogit"
+    return {
+        "backend_class": type(backend).__name__,
+        "model": getattr(backend, "model", None),
+        "temperature": None,
+        "temperature_note": "后端(OpenAICompatBackend)写死 temperature=0.9、无 seed;κ 因此非逐次可复现(见 PROVENANCE.md)。要可复现需给后端加 temperature=0 通道(动产品代码,另议)。",
+        "prompt_hash": _sha(system),
+        "rubric_hash": _sha(rubric_text),
+        "git_commit": commit,
+    }
+
+
 def build_judge_prompt(context: dict, chapter: str, rubric_text: str) -> tuple[str, str]:
     """判据单源:引擎 CRITIC(权威维度定义)+ rubric(操作化)+ JSON 输出指令。"""
     system = (
@@ -214,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.calibrate:
         from .calibration import calibrate, write_report
         report = calibrate(gold_cases, results)   # gold_cases 与 results 同 case 顺序
+        report["reproducibility"] = reproducibility_meta(backend, load_rubric())
         rdir = args.report_dir or (Path("evals/runs") / f"judge-{len(results)}cases")
         j, m = write_report(report, rdir)
         cov = report["coverage"]

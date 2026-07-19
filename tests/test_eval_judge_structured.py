@@ -221,3 +221,24 @@ def test_cli_calibrate_gate_demo_all_infra_is_infra_2(tmp_path, monkeypatch):
     from evals.judge import main
     code = main(["--backend", "demo", "--calibrate", "--gate", "--report-dir", str(tmp_path / "r")])
     assert code == 2          # 全 infra + --gate → infra 退出码,不伪装通过
+
+
+def test_reproducibility_meta_fields():
+    from conftest import FakeBackend
+    from evals.judge import reproducibility_meta, load_rubric
+    m = reproducibility_meta(FakeBackend(lambda s, u: ""), load_rubric())
+    assert m["backend_class"] == "FakeBackend"
+    assert len(m["prompt_hash"]) == 16 and len(m["rubric_hash"]) == 16
+    assert m["temperature"] is None and "0.9" in m["temperature_note"]
+    assert m["git_commit"]                       # 非空(git 仓)
+
+
+def test_calibrate_report_carries_reproducibility(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    from evals.judge import main
+    import json
+    rdir = tmp_path / "r"
+    main(["--backend", "demo", "--calibrate", "--report-dir", str(rdir)])
+    rep = json.loads((rdir / "report.json").read_text(encoding="utf-8"))
+    assert "reproducibility" in rep
+    assert rep["reproducibility"]["prompt_hash"] and rep["reproducibility"]["rubric_hash"]

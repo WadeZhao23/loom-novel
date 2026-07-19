@@ -100,5 +100,14 @@
     "n_evaluated": 11,
     "n_infra_dropped": 0,
     "dropped_case_ids": []
+  },
+  "reproducibility": {
+    "backend_class": "OpenAICompatBackend",
+    "model": "deepseek-v4-pro",
+    "temperature": null,
+    "temperature_note": "后端(OpenAICompatBackend)写死 temperature=0.9、无 seed;κ 因此非逐次可复现(见 PROVENANCE.md)。要可复现需给后端加 temperature=0 通道(动产品代码,另议)。",
+    "prompt_hash": "6e17e5160962c4c1",
+    "rubric_hash": "ed33a1b7344095b2",
+    "git_commit": "603259e"
   }
 }
