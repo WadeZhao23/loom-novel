@@ -73,3 +73,10 @@ def test_evaluate_below_target():
 def test_evaluate_no_data_is_none_not_fail():
     r = evaluate_against_targets(None, 0.70)
     assert r["met"] is None       # 无数据 ≠ 未达标,是「待测」
+
+
+def test_high_cost_dimensions_are_real_dimensions():
+    # 跨模块耦合护栏:targets.json 的高代价维必须是真实 DIMENSIONS 成员——
+    # 防将来改维度名/打错字让 Phase 4 硬门禁悄悄指向不存在的维度。
+    from evals.dataset import DIMENSIONS
+    assert set(load_targets()["high_cost_dimensions"]) <= set(DIMENSIONS)
