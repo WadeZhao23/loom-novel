@@ -4,7 +4,7 @@ import json
 import pytest
 
 from evals.dataset import DIMENSIONS
-from evals.judge import DimensionVerdict, JudgeParseError, parse_judge_verdict
+from evals.judge import DimensionVerdict, JudgeParseError, build_judge_prompt, load_rubric, parse_judge_verdict
 
 
 def _full_verdict(**overrides):
@@ -100,3 +100,30 @@ def test_present_non_bool_raises():
     raw = _full_verdict(断钩子={"present": 0})           # 0 非 bool,且 falsy
     with pytest.raises(JudgeParseError):
         parse_judge_verdict(raw)
+
+
+def test_build_prompt_names_all_dimensions():
+    ctx = {"setting": "无飞行铁律", "characters": "沈砚:寡言",
+           "prev_hook": "提灯人喊破真名", "chapter_goal": "过磅"}
+    system, user = build_judge_prompt(ctx, "正文内容", load_rubric())
+    for d in DIMENSIONS:
+        assert d in system                      # 8 维判据都在 system
+    assert "JSON" in system or "json" in system  # 明确要求 JSON 输出
+    assert "沈砚:寡言" in user and "正文内容" in user  # context+chapter 进 user
+
+
+def test_build_prompt_carries_engine_critic_criteria():
+    from loom.evalapi import CRITIC_质检, CRITIC_去AI味
+    system, _ = build_judge_prompt({"setting": "s", "characters": "c",
+                                    "prev_hook": "p", "chapter_goal": "g"}, "x", load_rubric())
+    # 判据单源:引擎 CRITIC 原文必须嵌进 Judge system(不是另写一套)
+    assert "信息边界" in CRITIC_质检 and "信息边界" in system
+    assert "写作指纹" in CRITIC_去AI味 and "写作指纹" in system
+
+
+def test_build_prompt_no_numeric_score_language():
+    system, _ = build_judge_prompt({"setting": "s", "characters": "c",
+                                    "prev_hook": "p", "chapter_goal": "g"}, "x", load_rubric())
+    # ADR-0002:不许诱导模型打「总体分」
+    for banned in ("总体文学分", "综合评分", "打分", "评分(0", "score"):
+        assert banned not in system

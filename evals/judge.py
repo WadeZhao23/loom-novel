@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
+
+from loom.evalapi import CRITIC_质检, CRITIC_去AI味
 
 from .dataset import DIMENSIONS, SEVERITIES
 
@@ -70,3 +73,46 @@ def parse_judge_verdict(raw: str) -> list[DimensionVerdict]:
     if missing:
         raise JudgeParseError(f"缺维度:{missing}")
     return [by_dim[d] for d in DIMENSIONS]
+
+
+RUBRIC_PATH = Path(__file__).resolve().parent / "dataset" / "rubric.md"
+
+_JSON_INSTRUCTION = (
+    "## 输出格式(严格 JSON,不要任何解释、不要正文、不要代码围栏外的字)\n"
+    "输出一个 JSON 数组,**恰好 8 个对象**,每个维度一个,dimension 逐字取自:\n"
+    f"{list(DIMENSIONS)}\n"
+    "每个对象字段:\n"
+    '  - "dimension": 维度名(上面 8 个之一)\n'
+    '  - "present": true/false(该维度缺陷是否命中)\n'
+    '  - "severity": present=true 时为 "高"/"中"/"低"(按 rubric 严重度分级);present=false 时为 null\n'
+    '  - "evidence": 命中处的原文短引(absence 型维度如断钩子/无爽点留空字符串 "")\n'
+    '  - "reason": 一句话判据(为何命中/为何干净)\n'
+    "只判上面 8 个维度,不要给总体评价、不要任何数值分。宁缺毋滥:没把握按 rubric 边界例判、"
+    "在 reason 里说明。"
+)
+
+
+def load_rubric() -> str:
+    return RUBRIC_PATH.read_text(encoding="utf-8")
+
+
+def build_judge_prompt(context: dict, chapter: str, rubric_text: str) -> tuple[str, str]:
+    """判据单源:引擎 CRITIC(权威维度定义)+ rubric(操作化)+ JSON 输出指令。"""
+    system = (
+        "你是**独立评审**,只诊断、不改写。按下面的判据逐维审这一章,输出结构化 JSON。\n\n"
+        "## 引擎判据(权威维度定义)\n"
+        f"### 质检维度\n{CRITIC_质检}\n\n### 去AI味维度\n{CRITIC_去AI味}\n\n"
+        "## 操作化细则(rubric:每维的正例/反例/边界例/严重度/证据要求)\n"
+        f"{rubric_text}\n\n"
+        f"{_JSON_INSTRUCTION}"
+    )
+    user = (
+        "## 本章上下文\n"
+        f"- 世界观设定:{context.get('setting', '')}\n"
+        f"- 人物卡:{context.get('characters', '')}\n"
+        f"- 上一章钩子:{context.get('prev_hook', '')}\n"
+        f"- 本章目标:{context.get('chapter_goal', '')}\n\n"
+        f"## 待评的本章正文\n{chapter}\n\n"
+        "## 你的任务\n按上面 8 维判据逐维评,严格输出 JSON 数组(8 个对象)。"
+    )
+    return system, user
