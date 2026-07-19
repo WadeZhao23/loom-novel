@@ -40,6 +40,18 @@ def _md(report: dict) -> str:
         cov = cal["coverage"]
         lines.append(f"- 覆盖:{cov.get('n_evaluated')}/{cov.get('n_total')} 例"
                      f"(infra 掉 {cov.get('n_infra_dropped')})")
+        jvg = cal.get("judge_vs_gold") or {}
+        high_cost = (cal.get("targets") or {}).get("high_cost_dimensions") or []
+        if jvg and high_cost:
+            lines.append("- 高代价维度 recall(单列,不得只看总分):")
+            for d in high_cost:
+                m = jvg.get(d)
+                if m:
+                    lines.append(f"  - {d}: recall={m.get('recall')}(tp={m.get('tp')}, fn={m.get('fn')})")
+                else:
+                    lines.append(f"  - {d}: 无数据")
+        elif high_cost:
+            lines.append(f"- 高代价维度({'、'.join(high_cost)}):待真机(judge_vs_gold 未计算)")
     else:
         lines.append(f"- 状态:{cal.get('status')}")
     return "\n".join(lines) + "\n"
