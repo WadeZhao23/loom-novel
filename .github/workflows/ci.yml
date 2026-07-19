@@ -35,6 +35,8 @@ jobs:
       - name: eval 回归门禁(确定性 grader,零 key)
         run: python -m evals.run_eval --gate
       - name: 生成 fixture 评测报告(零 key)
+        shell: bash
+        continue-on-error: true
         run: |
           python - <<'PY'
           from pathlib import Path

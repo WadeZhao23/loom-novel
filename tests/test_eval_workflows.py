@@ -30,5 +30,23 @@ def test_eval_real_triggers_are_dispatch_and_schedule_only():
 
 
 def test_release_yml_untouched_needs_chain():
-    text = (WF / "release.yml").read_text(encoding="utf-8")
-    assert "needs: test" in text and "needs: [build-mac, build-windows]" in text
+    import pytest
+    pytest.importorskip("yaml")
+    import yaml
+    data = yaml.safe_load((WF / "release.yml").read_text(encoding="utf-8"))
+    jobs = data["jobs"]
+    assert jobs["build-mac"]["needs"] == "test"
+    assert jobs["build-windows"]["needs"] == "test"
+    assert jobs["release"]["needs"] == ["build-mac", "build-windows"]
+
+
+def test_ci_report_step_is_bash_and_nonblocking():
+    import pytest
+    pytest.importorskip("yaml")
+    import yaml
+    data = yaml.safe_load((WF / "ci.yml").read_text(encoding="utf-8"))
+    steps = data["jobs"]["test"]["steps"]
+    rep = [s for s in steps if s.get("name", "").startswith("生成 fixture")]
+    assert rep, "没找到报告生成步骤"
+    assert rep[0].get("shell") == "bash"                 # 跨平台,防 Windows pwsh 崩
+    assert rep[0].get("continue-on-error") is True       # 报告 bug 不否决已过门禁
