@@ -34,3 +34,24 @@ jobs:
         run: python -m pytest tests/ -q
       - name: eval 回归门禁(确定性 grader,零 key)
         run: python -m evals.run_eval --gate
+      - name: 生成 fixture 评测报告(零 key)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from evals.run_eval import run_suite, aggregate, load_baseline, compare_to_baseline
+          from evals.report import build_run_report, write_run_report
+          import evals.run_eval as R
+          results = run_suite(R.HERE / "cases")
+          summ = aggregate(results)
+          base = load_baseline(R.HERE / "baseline.json")
+          regs = compare_to_baseline(results, base) if base else []
+          rep = build_run_report({"passed": summ["passed"], "cases": summ["cases"], "regressions": regs},
+                                 None, None)
+          write_run_report(rep, Path("eval-report"))
+          PY
+      - name: 上传评测报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-${{ matrix.os }}
+          path: eval-report/

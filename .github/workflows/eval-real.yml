@@ -1,0 +1,42 @@
+name: Eval Real Judge
+
+# 真 Judge(要 LLM API key):只手动/定时跑,绝不挂 pull_request(fork 读不到 secret /
+# pull_request_target 会把 secret 暴露给 fork 代码)。PR CI 的零 key 门禁在 ci.yml。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"   # 每周一 03:00 UTC
+
+permissions:
+  contents: read           # 最小权限,不复用 release.yml 的 contents:write
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  judge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: 真 Judge + 校准报告(要 key,secret 缺失则失败不伪装 PASS)
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "$DEEPSEEK_API_KEY" ]; then
+            echo "✗ 缺 DEEPSEEK_API_KEY secret —— 真 Judge 无法跑(这是 infra 缺失,不是质量 PASS)"
+            exit 2
+          fi
+          python -m evals.judge --backend configured --calibrate --report-dir eval-real-report
+      - name: 上传校准报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-real-report
+          path: eval-real-report/
