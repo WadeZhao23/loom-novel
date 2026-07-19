@@ -23,3 +23,9 @@ def test_gate_policy_reads_declared():
 def test_gating_has_no_hard_dimensions_yet():
     """护栏:本 Phase 只建机制,不晋级任何维度——gating.json 里不该出现 hard。"""
     assert "hard" not in load_gating()["dimensions"].values()
+
+
+def test_gating_dimensions_exactly_match_dataset():
+    # 跨模块耦合护栏:gating.json 的维度键必须恰好=DIMENSIONS(不多不少)——
+    # 防打错字混入伪维度、或改 DIMENSIONS 后 gating 漏同步。
+    assert set(load_gating()["dimensions"].keys()) == set(DIMENSIONS)
