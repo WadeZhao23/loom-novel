@@ -61,10 +61,20 @@ def prf_for_dimension(gold: list[bool], pred: list[bool]) -> PRF:
 
 
 TARGETS_PATH = Path(__file__).resolve().parent / "calibration" / "targets.json"
+GATING_PATH = Path(__file__).resolve().parent / "calibration" / "gating.json"
 
 
 def load_targets() -> dict:
     return json.loads(TARGETS_PATH.read_text(encoding="utf-8"))
+
+
+def load_gating() -> dict:
+    return json.loads(GATING_PATH.read_text(encoding="utf-8"))
+
+
+def gate_policy(dimension: str, gating: dict) -> str:
+    """维度的门禁策略;未声明的维度默认 observe(最保守,不拦截)。"""
+    return gating.get("dimensions", {}).get(dimension, "observe")
 
 
 def evaluate_against_targets(metric_value: float | None, target: float) -> dict:
