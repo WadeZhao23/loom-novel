@@ -40,6 +40,8 @@ class DimensionVerdict:
 
 def parse_judge_verdict(raw: str) -> list[DimensionVerdict]:
     """严格解析 Judge 输出为 8 维 verdict;任何不合规 → JudgeParseError(交上层判 infra)。"""
+    if not isinstance(raw, str):
+        raise JudgeParseError(f"verdict 须为字符串,后端返回了 {type(raw).__name__}")
     cleaned = _FENCE_RE.sub("", raw).strip()
     try:
         data = json.loads(cleaned)

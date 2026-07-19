@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from conftest import FakeBackend, ScriptedBackend
+from conftest import FakeBackend
 from evals.dataset import DIMENSIONS
 from evals.judge import (
     DimensionVerdict,
@@ -188,3 +188,16 @@ def test_judge_result_as_dict_shape():
     d = r.as_dict()
     assert d["case_id"] == "t" and d["infra_error"] is False
     assert len(d["verdicts"]) == 8 and d["verdicts"][0]["dimension"] == DIMENSIONS[0]
+
+
+def test_parse_non_string_input_raises_judge_parse_error():
+    for bad in ([], {}, 42, None):
+        with pytest.raises(JudgeParseError):
+            parse_judge_verdict(bad)
+
+
+def test_judge_case_non_string_backend_output_is_infra_not_crash():
+    # 违反 Backend 协议返回 list 的后端 → 必须 infra_error,不能裸崩
+    r = judge_case(_case_stub(), FakeBackend(lambda s, u: []))
+    assert r.infra_error is True and r.verdicts == []
+    assert "[infra]" in r.error
