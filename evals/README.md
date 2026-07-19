@@ -347,6 +347,34 @@ python -m evals.export_packets --out /tmp/annotate_export --split calibration
 - 这两个数字出来之前,`targets.json` 里的阈值都只是**待验收标准**,不是「已达标」的宣称——
   报告里刻意留空位,而不是拿构造性金标的自洽性冒充人工验证。
 
+## 分层 CI + 评测报告(Phase 4)
+
+两条 CI 通道,按「零 key 还是要 key」分层——这是整套 eval 能安全进 CI 的关键:
+
+```
+PR / push ──→ ci.yml(每次都跑)
+                ├─ pytest 全量(含 FakeBackend Judge 合同测试,零 key)
+                ├─ evals.run_eval --gate(确定性门禁,零 key,有回归退出码 1 挡合入)
+                └─ 生成 fixture 评测报告 → 上传 artifact(shell:bash + continue-on-error:
+                   报告生成失败只降级留痕,绝不否决已通过的门禁)
+
+手动 / 每周一 ──→ eval-real.yml(workflow_dispatch + schedule)
+                └─ evals.judge --backend configured --calibrate(真调 LLM Judge,要 key)
+                   → 校准报告上传 artifact
+```
+
+**为什么分层**:fork PR 读不到仓库 secret(GitHub 的机制,防 fork 恶意代码窃密),`pull_request_target` 又会把 secret 暴露给 fork 代码(pwn request)。所以真 Judge 只挂 `workflow_dispatch`+`schedule`(仅仓库自身触发),PR CI 永远零 key、零成本、双平台稳过。`eval-real.yml` 用最小 `contents: read` 权限,不碰发版流程。
+
+**要真跑 eval-real,你得先加一个 repo secret**(Claude 不能也不应代加密钥):
+
+> GitHub 仓库 → Settings → Secrets and variables → Actions → New repository secret
+> 名字 `DEEPSEEK_API_KEY`(或所配 provider 的 key 名),值填你的 key。
+> 没加时 workflow 会 `exit 2` 如实报「缺 key = infra 缺失」,**不会伪装成质量 PASS**。
+
+**门禁策略 `evals/calibration/gating.json`**:每个维度一个策略——`observe`(只记录不拦截)/ `soft`(警告不拦截)/ `hard`(参与门禁拦截)。**现在 8 维全 `observe`**。任一维度要晋级 `soft`/`hard`,必须先有 Phase 3 校准报告证明它达标(κ/recall 过预注册阈值),不凭印象晋级(ADR-0002)。晋级本身是一次可审查的 `gating.json` diff,不在本期。
+
+**评测报告 `evals/report.py`**:把三套 suite 的结果(Fixture 门禁 / Generation manifest / Judge 校准)合成 JSON + MD 上传 artifact,构成「commit → 模型 → prompt hash → 结论」的可追溯链。报告**禁止只看加权总分**:高代价维(信息边界 / 设定漂移)的 recall 在校准段**单列**;缺哪源就如实标「未跑 / 待真机」,不造数;真 Judge 一次 infra 掉了 case,报告披露「N 例中 M 例掉出、只在 K 例上算」,不把子集标成全量。
+
 ## 为什么要有它(写给作者自己)
 
 你已经有了 eval 的**零件**(aitell / gates 复审 / fatigue),缺的是把它们**组织成可回归的度量**。有了这层:① 调 prompt 不再「凭感觉变好了」,有数;② 换模型能一眼看出哪类质量掉了;③ 这套「数据集 + 复用检测器打分 + 回归门禁」本身,就是一份能讲的 eval engineering 实证。
