@@ -16,6 +16,19 @@ let _weaving = false;    // 织章中(领航员隐身)
 let _navPopOpen = false; // 球浮层开合(重画后按此恢复)
 let _navAutoAsked = new Set(); // 居中态自动出题去重:每段至多自动跑一次 LLM,防降级卡无限重拉
 
+// ---------- 书房伙伴对话(P3,与卡片机并存)----------
+let PARTNER = null;            // 伙伴对话事件缓存({events:[...]}),对应当前书;null=尚未加载
+let _partnerRoot = null;       // PARTNER 所属书 root(换书判据,同 JOURNEY 缓存套路,防串书)
+let _partnerBusy = false;      // 一轮 say() 请求进行中:输入框/发送键置灰,阻止并发发送
+let _partnerGen = 0;           // 对话世代号:每轮 partnerSay 自增;归档「另起一段对话」/ 换书时同步前移,
+                                // 旧世代流里迟到的事件一律作废(比 DATA.root 更细——同一本书内新旧会话也能区分)
+let _partnerDelta = "";        // 当前轮 assistant_delta 累积预览(未落盘,权威事件一到就清空)
+let _partnerReasoning = "";    // 当前轮 reasoning_delta 累积(v2 思考层,纯 UI 灰字,transient;权威事件一到清空)
+let _partnerAbort = null;      // 本轮 AbortController(P1.5 停止键用);轮结束置 null
+let _partnerStopped = false;   // 上一轮被用户「停」→ 渲染尾部出「· 已停止 ·」;换书/另起/再发清零
+let _partnerAutoOpened = new Set();   // 本次会话已自动开场过的书 root(前端侧去重;服务端空 text 双保险)
+let _pcInputEl = null;         // 当前渲染的对话输入框引用(供「改一改」把候选内容填进去)
+
 // ---------- 领航员在场形态:navMode 三态推导(hidden/center/float)----------
 function navMode() {
   if (!DATA) return "hidden";
@@ -26,6 +39,9 @@ function navMode() {
 function journeyHost() {
   return navMode() === "center" ? $("nav-center-card") : $("nav-pop-card");
 }
+// 对话式是伙伴面板的唯一形态(老版问答卡已下线,不再提供切回入口)——恒返回 chat,
+// 哪怕旧 localStorage 残留 "card" 也忽略,免把用户困在没有出口的卡片机里。
+function partnerUiMode() { return "chat"; }
 
 // ---------- 图标(iconfont Symbol)----------
 // 单一改名处:HTML 里写 <span class="ico" data-ico="export">,JS 里用 icon("export")。
@@ -334,7 +350,7 @@ async function createProject() {
   try {
     const d = await jreq("POST", "/api/project/create",
       { name, parent: $("new-parent").value.trim(), genre: $("new-genre").value || null,
-        idea, platform: $("new-platform").value || "" });
+        idea });   // FB-平台:建书不再选平台(平台降级为立项里可选可跳的最后一格);server 端 platform 默认空
     $("create-overlay").classList.add("hidden");
     enterProject(d);
     // 填了设定=明确意图:模型就绪就直接铺底稿(仅建书这一次;draftBrain 自带就绪检查与 toast)
@@ -449,6 +465,7 @@ function enterProject(d) {
   JOURNEY = null;               // 换书清旅程态:过期卡绝不能渲染在另一本书上
   _navYield = false; _weaving = false; _navPopOpen = false;   // 换书清领航员在场态:让位/织章/浮层开合都是会话级,不跨书带
   _navAutoAsked = new Set();
+  PARTNER = null; _partnerRoot = null; _partnerBusy = false; _partnerDelta = ""; _partnerReasoning = ""; _partnerStopped = false; _partnerGen++;   // 换书清伙伴对话缓存:过期对话绝不能渲染在另一本书上;世代号前移作废旧书迟到事件
   localStorage.setItem("loom_root", d.root);
   recordRecent(d.root, d.title);
   $("welcome").classList.add("hidden");
@@ -742,7 +759,8 @@ function renderJourney() {
   if (bava) { bava.innerHTML = ""; bava.appendChild(agentAvatar("领航员", "jc-ava", "jc-fallback")); }
   if (mode === "center") paintNavCenterChrome();
   if (mode === "float") paintNavDot();
-  loadJourney();   // 取 journey/state → paintJourney() 画进 journeyHost()
+  loadJourney();   // 取 journey/state → paintJourney() 画进 journeyHost()(段进度头两态都要)
+  if (partnerUiMode() === "chat") loadPartnerPanel();   // 对话 UI:取 /api/partner/history → paintPartnerChat()
 }
 
 async function loadJourney() {
@@ -769,14 +787,8 @@ function paintNavCenterChrome() {
   const gist = missing.length ? `距开写还差 ${missing.length} 项:${missing.join("、")}` : "地基快齐了";
   // 副标题带上「现在这段要定什么」——立项/世界观等的具体指示,别让用户对着空题干瞪眼
   $("nav-center-sub").textContent = cur && cur.hint ? `${gist} · 现在定「${cur.key}」:${cur.hint}` : gist;
-  const strip = $("nav-center-strip"); strip.innerHTML = "";
-  ((JOURNEY && JOURNEY.stages) || []).forEach((s) => {
-    const seg = document.createElement("span");
-    seg.className = "ns-seg" + (s.done ? " done" : "") + (JOURNEY && s.key === JOURNEY.current ? " next" : "");
-    seg.textContent = (s.done ? "✓ " : s.skipped ? "– " : "○ ") + s.key;
-    seg.onclick = () => postJourneyGoto(s.key, false);
-    strip.appendChild(seg);
-  });
+  // bug3:撤掉分段进度条(✓立项 ○世界观…)——对话式领航员自会按固定顺序引导,分段 chip 是老卡机遗留、无必要
+  const strip = $("nav-center-strip"); strip.innerHTML = ""; strip.classList.add("hidden");
 }
 
 // 球未读点:有值就说明球浮层里有条领航员想说的话
@@ -806,6 +818,9 @@ function paintNavPopList() {
 function paintJourney() {
   const card = journeyHost();
   if (!card || !DATA) return;
+  // 对话 UI / 卡片机开关(P3):两条渲染路径并存,下面卡片机原逻辑一字不动。
+  card.classList.toggle("partner-chat", partnerUiMode() === "chat");
+  if (partnerUiMode() === "chat") { paintPartnerChat(); return; }
   card.innerHTML = "";
   const stages = (JOURNEY && JOURNEY.stages) || [];
   const centerMode = navMode() === "center";   // 居中态外层 chrome 已有头像+标题+段进度条,卡内不重复画
@@ -952,6 +967,589 @@ async function postJourneyGoto(stage, skip) {
   } catch (e) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);
+  }
+}
+
+// ---------- 书房伙伴对话(P3):say 流式消费 + 候选卡拍板 + 渲染 ----------
+// 打开面板先取 history;仅当 history 空且书无章节才自动开场(说明书 §2「开场的触发与幂等」)。
+// 换书判据同 loadJourney(_partnerRoot 缓存),避免每次 renderJourney 都重新拉一次。
+async function loadPartnerPanel() {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  if (_partnerRoot === root) { paintJourney(); return; }   // 本书已加载过:只重画,不重拉
+  _partnerRoot = root;
+  PARTNER = null;   // null = 加载中占位(区别于「加载完但确实没有历史」的空数组)
+  paintJourney();
+  let out = null;
+  try { out = await jreq("GET", `/api/partner/history?root=${encodeURIComponent(root)}`); }
+  catch (e) { out = null; }
+  if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
+  PARTNER = (out && Array.isArray(out.events)) ? out : { events: [] };
+  paintJourney();
+  const noChapters = (DATA.chapters || []).length === 0;
+  if (PARTNER.events.length === 0 && noChapters && !_partnerAutoOpened.has(root)) {
+    _partnerAutoOpened.add(root);   // 前端去重(防 _navAutoAsked 式重复);服务端对空 text 不追加 user 事件是第二道保险
+    partnerSay("");
+  }
+}
+
+// 一轮 say:ndjson 流式消费,套路照抄 writeChapter() 的 /api/write 消费范式(fetch + reader + 按行 parse)。
+async function partnerSay(text) {
+  const root = DATA && DATA.root;
+  if (!root || _partnerBusy) return;
+  const gen = ++_partnerGen;   // 本轮世代号:归档新会话/换书会令 _partnerGen 前移,凡 gen 对不上的迟到事件一律作废
+  _partnerBusy = true;
+  _partnerDelta = "";
+  _partnerReasoning = "";              // 新一轮:清上轮思考流
+  _partnerStopped = false;             // 新一轮:清上轮的「已停止」标记
+  const ctrl = new AbortController();  // P1.5 停止键:点了 abort() → reader/fetch 抛 AbortError
+  _partnerAbort = ctrl;
+  paintJourney();
+
+  let resp;
+  try {
+    resp = await fetch("/api/partner/say", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root, text }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") {   // 用户点了停止(fetch 阶段就 abort),不是连接失败——不落 error
+      if (gen === _partnerGen) { _partnerBusy = false; _partnerStopped = true; _partnerAbort = null; }
+      if (gen === _partnerGen && DATA && DATA.root === root) paintJourney();
+      return;
+    }
+    if (gen === _partnerGen) _partnerBusy = false;   // 世代已过期(旧轮):busy 归属新世代,不许旧轮回头清掉
+    if (gen === _partnerGen && DATA && DATA.root === root) {
+      if (!PARTNER) PARTNER = { events: [] };
+      PARTNER.events.push({ t: "error", text: "连接失败:" + e.message });
+      paintJourney();
+    }
+    return;
+  }
+
+  const ct = resp.headers.get("content-type") || "";
+  if (!ct.includes("ndjson")) {
+    // 非流式响应 = 出错(如 409 partner_busy/织章占锁),同 writeChapter() 对非 ndjson 响应的处理套路
+    const d = await resp.json().catch(() => ({}));
+    if (gen === _partnerGen) _partnerBusy = false;
+    if (gen === _partnerGen && DATA && DATA.root === root) {
+      if (!PARTNER) PARTNER = { events: [] };
+      PARTNER.events.push({ t: "error", text: (d.error || `失败 (${resp.status})`) + codeHint(d.code) });
+      paintJourney();
+    }
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch (e) { continue; }   // 坏行跳过(同 jsonl「坏行当无」纪律),不许炸整条流
+        if (gen === _partnerGen && DATA && DATA.root === root) handlePartnerEvent(ev);
+      }
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") {   // 用户点了停止(流式阶段 abort):不追加 error 气泡,只记已停止
+      if (gen === _partnerGen) _partnerStopped = true;
+    } else if (gen === _partnerGen && DATA && DATA.root === root) {
+      if (!PARTNER) PARTNER = { events: [] };
+      PARTNER.events.push({ t: "error", text: "连接中断:" + e.message });
+    }
+  } finally {
+    if (gen === _partnerGen) {   // 本世代已被「另起一段对话」/换书作废:busy/delta 归下一世代管,这里不许再碰
+      _partnerBusy = false;
+      _partnerDelta = "";
+      _partnerReasoning = "";
+      _partnerAbort = null;
+      if (DATA && DATA.root === root) paintJourney();
+    }
+  }
+}
+
+// 事件信封 {"t":...}(非 /api/write 的 type-keyed):user/assistant/assistant_delta/tool/result/proposal/error。
+// 流结束靠 HTTP body 结束,无显式 done 事件——partnerSay() 的 reader 循环 done=true 即收尾。
+function handlePartnerEvent(ev) {
+  if (!PARTNER) PARTNER = { events: [] };
+  const t = ev && ev.t;
+  if (t === "reasoning_delta") {
+    // v2 思考层:思考流逐块累积(后端已攒几字才发)。纯 UI 灰字,不进 PARTNER.events(transient)。
+    _partnerReasoning += (ev.text || "");
+  } else if (t === "assistant_delta") {
+    // _preview() 每次给的是「刚落定的一整行」,不是累积全文——这里按行拼接重建预览文本
+    _partnerDelta += (_partnerDelta ? "\n" : "") + (ev.text || "");
+  } else if (t === "assistant") {
+    _partnerDelta = "";
+    // v2:把本轮思考挂到这条回复上(会话内可回看,收成「已思考 ▸」;不落盘、刷新即失,transient)
+    if (_partnerReasoning) ev._reasoning = _partnerReasoning;
+    _partnerReasoning = "";
+    PARTNER.events.push(ev);
+  } else if (t === "user" || t === "tool" || t === "result" || t === "proposal" || t === "error") {
+    _partnerDelta = "";   // 权威事件到了(轮内一个新阶段开始/结束),清预览缓冲
+    _partnerReasoning = "";   // 非 assistant 的阶段结束:思考已产出动作,清掉(工具轮的思考不单独回看)
+    PARTNER.events.push(ev);
+  }
+  // 其余类型(meta/summary/confirm)不在 say 流里出现(confirm 只来自 partnerConfirm() 本地追加),忽略即可
+  paintJourney();
+}
+
+function paintPartnerChat() {
+  const card = journeyHost();
+  if (!card || !DATA) return;
+  // sticky-bottom(spec §5):重画前量旧容器是否贴底 + 当前位置,重画后据此决定滚动。
+  const oldScroll = card.querySelector(".pc-scroll");
+  let stickBottom = true, prevTop = 0;
+  if (oldScroll) {
+    prevTop = oldScroll.scrollTop;
+    stickBottom = (oldScroll.scrollHeight - oldScroll.scrollTop - oldScroll.clientHeight) < 40;
+  }
+  card.innerHTML = "";
+
+  const scroll = document.createElement("div");
+  scroll.className = "pc-scroll";
+  card.appendChild(scroll);
+
+  if (PARTNER === null) {
+    const wait = document.createElement("div");
+    wait.className = "pc-empty";
+    wait.textContent = "加载对话记录…";
+    scroll.appendChild(wait);
+  } else {
+    const rendered = renderPartnerEvents(PARTNER.events || []);
+    if (!rendered.length && !_partnerBusy) {
+      const empty = document.createElement("div");
+      empty.className = "pc-empty";
+      empty.textContent = "跟伙伴聊聊这本书吧。";
+      scroll.appendChild(empty);
+    }
+    rendered.forEach((el) => scroll.appendChild(el));
+  }
+
+  if (_partnerBusy) {
+    // 末尾事件是 tool ⟺ dangling(已被扫描渲染成活动行,它本身即 busy 指示器)——
+    // 此时不再叠通用「伙伴在想…」,免双指示器(spec §4.4)。
+    const evs = (PARTNER && PARTNER.events) || [];
+    const danglingTool = evs.length > 0 && evs[evs.length - 1].t === "tool";
+    if (_partnerReasoning) {
+      // v2 思考层:有思考流。没出正文=思考中(展开、实时流);已出正文=思考收折「已思考▸」+ 正文流。
+      scroll.appendChild(pcReasoning(_partnerReasoning, !_partnerDelta));
+      if (_partnerDelta) scroll.appendChild(pcBubble("assistant", _partnerDelta, true));
+    } else if (_partnerDelta) {
+      scroll.appendChild(pcBubble("assistant", _partnerDelta, true));
+    } else if (!danglingTool) {
+      const think = document.createElement("div");
+      think.className = "pc-thinking";
+      think.innerHTML = zhaoIconHtml() + "<span>伙伴在想…</span>";   // 无思考流时(非思考型后端/思考未到)的通用指示
+      scroll.appendChild(think);
+    }
+  }
+
+  if (_partnerStopped && !_partnerBusy) {   // 用户「停」的纯客户端标记(不落盘、不产事件),换书/另起/再发清零
+    const stopped = document.createElement("div");
+    stopped.className = "pc-stopped";
+    stopped.textContent = "· 已停止 ·";
+    scroll.appendChild(stopped);
+  }
+
+  // 加载 history 期间(PARTNER===null)输入框必须禁用:否则这个网络窗口内发的消息会被晚到的 history 响应整体覆盖(见 partnerSay/loadPartnerPanel 注释)
+  const loading = PARTNER === null;
+  const inputRow = document.createElement("div");
+  inputRow.className = "pc-input-row";
+  const ta = document.createElement("textarea");
+  ta.className = "pc-input";
+  ta.rows = 2;
+  ta.placeholder = _partnerBusy ? "伙伴在回复,请稍候…" : (loading ? "加载对话记录…" : "跟伙伴说点什么……");
+  ta.disabled = _partnerBusy || loading;
+  _pcInputEl = ta;
+  const doSend = () => {
+    const v = ta.value.trim();
+    if (!v || _partnerBusy || PARTNER === null) return;
+    ta.value = "";
+    partnerSay(v);
+  };
+  ta.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
+  });
+  const sendBtn = document.createElement("button");
+  sendBtn.className = "jc-btn pc-send";
+  if (_partnerBusy) {
+    // 回复中:发送键变「停止」——点了 abort() 立刻拿回控制权(P1.5 spec §10.1)
+    sendBtn.textContent = "停止";
+    sendBtn.disabled = false;
+    sendBtn.onclick = () => { if (_partnerAbort) _partnerAbort.abort(); };
+  } else {
+    sendBtn.textContent = "发送";
+    sendBtn.disabled = loading;
+    sendBtn.onclick = doSend;
+  }
+  inputRow.appendChild(ta);
+  inputRow.appendChild(sendBtn);
+  card.appendChild(inputRow);
+
+  const newBtn = document.createElement("button");
+  newBtn.className = "jc-btn ghost pc-newthread";
+  newBtn.textContent = "另起一段对话";
+  newBtn.disabled = _partnerBusy;   // 伙伴回复中不许归档,否则旧轮尾巴事件会串进刚重置的新会话(见 partnerNewThread)
+  newBtn.title = "归档当前对话,伙伴重新认识这本书(书内容不受影响,旧对话仍留档可查)";
+  newBtn.onclick = partnerNewThread;
+  card.appendChild(newBtn);
+
+  // 贴底则跟读到底,否则维持作者停留位置(不被新事件拽走,spec §5)
+  scroll.scrollTop = stickBottom ? scroll.scrollHeight : prevTop;
+}
+
+// 单遍配对扫描(spec §4.2):tool 按【下一事件类型】配对——绝不按工具名,
+// 否则提设定 result(error) 会被当 proposal 渲染成假候选卡(评审 finding #2)。
+// 任何配不到 result/proposal 的 tool 都落 active 或 done,绝不消失(finding #7)。
+function renderPartnerEvents(events) {
+  const out = [];
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (ev && ev.t === "tool") {
+      const next = events[i + 1];
+      if (next && next.t === "result") {
+        out.push(pcToolResult(ev, next));
+        i++;                                  // 连同 result 一起消费
+        continue;
+      }
+      if (next && next.t === "proposal") {
+        continue;                             // 压掉 tool 行;proposal 下一轮迭代自渲染
+      }
+      if (i === events.length - 1 && _partnerBusy) {
+        out.push(pcToolActive(ev));           // 末尾 + busy → 活动行
+      } else {
+        out.push(pcToolDone(ev));             // 轮末残留 / [tool,error] / 非 busy → 静态 done
+      }
+      continue;
+    }
+    const el = renderPartnerEvent(ev);
+    if (el) out.push(el);
+  }
+  return out;
+}
+
+function renderPartnerEvent(ev) {
+  switch (ev && ev.t) {
+    // 空 text 的 user 事件(开场触发的 say{text:""})不上屏:防御性处理——服务端理应
+    // 不追加这条(spec §2「服务端对空 text:不追加 user 事件」),真机若未来收紧到该口径,
+    // 这里的判断天然是 no-op,不会因此显示重复/多余内容。
+    case "user": return ev.text && ev.text.trim() ? pcBubble("user", ev.text) : null;
+    case "assistant": {
+      const bubble = pcBubble("assistant", ev.text);
+      if (ev._reasoning) {   // v2:本轮思考挂在这条回复上(会话内可回看)→ 上方收折「已思考 ▸」
+        const wrap = document.createElement("div");
+        wrap.className = "pc-answer";
+        wrap.appendChild(pcReasoning(ev._reasoning, false));
+        wrap.appendChild(bubble);
+        return wrap;
+      }
+      return bubble;
+    }
+    case "result": return pcResult(ev);
+    case "proposal": return pcProposal(ev);
+    case "error": return pcError(ev);
+    default: return null;   // confirm/meta/summary:不单独起一行(confirm 的效果画在对应候选卡上)
+  }
+}
+
+function pcBubble(role, text, live) {
+  const wrap = document.createElement("div");
+  wrap.className = "pc-row pc-" + role + (live ? " pc-live" : "");
+  const av = document.createElement("div");
+  av.className = "pc-avatar";
+  if (role === "assistant") av.appendChild(agentAvatar("领航员", "jc-ava", "jc-fallback"));
+  else av.textContent = "你";
+  const b = document.createElement("div");
+  b.className = "pc-bubble";
+  b.textContent = text || "";
+  wrap.appendChild(av);
+  wrap.appendChild(b);
+  return wrap;
+}
+
+// 「曌」加载图标(日月绕中心轮转):思考期通用指示,summary/纯 busy 态共用
+function zhaoIconHtml() {
+  return '<svg class="pc-zhao" viewBox="0 0 24 24" aria-hidden="true"><g class="pc-zhao-spin">'
+    + '<circle cx="12" cy="4.6" r="3" fill="currentColor"/>'
+    + '<circle cx="12" cy="19.4" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+    + '</g></svg>';
+}
+
+// v2 思考层:思考流灰字折叠块。open=true → 思考中(曌+「伙伴在想…」,展开实时流);
+// open=false → 已想完正在出正文(「已思考 ▸」收折,可点开回看本轮思考)。transient,轮末即清。
+function pcReasoning(text, open) {
+  const det = document.createElement("details");
+  det.className = "pc-reasoning";
+  if (open) det.open = true;
+  const sum = document.createElement("summary");
+  sum.innerHTML = zhaoIconHtml() + "<span>" + (open ? "伙伴在想…" : "已思考") + "</span>";
+  det.appendChild(sum);
+  const body = document.createElement("div");
+  body.className = "pc-reasoning-body";
+  body.textContent = text || "";
+  det.appendChild(body);
+  return det;
+}
+
+function pcResult(ev) {
+  const det = document.createElement("details");
+  det.className = "pc-result" + (ev.error ? " err" : "");
+  const sum = document.createElement("summary");
+  sum.textContent = ev.error ? "查询没成功" : "查到的内容";
+  det.appendChild(sum);
+  const body = document.createElement("div");
+  body.className = "pc-result-text";
+  body.textContent = ev.error || ev.text || "";
+  det.appendChild(body);
+  return det;
+}
+
+// 工具名 → 三态文案(spec §4.3)。〈basename〉取 params.路径 末段文件名。
+// 每个工具每条路径都有定义,无 undefined:提设定成功走 proposal(tool 行被压)、
+// 参数错走 result(error) 用 .err;done 仅极端边角兜底。
+function partnerToolVerb(name, params) {
+  const base = (params && params.路径) ? String(params.路径).split("/").pop() : "";
+  switch (name) {
+    case "看地基": return { active: "正在看地基…", done: "看了地基", err: "查地基没成功" };
+    case "读文件": return { active: `正在读${base}…`, done: `读了${base}`, err: `读${base}没成功` };
+    case "提设定": return { active: "正在拟一条设定…", done: "拟了一条设定", err: "拟设定没成功" };
+    default: {
+      const n = name || "工具";
+      return { active: `正在用${n}…`, done: `用了${n}`, err: `用${n}没成功` };
+    }
+  }
+}
+
+// 活动行:旋转指示器 + 「正在看地基…」(spec §4.2 dangling+busy)
+function pcToolActive(ev) {
+  const row = document.createElement("div");
+  row.className = "pc-tool-active";
+  const spin = document.createElement("span");
+  spin.className = "pc-spinner";
+  row.appendChild(spin);
+  const label = document.createElement("span");
+  label.textContent = partnerToolVerb(ev.name, ev.params).active;
+  row.appendChild(label);
+  return row;
+}
+
+// 静态 done 行:轮末残留 / [tool,error] 兜底 / 非 busy(spec §4.2 后两档)
+function pcToolDone(ev) {
+  const row = document.createElement("div");
+  row.className = "pc-tool-done";
+  row.textContent = partnerToolVerb(ev.name, ev.params).done;
+  return row;
+}
+
+// 合并折叠行:tool + 其 result 配一行(spec §4.2)。summary 用配对 tool 的 done/err 文案,
+// 沿用 pcResult 的 .pc-result 折叠骨架 + .err 样式。
+function pcToolResult(toolEv, resultEv) {
+  const verb = partnerToolVerb(toolEv.name, toolEv.params);
+  const det = document.createElement("details");
+  det.className = "pc-result" + (resultEv.error ? " err" : "");
+  const sum = document.createElement("summary");
+  sum.textContent = resultEv.error ? verb.err : verb.done;
+  det.appendChild(sum);
+  const body = document.createElement("div");
+  body.className = "pc-result-text";
+  body.textContent = resultEv.error || resultEv.text || "";
+  det.appendChild(body);
+  return det;
+}
+
+function pcError(ev) {
+  const row = document.createElement("div");
+  row.className = "pc-error";
+  row.textContent = (ev.text || "出错了") + codeHint(ev.code);
+  return row;
+}
+
+// proposal 事件(候选卡,spec §6.1):虚线边+「候选」角标是挡 AI 文字混进书的唯一结构性保证。
+// before 非空 → 渲染「现在是:〈旧值〉」+ 确认键文案改〔替换〕(二期「见旧值才换值」的知情前提)。
+function pcProposal(ev) {
+  const card = document.createElement("div");
+  card.className = "pc-proposal";
+  const badge = document.createElement("span");
+  badge.className = "pc-proposal-badge";
+  badge.textContent = "候选";
+  card.appendChild(badge);
+
+  const slotLine = document.createElement("div");
+  slotLine.className = "pc-proposal-slot";
+  slotLine.textContent = humanizeSlot(ev.slot);
+  card.appendChild(slotLine);
+
+  if (ev.before) {
+    const beforeLine = document.createElement("div");
+    beforeLine.className = "pc-proposal-before";
+    beforeLine.textContent = `现在是:${ev.before}`;
+    card.appendChild(beforeLine);
+  }
+
+  const content = document.createElement("div");
+  content.className = "pc-proposal-content";
+  content.textContent = ev.content || "";
+  card.appendChild(content);
+
+  const landed = findConfirmLanded(ev.id);
+  if (landed) {
+    const done = document.createElement("div");
+    done.className = "pc-proposal-done";
+    done.textContent = `✓ 已落库 → ${landed}`;
+    card.appendChild(done);
+    return card;
+  }
+
+  // FB-B 模型A:这一格已被同轮兄弟候选落盘 → 本卡变灰、不留死键(点了必撞 stale「这一格刚改过」)
+  if (slotTakenBySibling(ev)) {
+    card.classList.add("pc-proposal-moot");
+    const moot = document.createElement("div");
+    moot.className = "pc-proposal-mootnote";
+    moot.textContent = "这一格已选了其他方向(想换就跟我说)";
+    card.appendChild(moot);
+    return card;
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "pc-proposal-actions";
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "jc-btn";
+  confirmBtn.textContent = "落库";
+  if (_weaving) {   // 织章进行中:确认键置灰(spec §2,锁裁量红线——confirm 走真书写锁,与织章互斥)
+    confirmBtn.disabled = true;
+    confirmBtn.title = "织章进行中,跑完即可拍板";
+  }
+  confirmBtn.onclick = () => partnerConfirm(ev.id, confirmBtn);
+  const editBtn = document.createElement("button");
+  editBtn.className = "jc-btn ghost";
+  editBtn.textContent = "改一改";
+  editBtn.onclick = () => fillPartnerInput(ev.content);
+  actions.appendChild(confirmBtn);
+  actions.appendChild(editBtn);
+  card.appendChild(actions);
+  return card;
+}
+
+// 落点(容器rel#键)→ 人话,如「外置大脑/世界观/金手指.md#代价」→「世界观 · 金手指 · 代价」。
+// 纯字符串启发式(前端没有 slots.py 的槽位扫描器可查),解析不出来就原样兜底显示。
+function humanizeSlot(slotId) {
+  const s = String(slotId || "");
+  const hashIdx = s.lastIndexOf("#");
+  const containerRel = hashIdx >= 0 ? s.slice(0, hashIdx) : s;
+  const key = hashIdx >= 0 ? s.slice(hashIdx + 1) : "";
+  const filename = containerRel.split("/").pop() || "";
+  const stem = filename.replace(/\.md$/i, "");
+  let stage = "", showStem = false;
+  if (containerRel.includes("/世界观/")) { stage = "世界观"; showStem = true; }
+  else if (containerRel.includes("/人物/")) { stage = "人物"; showStem = true; }
+  else if (/立项卡$/.test(stem)) stage = "立项";       // 立项卡/卡章纲本身就是整段的容器,不重复报文件名
+  else if (/卡章纲$/.test(stem)) stage = "卡章纲";
+  const segs = [];
+  if (stage) segs.push(stage);
+  if (showStem) {
+    const shortStem = stem.split(/[·・•]/).pop();   // 人物文件「主角·林潜」只取名字
+    if (shortStem) segs.push(shortStem);
+  }
+  if (key === "@name") segs.push("起名字");
+  else if (key === "@body") segs.push("正文");
+  else if (key) segs.push(key);
+  return segs.join(" · ") || s;
+}
+
+function findConfirmLanded(id) {
+  const events = (PARTNER && PARTNER.events) || [];
+  const hit = events.find((e) => e && e.t === "confirm" && e.id === id);
+  return hit ? (hit.landed || "已落库") : null;
+}
+
+// FB-B 模型A:这一格是否已被【同轮兄弟候选】落盘(同槽备选选了一个,其余变灰,不留点了必撞 stale 的死键)
+function slotTakenBySibling(ev) {
+  const events = (PARTNER && PARTNER.events) || [];
+  for (const e of events) {
+    if (e && e.t === "confirm" && e.id !== ev.id) {
+      const prop = events.find((x) => x && x.t === "proposal" && x.id === e.id);
+      if (prop && prop.slot === ev.slot) return true;
+    }
+  }
+  return false;
+}
+
+// 还有没有【可点】的候选卡(自己没确认、且这一格没被兄弟占)——落盘后自动接一轮的门(FB-B #3):
+// 同槽挑一个 → 其余变灰、无 pending → 前进;异槽逐个决 → 还有卡没决就不前进,等决完。
+function hasActionableProposal() {
+  const events = (PARTNER && PARTNER.events) || [];
+  return events.some((ev) => ev && ev.t === "proposal"
+    && !findConfirmLanded(ev.id) && !slotTakenBySibling(ev));
+}
+
+function fillPartnerInput(text) {
+  if (!_pcInputEl) return;
+  _pcInputEl.value = text || "";
+  _pcInputEl.focus();
+}
+
+// 拍板落盘 = 新的一轮(非流式,走真书写锁):POST /api/partner/confirm {root, id} → 结果记 confirm(本地追加,
+// 供 findConfirmLanded 渲染「已落盘」态)→ 刷新(外置大脑侧栏跟着长,伙伴下一轮看得见,同 postJourneyAnswer 先例)。
+async function partnerConfirm(id, btnEl) {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const out = await jreq("POST", "/api/partner/confirm", { root, id });
+    if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
+    if (out && out.error) {
+      toast(out.error, true);   // 过期/这一格刚改过(快照失配)/落点冲突——不崩,提案仍可重试或重新问
+      if (btnEl) btnEl.disabled = false;
+      return;
+    }
+    if (!PARTNER) PARTNER = { events: [] };
+    PARTNER.events.push({ t: "confirm", id, landed: out.landed });
+    if (out.state) JOURNEY = out.state;
+    toast("已落库 → " + out.landed);
+    paintJourney();
+    if (navMode() === "center") paintNavCenterChrome();
+    refresh();
+    // bug4下一步:落盘后自动接一轮,领航员按固定顺序引下一格(空 text→后端见末事件=confirm 放行,
+    // 不落假 user 气泡)。不 await:确认路径立即返回,引导轮自行流式上屏。
+    // FB-B #3:仅当没有还能点的候选卡时才前进——同槽挑完(兄弟变灰)就走,异槽还有卡没决就等决完。
+    if (!_partnerBusy && !hasActionableProposal()) partnerSay("");
+  } catch (e) {
+    if (!DATA || DATA.root !== root) return;
+    toast(e.message, true);
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+// 归档当前对话、另起一段(不动书内容,只挪 .伙伴对话/ 下的 jsonl 文件)。
+async function partnerNewThread() {
+  const root = DATA && DATA.root;
+  if (!root) return;
+  if (_partnerBusy) { toast("伙伴还在回复,请稍候", true); return; }   // 回复中归档:旧轮 reader 循环没被中止,尾巴事件会串进刚重置的新会话
+  if (!window.confirm("归档当前伙伴对话、另起一段?(书内容不受影响,旧对话仍留档可查)")) return;
+  try {
+    const out = await jreq("POST", "/api/partner/new", { root });
+    if (!DATA || DATA.root !== root) return;
+    if (out && out.error) { toast(out.error, true); return; }
+    _partnerGen++;   // 世代号前移:哪怕 busy 判断被绕过,任何仍在飞的旧世代事件也一律作废(双保险,见 partnerSay)
+    _partnerStopped = false;   // 另起清「已停止」标记(镜像 _partnerGen 生命周期,免漏到新会话)
+    PARTNER = { events: [] };
+    _partnerAutoOpened.delete(root);
+    _partnerRoot = null;   // 强制 loadPartnerPanel() 重新走一遍(history 应已归档为空,可能再触发开场)
+    loadPartnerPanel();
+  } catch (e) {
+    if (!DATA || DATA.root !== root) return;
+    // 停之后 worker 尚在收尾窗口:归档撞轮锁 409 partner_busy(blocker 门禁)→ 专属文案
+    const msg = /partner_busy|还在应答|收尾/.test(e.message || "") ? "伙伴还在收尾,稍等一下再另起" : e.message;
+    toast(msg, true);
   }
 }
 

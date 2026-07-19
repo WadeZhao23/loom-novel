@@ -1,0 +1,25 @@
+{
+  "id": "ds_04_payoff",
+  "split": "dev",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。矿场旧料需按册清点入库,是每月例行的杂务。逆息体质者身份需隐藏——但清点杂务与体质无涉。",
+    "characters": "沈砚:逆息体质,寡言谨慎,做事一板一眼;老陈:同班矿工,搭手对账,话不多。",
+    "prev_hook": "上一章末:工头撂下一句『明早卯时,把三号矿道的旧料清点造册,一件不许漏』。",
+    "chapter_goal": "接住清点造册的杂务钩;沈砚如实点完旧料、造册交差,把这段例行事务走完。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": true, "severity": "中", "evidence_type": "absence",
+     "evidence": "",
+     "note": "本章整体走向=沈砚按工头指派,通篇清点三号矿道旧料、搬运、与老陈重复核对数目、造册交差;数目分毫不差,无任何意外发现、信息增量、资源/关系/实力进展,也无情绪释放或悬念揭晓——纯事务性空转,判无爽点。(注:prev_hook『清点造册』的杂务钩已被正面接住并完成,断钩子维度不误伤。)",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

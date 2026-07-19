@@ -637,6 +637,78 @@ body.typing:not(.focus-mode) .topbar:hover { opacity: 1; }
 .nav-pop-list .np-item::before { content: "●"; color: var(--seal); font-size: 8px; margin-right: 6px; }
 body.focus-mode .nav-ball, body.focus-mode .nav-popover,
 body.typing .nav-ball, body.typing .nav-popover { display: none; }
+.nav-pop-head { display: flex; justify-content: flex-end; margin-bottom: 2px; }
+.nav-center-title { flex: 1; min-width: 0; }   /* 让 #nav-mode-toggle 挤到头像行最右侧 */
+.pc-mode-toggle { flex: none; font-size: var(--fs-caption); padding: 3px 9px; align-self: flex-start; }
+
+/* ---------- 7i. 书房伙伴对话(P3,与卡片机并存):气泡流 + 候选卡 ---------- */
+.journey-card.partner-chat { display: flex; flex-direction: column; gap: var(--space-2); }
+.pc-scroll { display: flex; flex-direction: column; gap: var(--space-3);
+  overflow-y: auto; max-height: 320px; padding-right: 2px; }
+.nav-center .journey-card.partner-chat .pc-scroll { max-height: 44vh; }
+.pc-empty { color: var(--text-mute); font-size: var(--fs-sm); font-style: italic;
+  padding: var(--space-2) 0; }
+.pc-thinking { display: flex; align-items: center; gap: 7px; color: var(--text-mute);
+  font-size: var(--fs-sm); font-style: italic; padding: var(--space-2) 0; }
+/* 「曌」加载图标:日月绕中心轮转(日月当空,时光流转=在思考) */
+.pc-zhao { flex: none; width: 17px; height: 17px; color: var(--seal); }
+.pc-zhao-spin { transform-origin: 12px 12px; animation: pc-zhao-turn 2.6s linear infinite; }
+@keyframes pc-zhao-turn { to { transform: rotate(360deg); } }
+/* v2 思考层:思考流灰字折叠块(思考中展开实时流 / 出正文后收成「已思考 ▸」) */
+.pc-reasoning { border-left: 2px solid var(--line-soft); padding: 1px 0 1px 9px; margin: 2px 0; }
+.pc-reasoning > summary { display: flex; align-items: center; gap: 7px; cursor: pointer;
+  color: var(--text-mute); font-size: var(--fs-sm); font-style: italic; list-style: none; }
+.pc-reasoning > summary::-webkit-details-marker { display: none; }
+.pc-reasoning-body { margin-top: 4px; max-height: 30vh; overflow-y: auto; white-space: pre-wrap;
+  word-break: break-word; line-height: 1.55; font-size: var(--fs-xs); color: var(--text-soft); }
+.pc-row { display: flex; gap: var(--space-2); align-items: flex-start; }
+.pc-row.pc-user { flex-direction: row-reverse; }
+.pc-avatar { flex: none; width: 24px; height: 24px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: var(--fs-caption); color: var(--text-soft);
+  background: var(--line-soft); }
+.pc-row.pc-user .pc-avatar { background: var(--accent-tint); color: var(--accent-ink); font-weight: 700; }
+.pc-bubble { max-width: 82%; padding: 7px 11px; border-radius: var(--radius-md); line-height: 1.55;
+  font-size: var(--fs-sm); white-space: pre-wrap; word-break: break-word;
+  background: var(--surface); border: 1px solid var(--line); }
+.pc-row.pc-user .pc-bubble { background: var(--accent-tint); border-color: transparent; }
+.pc-row.pc-live .pc-bubble { opacity: .7; }
+.pc-tool { font-size: var(--fs-xs); color: var(--text-mute); padding: 1px 4px; }
+.pc-result { font-size: var(--fs-xs); color: var(--text-soft); border: 1px dashed var(--line);
+  border-radius: var(--radius-sm); padding: 4px 8px; background: var(--bg-sunken); }
+.pc-result summary { cursor: pointer; }
+.pc-result.err summary { color: var(--danger); }
+.pc-result-text { margin-top: 4px; white-space: pre-wrap; word-break: break-word; color: var(--text-soft); }
+.pc-tool-active { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs);
+  color: var(--text-mute); padding: 1px 4px; }
+.pc-spinner { flex: none; width: 10px; height: 10px; border-radius: 50%;
+  border: 1.5px solid var(--line); border-top-color: var(--text-soft);
+  animation: pc-spin 0.7s linear infinite; }
+@keyframes pc-spin { to { transform: rotate(360deg); } }
+.pc-tool-done { font-size: var(--fs-xs); color: var(--text-soft); padding: 1px 4px; }
+.pc-stopped { text-align: center; font-size: var(--fs-xs); color: var(--text-mute);
+  font-style: italic; padding: 2px 0; }
+.pc-proposal.pc-proposal-moot { opacity: .55; }   /* FB-B 模型A:同轮兄弟候选已落盘,本卡变灰 */
+.pc-proposal-mootnote { font-size: var(--fs-xs); color: var(--text-mute); font-style: italic; margin-top: 4px; }
+.pc-error { font-size: var(--fs-sm); color: var(--danger); background: var(--danger-tint);
+  border-radius: var(--radius-sm); padding: 6px 9px; }
+/* 候选卡:虚线边 + 「候选」角标——挡 AI 文字混进书的唯一结构性保证(spec §6.1) */
+.pc-proposal { position: relative; border: 1.5px dashed var(--seal-line); border-radius: var(--radius-md);
+  padding: var(--space-3); background: var(--seal-tint); margin: var(--space-1) 0; }
+.pc-proposal-badge { position: absolute; top: -9px; left: 10px; background: var(--seal);
+  color: var(--text-on-accent); font-size: var(--fs-caption); font-weight: 700;
+  padding: 1px 8px; border-radius: var(--radius-pill); }
+.pc-proposal-slot { font-size: var(--fs-xs); color: var(--seal-ink); font-weight: 700; margin-bottom: 4px; }
+.pc-proposal-before { font-size: var(--fs-xs); color: var(--text-mute); margin-bottom: 6px; }
+.pc-proposal-content { font-size: var(--fs-sm); line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.pc-proposal-actions { margin-top: var(--space-2); }
+.pc-proposal-done { margin-top: var(--space-2); font-size: var(--fs-xs); color: var(--success); font-weight: 600; }
+.pc-input-row { display: flex; gap: var(--space-2); align-items: flex-end;
+  border-top: 1px solid var(--line); padding-top: var(--space-2); }
+.pc-input { flex: 1; margin: 0; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+  background: transparent; color: inherit; font: inherit; resize: vertical; }
+.pc-input:disabled { opacity: .55; }
+.pc-send { flex: none; margin: 0; }
+.pc-newthread { align-self: flex-end; font-size: var(--fs-caption); }
 
 /* ---------- 7g. 脉络:三个只读投影(时间轴/伏笔账本/专名册) ---------- */
 .studio-card { width: 560px; }

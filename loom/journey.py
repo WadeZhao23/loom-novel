@@ -31,6 +31,7 @@ class StageSpec:
     land: str                 # 落盘模式:field | sections | card_lines | seed
     target: str = ""          # field/card_lines 的目标文件;sections 的单文件形态
     target_dir: str = ""      # sections 的目录形态
+    slot_order: tuple[str, ...] = ()   # 槽位扫描的容器 stem 优先序(round-robin 轮转用;空=按现有顺序)
 
 
 STAGES: tuple[StageSpec, ...] = (
@@ -38,10 +39,12 @@ STAGES: tuple[StageSpec, ...] = (
               (paths.PROJECT_CARD_REL,), "field", target=paths.PROJECT_CARD_REL),
     StageSpec("世界观", "问出核心世界观:力量体系、金手指及其代价、关键地理与势力",
               (paths.WORLD_REL, paths.WORLD_DIR_REL), "sections",
-              target=paths.WORLD_REL, target_dir=paths.WORLD_DIR_REL),
+              target=paths.WORLD_REL, target_dir=paths.WORLD_DIR_REL,
+              slot_order=("一句话定位", "力量体系", "金手指", "地理与势力", "冰山真相")),
     StageSpec("人物", "问出主角与关键配角/反派:名字、动机、底牌、软肋",
               (paths.CHARS_REL, paths.CHARS_DIR_REL), "sections",
-              target=paths.CHARS_REL, target_dir=paths.CHARS_DIR_REL),
+              target=paths.CHARS_REL, target_dir=paths.CHARS_DIR_REL,
+              slot_order=("主角", "配角", "反派")),
     StageSpec("卡章纲", "问出开局钩子、前 5 章一句话章纲、全书大弧",
               (paths.CARD_REL,), "card_lines", target=paths.CARD_REL),
     StageSpec("voice", "喂 2-3 段你的真实样本让指纹像你(走 seed,不出题)",
@@ -246,6 +249,29 @@ def _premise(root: Path, spec: StageSpec) -> str:
     return "\n\n".join(parts)
 
 
+def _nav_trace(root: Path, *, stage: str, sig: str, why: str, backend, raw: str, code: str = "") -> None:
+    """出题降级才留痕(.审稿留痕/领航员留痕.md):现场证据,新条目在前,保最近 20 条。
+
+    三条硬边界:绝不进 .loom_state.json(游标要薄且可丢弃,ADR 0013);绝不进外置大脑
+    (会被 agent 读到污染设定);绝不被读回来派生状态(题从文件现状推导,不从问答历史推导)。
+    留痕失败绝不影响出题(fire-and-forget,同 events 纪律)。"""
+    from datetime import datetime
+    try:
+        p = root / paths.NAV_TRACE_REL
+        old = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""   # 人可改的文件:GBK 存回也不能让留痕从此静默全丢(读完即 UTF-8 重写,自愈)
+        entries = [b for b in re.split(r"(?=^## )", old, flags=re.M) if b.startswith("## ")][:19]
+        quoted = "\n".join("  > " + l for l in (raw.strip() or "(无原始回复)")[:500].splitlines())
+        entry = (f"## {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {stage}\n"
+                 f"- sig: {sig}\n- 结果: {why}\n"
+                 f"- 后端: {type(backend).__name__} / {getattr(backend, 'model', '') or '—'}\n"
+                 + (f"- code: {code}\n" if code else "")
+                 + f"- 原始回复(截断 500 字):\n{quoted}\n\n")
+        head = "# 领航员留痕\n\n> 出题失败的现场记录:查「为什么降级」用。loom 只追加、不读回;整个文件可删。\n\n"
+        atomic_write_text(p, head + entry + "".join(entries))
+    except Exception:
+        pass
+
+
 def next_card(root: Path, backend) -> dict:
     view = journey_state(root)
     cur = view["current"]
@@ -268,11 +294,16 @@ def next_card(root: Path, backend) -> dict:
             + (premise + "\n\n" if premise else "")
             + f"资料现状:\n{_stage_context(root, spec) or '(全部空白)'}")
     parsed = None
+    raw = ""
+    why = ""       # 降级原因:backend_error|unparsed|few_options|false_exhausted(留痕+查因;成卡时为空)
+    err_code = ""
     try:
         raw = backend.complete(_navigator_system(root), user, max_chars=_NAV_MAX_CHARS)
         parsed = parse_journey_card(raw)
-    except LoomBackendError:
-        parsed = None   # 断网/超时 → 降级卡,旅程不卡死
+        if parsed is None:
+            why = "unparsed"
+    except LoomBackendError as e:
+        why, err_code = "backend_error", (e.code or "")   # 断网/超时 → 降级卡,旅程不卡死
 
     if parsed and parsed.get("exhausted"):
         if stage_done(root, spec):
@@ -282,7 +313,10 @@ def next_card(root: Path, backend) -> dict:
             save_state(root, st)
             return next_card(root, backend) if journey_state(root)["current"] else \
                 {"card": None, "state": journey_state(root)}
-        parsed = None   # 没做完却报无题 → 模型误判,降级卡兜底,给自由输入出口,别死锁
+        parsed, why = None, "false_exhausted"   # 没做完却报无题 → 模型误判,降级兜底,别死锁
+
+    if parsed and len(parsed["options"]) < 2:
+        parsed, why = None, "few_options"   # 契约 2-4 个候选:独苗不成卡(否则烧预算+缓存钉死+无重试钮)
 
     if parsed:
         card = {"stage": cur, "sig": sig, "question": parsed["question"],
@@ -291,8 +325,9 @@ def next_card(root: Path, backend) -> dict:
             card["field"] = parsed["field"]
         j["asked"][cur] = int(j["asked"].get(cur, 0)) + 1   # 只有成卡才烧预算
     else:
-        card = {"stage": cur, "sig": sig, "options": [], "degraded": True,
+        card = {"stage": cur, "sig": sig, "options": [], "degraded": True, "why": why,
                 "question": f"「{spec.key}」要定:{_STAGE_HINT.get(cur, spec.key)}。领航员这次没出上题,直接写你想定的。"}
+        _nav_trace(root, stage=cur, sig=sig, why=why, backend=backend, raw=raw, code=err_code)
     j["card"] = card
     st["journey"] = j
     save_state(root, st)
@@ -344,6 +379,7 @@ def _replace_h2_body(text: str, title: str, new_body: str) -> str:
                   lambda m: m.group(1) + replacement + "\n", text, count=1, flags=re.M | re.S)
 
 
+# ⚠️ 卡片机 legacy 落盘链与伙伴 `_land_slot`(line 分支)共用此 helper——退役卡片机时勿删。
 def _land_field(root: Path, field: str, answer: str) -> str:
     p = root / paths.PROJECT_CARD_REL
     text = p.read_text(encoding="utf-8") if p.is_file() else "# 立项卡\n"
@@ -358,6 +394,56 @@ def _land_field(root: Path, field: str, answer: str) -> str:
         text = _replace_h2_body(text, field, answer)
     atomic_write_text(p, text)
     return paths.PROJECT_CARD_REL
+
+
+_SLOT_ROW_FILL_RE_TMPL = r"^(-\s*{key}\s*(?:[(（][^)）]*[)）])?\s*[:：])(.*)$"
+
+
+def _land_slot(root: Path, slot_id: str, answer: str) -> str:
+    """按 slot 的 at 类型定址落盘。slot_id = "<容器rel>#<键>"。守落盘三铁律。
+
+    P1 覆盖 line/h2/row;filename/file 见 Task 5。slot_id 必须来自 stage_slots(防越界)。"""
+    from .slots import stage_slots
+    answer = answer.strip()
+    if not answer:
+        raise ValueError("答案不能为空")
+    rel, _, key = slot_id.partition("#")
+    # 从 slot 集合定位 at(单一真相:落点类型由扫描器说了算,不在这里重新推断)
+    slot = next((s for spec in STAGES for s in stage_slots(root, spec) if s.id == slot_id), None)
+    if slot is None:
+        raise ValueError(f"未知槽位:{slot_id}")
+    p = root / rel
+    text = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+    if slot.at == "line":       # 平台行:复用 _land_field 的整行替换裁量
+        return _land_field(root, "平台", answer)
+    if slot.at == "h2":
+        atomic_write_text(p, _replace_h2_body(text, key, answer))
+        return rel
+    if slot.at == "row":
+        pat = re.compile(_SLOT_ROW_FILL_RE_TMPL.format(key=re.escape(key)), re.M)
+        if slot.key.startswith("第") or key == "大弧":   # 卡章纲行走既有 _apply_card_lines(内部已落盘)
+            return _apply_card_lines(root, f"- {key}:{answer}", fallback=answer)
+        new, n = pat.subn(lambda m: f"{m.group(1)}{answer}", text, count=1)
+        if not n:   # 理论兜底:守卫已保证槽位存在→行通常在;仅防扫描与落盘间文件被并发改(TOCTOU)
+            new = text.rstrip() + f"\n- {key}:{answer}\n"
+        atomic_write_text(p, new)
+        return rel
+    if slot.at == "filename":
+        from .draft import _FN_BAD
+        name = _FN_BAD.sub("·", answer.splitlines()[0].strip())[:12] or "未命名"
+        role = Path(rel).stem.split("·")[0].split("・")[0].split("•")[0]
+        target = p.with_name(f"{role}·{name}.md")
+        if target.exists() and is_substantive(target.read_text(encoding="utf-8", errors="replace")):
+            raise ValueError(f"已经有一个叫「{name}」的{role}了——换个名字,或先合并那张卡")
+        if target.exists():   # 占位残卡,让位
+            target.unlink()
+        p.rename(target)
+        return str(target.relative_to(root))
+    if slot.at == "file":
+        joiner = "\n" if text.endswith("\n") else "\n\n"
+        atomic_write_text(p, (text.rstrip() + joiner + answer + "\n") if text.strip() else f"{answer}\n")
+        return rel
+    raise ValueError(f"P1 未支持的落点类型:{slot.at}(filename/file 见 Task 5)")
 
 
 def _digest(backend, question: str, answer: str, format_ask: str) -> str:
@@ -421,6 +507,7 @@ def _bulleted(answer: str) -> str:
     return "\n".join(f"- {l.strip()}" for l in answer.splitlines() if l.strip())
 
 
+# ⚠️ 卡片机 legacy 落盘链与伙伴 `_land_slot`(row 分支,章纲行)共用此 helper——退役卡片机时勿删。
 def _apply_card_lines(root: Path, body: str, *, fallback: str = "") -> str:
     """把已整形的「- 第N章:…」body 落卡章纲(填空章行/追加缺章行/非章行精确判重;人写行绝不覆盖)。
     啥都没落且 fallback 非空 → 追加 _bulleted(fallback) 兜底(land_answer 传原 answer 保「答案绝不丢」;

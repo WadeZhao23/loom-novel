@@ -3,6 +3,8 @@
   "title": "废矿·逆息觉醒(注入缺陷·验证检测器)",
   "chapter_chars": 600,
   "fixture": "chapter.md",
+  "case_type": "detector_contract",
+  "expect_fail_graders": ["关键要素", "去AI味·确定性"],
   "setting": "(同 case_01)灵气复苏第三年,逆息体质,濒死爆发折寿。地名:少年时在「一中」读书。力量体系 F~SSS。人物:师姐。章末钩=师姐登场。",
   "fingerprint": "## anchor 例句\n> 他没说话。",
   "fingerprint_anchors": ["他没说话。"],
@@ -12,5 +14,5 @@
     "max_aitell_hits": 0,
     "len_tolerance": 0.6
   },
-  "note": "这一章是【故意写坏的】固定 fixture:埋了 1 句 AI 翻转句、1 处设定漂移(二中)、并漏掉了师姐——用来证明 grader 真能抓到。它【应当】FAIL。"
+  "note": "这一章是【故意写坏的】固定 fixture:埋了 1 句 AI 翻转句、1 处设定漂移(二中)、并漏掉了师姐——用来证明 grader 真能抓到。契约语义(detector_contract):expect_fail_graders 里声明的 grader 命中缺陷=契约成立=本 case 判绿✅;检测器漏抓才 FAIL 变红。"
 }

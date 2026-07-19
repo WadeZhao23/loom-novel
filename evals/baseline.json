@@ -1,22 +1,77 @@
 {
+  "schema_version": 1,
   "cases": {
     "case_01_clean": {
       "score": 1.0,
-      "passed": true
+      "passed": true,
+      "case_type": "quality",
+      "graders": {
+        "长度达标": {
+          "score": 1.0,
+          "passed": true,
+          "gating": true
+        },
+        "去AI味·确定性": {
+          "score": 1.0,
+          "passed": true,
+          "gating": true
+        },
+        "关键要素": {
+          "score": 1.0,
+          "passed": true,
+          "gating": true
+        }
+      }
     },
     "case_02_flawed": {
       "score": 0.607,
-      "passed": false
+      "passed": true,
+      "case_type": "detector_contract",
+      "graders": {
+        "长度达标": {
+          "score": 1.0,
+          "passed": true,
+          "gating": true
+        },
+        "去AI味·确定性": {
+          "score": 0.5,
+          "passed": false,
+          "gating": true
+        },
+        "关键要素": {
+          "score": 0.5,
+          "passed": false,
+          "gating": true
+        }
+      }
     },
     "case_03_style_ab": {
       "score": 0.828,
-      "passed": true
+      "passed": true,
+      "case_type": "quality",
+      "graders": {
+        "风格相似·中性指纹": {
+          "score": 0.657,
+          "passed": true,
+          "gating": false
+        },
+        "风格相似·学过指纹": {
+          "score": 0.74,
+          "passed": true,
+          "gating": false
+        },
+        "指纹生效·A/B": {
+          "score": 0.828,
+          "passed": true,
+          "gating": true
+        }
+      }
     }
   },
   "summary": {
     "cases": 3,
-    "passed": 2,
-    "pass_rate": 0.667,
+    "passed": 3,
+    "pass_rate": 1.0,
     "mean_score": 0.812,
     "per_grader": {
       "长度达标": 1.0,

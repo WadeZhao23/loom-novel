@@ -19,6 +19,14 @@ from .fingerprint import _segment as segment_sentences
 from .gates import CRITIC_去AI味, CRITIC_质检, Issue
 from .gates import _parse_verdict as parse_critic_verdict
 
+# ── Generation suite 接缝(Phase 1)──纯再导出,零逻辑:evals/generate.py 真调
+#    五 Agent 流水线所需的最小集合。引擎侧改这些符号的签名 = 改契约,先改这里。
+from .agents import run_pipeline
+from .backends import get_backend
+from .config import Config, load_config, save_config
+from .paths import outline_path
+from .scaffold import init as scaffold_init
+
 __all__ = [
     "CRITIC_去AI味",
     "CRITIC_质检",
@@ -26,4 +34,11 @@ __all__ = [
     "detect_aitell",
     "parse_critic_verdict",
     "segment_sentences",
+    "Config",
+    "get_backend",
+    "load_config",
+    "outline_path",
+    "run_pipeline",
+    "save_config",
+    "scaffold_init",
 ]

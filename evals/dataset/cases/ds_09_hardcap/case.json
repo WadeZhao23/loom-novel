@@ -1,0 +1,26 @@
+{
+  "id": "ds_09_hardcap",
+  "split": "holdout",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "detector_note": "本例为数据集平衡性收录的『硬约束组合』样本,不用于校准本 8 维语义 Judge,而为覆盖确定性 grader(evals/cases Fixture suite)辖区的缺陷类型。正文含三处硬约束缺陷,均属确定性 grader 辖区、不由本 8 维语义 Judge 覆盖:① 必含缺失——生成约束要求本章必须让主线信物『半枚虎符』出场并交代下落,正文通篇无『虎符』二字(必含关键词缺席,可正则/关键词检测判定);② 禁止项出现——生成规范要求正文数字一律用汉字,正文出现阿拉伯数字『3号矿道』(格式黑名单,可正则判定);③ 套路翻转句式——去AI味硬规则禁止『不是…而是…』翻转句,正文含一处(可正则判定)。其中第③处翻转句同时构成语义 Judge 的 AI 腔硬伤,故 8 维标注中 AI 腔如实标 present=True、evidence 引该翻转句;①②纯属确定性辖区、不落入 8 维语义硬伤,故其余 7 维如实标 present=False。此类缺陷由 Fixture suite 的确定性 grader 辖区覆盖,本集只为平衡性收录。",
+  "context": {
+    "setting": "灵气复苏第三年。矿场按班排工,换班的门路都攥在班头手里。逆息体质者沈砚要瞅准无人的时辰才好脱身,一条能自由进出的暗道就是活命的本钱。",
+    "characters": "沈砚:逆息体质,寡言谨慎,肯下本钱换退路;老陈:同班老矿工,管着夜班的换班名册,爱占点小便宜。",
+    "prev_hook": "上一章末:老陈私下递话『你要夜里那条清净道,不是不行,拿东西来换』。",
+    "chapter_goal": "接住老陈『拿东西来换』的钩——沈砚同老陈谈拢,换到夜班独走那条道的门路。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": true, "severity": "低", "evidence_type": "chapter",
+     "evidence": "沈砚要的不是这几两钱能省下的工,而是一条没人盯着、能自由进出的活路。",
+     "note": "如实标注:正文含一处『不是…而是…』套路翻转句,归 AI 腔六类中的『句式过整齐/套路句式』,系本章唯一 AI 腔处,故判低。context 无写作指纹声明,不适用豁免护栏。该翻转句亦属确定性去AI味 grader 辖区(详见顶层 detector_note),两辖区在此重叠,语义侧如实记 present=True。本章另有『必含缺失(半枚虎符)』与『禁止项(阿拉伯数字3号矿道)』两处硬约束缺陷,纯属确定性辖区、不落 8 维,故其余七维如实为 present=False。",
+     "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

@@ -17,7 +17,7 @@ from .backends import Backend
 from .config import load_config
 from .fsutil import atomic_write_text
 from .guard import DRAFT_SECTION, validate_output
-from .parse import PLACEHOLDER_MARKS, split_brain_draft as _split  # 读侧解析共置 parse.py(S7),薄别名保引用面
+from .parse import is_substantive, split_brain_draft as _split  # 读侧解析共置 parse.py(S7),薄别名保引用面
 from .paths import CARD_REL, CHARS_REL, WORLD_REL
 
 Progress = Callable[[dict], None]
@@ -77,13 +77,14 @@ def _genre(project_root: Path) -> str:
 
 
 def _is_blank_or_template(path: Path) -> bool:
-    """文件缺失 / 空 / 还是占位模板(含占位标记)→ 可安全覆盖;否则保留作者内容。"""
+    """文件缺失 / 空 / 剥掉占位提示后没有实质内容 → 可安全覆盖;否则保留作者内容。
+
+    与 parse.is_substantive 共用同一判定(占位判定单一真相),两侧永不漂移——
+    旧版裸子串匹配 PLACEHOLDER_MARKS 会把「引导行含标记 + 作者已填真内容」误判为可覆盖(静默数据丢失)。"""
     if not path.exists():
         return True
     text = path.read_text(encoding="utf-8")
-    if not text.strip():
-        return True
-    return any(m in text for m in PLACEHOLDER_MARKS)
+    return not text.strip() or not is_substantive(text)
 
 
 def draft_brain(project_root: Path, idea: str, backend: Backend, progress: Progress = _noop) -> dict:

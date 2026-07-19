@@ -1,6 +1,8 @@
 """创作旅程状态机:阶段谓词/游标推进/跳段回跳/坏游标降级(ADR 0013:游标可丢弃、文件现状为准)。"""
 from loom import journey
-from loom.paths import CARD_REL, PROJECT_CARD_REL
+from loom.backends import LoomBackendError, DemoBackend
+from loom.config import load_config
+from loom.paths import CARD_REL, PROJECT_CARD_REL, NAV_TRACE_REL
 from conftest import FakeBackend, const
 
 
@@ -155,6 +157,53 @@ def test_last_question_of_stage_pins_current(project):
     assert s2["card"] == out["card"]
 
 
+def test_single_option_degrades_without_burning_budget(project):
+    # 契约是 2-4 个候选:独苗/零候选不成卡——不烧预算、不进缓存、带 why 供查因
+    fake = FakeBackend(const("问:只有一个选项?\n- 独苗"))
+    out = journey.next_card(project, fake)
+    assert out["card"]["degraded"] is True
+    assert out["card"]["why"] == "few_options"
+    s = journey.journey_state(project)
+    assert next(x for x in s["stages"] if x["key"] == "立项")["asked"] == 0
+    journey.next_card(project, fake)          # 降级不吃缓存 → 真重试
+    assert len(fake.calls) == 2
+
+
+class BoomBackend:
+    """一调用就炸的假后端:模拟断网/没key。"""
+    def complete(self, system, user, *, max_chars=None, on_chunk=None):
+        raise LoomBackendError("联不上", code="deepseek_call_failed")
+
+
+def test_trace_written_on_backend_error(project):
+    out = journey.next_card(project, BoomBackend())
+    assert out["card"]["why"] == "backend_error"
+    text = (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+    assert "backend_error" in text and "deepseek_call_failed" in text
+
+
+def test_trace_records_model_name(project):
+    class BoomWithModel:
+        model = "deepseek-v4-flash"
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise LoomBackendError("联不上", code="deepseek_call_failed")
+    journey.next_card(project, BoomWithModel())
+    assert "deepseek-v4-flash" in (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+
+
+def test_no_trace_on_success(project):
+    journey.next_card(project, FakeBackend(const(_CARD_RAW)))
+    assert not (project / NAV_TRACE_REL).exists()   # 成功不打点(体积+隐私:raw含书的设定)
+
+
+def test_trace_keeps_last_20(project):
+    import re as _re
+    for _ in range(23):
+        journey.next_card(project, BoomBackend())
+    text = (project / NAV_TRACE_REL).read_text(encoding="utf-8")
+    assert len(_re.findall(r"^## ", text, _re.M)) == 20
+
+
 # ---- 答案落盘(Task 5) ----
 
 def _prime_card(project, **extra):
@@ -298,6 +347,85 @@ def test_land_answer_requires_card_and_text(project):
         journey.land_answer(project, "   ", FakeBackend(const("x")))
 
 
+def test_land_slot_line_replaces_platform(project):
+    from loom.journey import _land_slot
+    rel = _land_slot(project, "外置大脑/立项卡.md#平台", "番茄")
+    assert rel.endswith("立项卡.md")
+    assert "平台:番茄" in (project / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+
+
+def test_land_slot_h2_fills_placeholder(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/立项卡.md#题材", "重生+复仇+宗门流")
+    body = (project / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+    assert "重生+复仇+宗门流" in body
+
+
+def test_land_slot_row_fills_after_colon_keeps_paren(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/世界观/金手指.md#代价·限制", "每吞一次折寿三天")
+    text = (project / "外置大脑/世界观/金手指.md").read_text(encoding="utf-8")
+    assert "- 代价·限制(至少一种硬代价,不能无敌到没冲突):每吞一次折寿三天" in text  # 括注一字不剥
+
+
+def test_land_slot_row_refilled_replaces_line(project):
+    from loom.journey import _land_slot
+    p = project / "外置大脑/世界观/金手指.md"
+    _land_slot(project, "外置大脑/世界观/金手指.md#类型", "系统面板")
+    _land_slot(project, "外置大脑/世界观/金手指.md#类型", "随身空间")   # 回头改
+    text = p.read_text(encoding="utf-8")
+    assert "随身空间" in text and text.count("系统面板") == 0        # 整行替换,旧值不残留
+
+
+def test_land_slot_card_line_does_not_nuke_file(project, monkeypatch):
+    # 卡章纲 row 槽落盘:内容进第N章行,文件标题/其它章行/大弧行都还在(防 rel-as-content bug)
+    from loom import slots as slots_mod
+    from loom.journey import _land_slot
+    from loom.slots import Slot
+    rel = "外置大脑/卡章纲.md"
+    fake = Slot(id=f"{rel}#第1章", label="第1章", container=rel, at="row",
+                key="第1章", hint="", filled=False, preview="")
+    orig = slots_mod.stage_slots
+    monkeypatch.setattr(slots_mod, "stage_slots",
+                        lambda root, spec: [fake] if spec.key == "卡章纲" else orig(root, spec))
+    _land_slot(project, f"{rel}#第1章", "主角觉醒,发现体内有个系统")
+    text = (project / rel).read_text(encoding="utf-8")
+    assert "主角觉醒" in text
+    assert "# 卡章纲" in text           # 标题还在(没被 rel 字符串覆盖)
+    assert "- 第5章:" in text or "第5章" in text   # 其它章行还在
+
+
+def test_land_slot_filename_renames_and_unlocks(project):
+    from loom.journey import _land_slot, _protagonist_done
+    d = project / "外置大脑/人物"
+    # 先给未命名主角填点实质(否则改名后仍非实质,门禁不认)
+    unnamed = d / "主角·未命名.md"
+    unnamed.write_text(unnamed.read_text(encoding="utf-8").replace(
+        "- 核心欲望", "- 核心欲望:复仇\n- 旧核心欲望"), encoding="utf-8")
+    _land_slot(project, "外置大脑/人物/主角·未命名.md#@name", "林潜")
+    assert (d / "主角·林潜.md").is_file()
+    assert not (d / "主角·未命名.md").exists()
+    assert _protagonist_done(project) is True       # 门禁解锁
+
+
+def test_land_slot_filename_collision_refuses(project):
+    from loom.journey import _land_slot
+    import pytest
+    d = project / "外置大脑/人物"
+    (d / "主角·林潜.md").write_text("# 主角 · 林潜\n\n- 核心欲望:复仇\n", encoding="utf-8")  # 已有实质
+    with pytest.raises(ValueError):
+        _land_slot(project, "外置大脑/人物/主角·未命名.md#@name", "林潜")
+    assert (d / "主角·未命名.md").exists()           # 原文件没被吞
+
+
+def test_land_slot_file_appends(project):
+    from loom.journey import _land_slot
+    _land_slot(project, "外置大脑/世界观/一句话定位.md#@body", "灵气复苏的现代都市,旧秩序崩塌")
+    text = (project / "外置大脑/世界观/一句话定位.md").read_text(encoding="utf-8")
+    assert "灵气复苏的现代都市" in text
+    assert text.index("#") < text.index("灵气复苏")   # 追加在标题之后
+
+
 # ---- goto 语义(I1/I2) ----
 
 def test_goto_refocuses_done_stage(project):
@@ -357,3 +485,12 @@ def test_exhausted_on_done_stage_skips_and_advances(project):
     s = out["state"]
     assert next(x for x in s["stages"] if x["key"] == "世界观")["skipped"] is True
     assert s["current"] != "世界观"   # 真做完了 + 报无题 → 真跳走,不困在本段
+
+
+# ---- DemoBackend 领航员分支(Task 5) ----
+
+def test_demo_navigator_end_to_end_card(project):
+    # LOOM_DEMO 下起书访谈必须端到端可点:出正常卡带 2-4 个候选,不降级
+    out = journey.next_card(project, DemoBackend(load_config(project)))
+    assert "degraded" not in out["card"]
+    assert 2 <= len(out["card"]["options"]) <= 4

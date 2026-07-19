@@ -1,0 +1,25 @@
+{
+  "id": "ds_07_time",
+  "split": "calibration",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者的真名是活命死穴,一旦被当众喊破、坐实身份,就会被清脉司缉拿为炉鼎。矿场夜里打更报时,昨夜三更正是最死寂的时候。",
+    "characters": "沈砚:逆息体质,寡言谨慎,遇事先查清底细;提灯人:身份不明,昨夜喊破沈砚真名后隐入黑暗。",
+    "prev_hook": "上一章末(就在昨夜三更):矿道尽头亮起一盏提灯,一个陌生声音在黑暗里清清楚楚喊出了沈砚的真名,人却转身没入巷道深处。",
+    "chapter_goal": "接住提灯人喊破真名的强钩——沈砚追查昨夜那盏提灯与那道声音的来历,把身份暴露的危机往前推。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": true, "severity": "中", "evidence_type": "chapter",
+     "evidence": "前日夜里的动静——那盏提灯、那道喊破他真名的声音",
+     "note": "context.prev_hook 把提灯人喊破真名一事锚定在『昨夜三更』;本章正文却把同一件事(那盏提灯、那道喊破真名的声音)回想成『前日夜里』——前日即前天,与昨夜相差一昼夜以上,时间粒度与前情锚点明显不符,且非『不久前』一类模糊词、非合理换算。命中时间连续性,粒度明显不符判中。",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

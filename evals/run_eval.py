@@ -5,7 +5,7 @@
     python -m evals.run_eval --baseline        # 把本次结果存成基线 baseline.json
     python -m evals.run_eval --gate            # 和基线比对,有回归则退出码 1(给 CI 用)
 
-退出码:0=无回归 / 1=有回归(--gate)或加载基线失败。
+退出码:0=通过/已固化 / 1=质量回归 / 2=infra(无 case 或无基线文件)。
 """
 
 from __future__ import annotations
@@ -52,25 +52,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--baseline", action="store_true", help="把本次结果存成基线")
     ap.add_argument("--gate", action="store_true", help="和基线比对,有回归则退出码 1(CI 用)")
     ap.add_argument("--judge", action="store_true", help="额外跑 LLM 复审 grader")
+    ap.add_argument("--judge-backend", choices=["demo", "configured"], default="demo",
+                    help="judge 用哪个后端:demo(离线占位,默认)/ configured(读项目配置,要 key)")
     ap.add_argument("--tol", type=float, default=0.05, help="回归容差(分数下滑超过它才算回归)")
     ap.add_argument("--baseline-file", type=Path, default=HERE / "baseline.json")
     args = ap.parse_args(argv)
 
     backend = None
     if args.judge:
-        # 离线默认走 DemoBackend(占位、不联网、不花钱);要真评测:去掉 LOOM_DEMO 并在项目配好 .env/后端。
-        os.environ.setdefault("LOOM_DEMO", "1")
+        if args.judge_backend == "demo":
+            os.environ["LOOM_DEMO"] = "1"   # 显式设,不用 setdefault(避免 "0" 也算真、进程串染)
         try:
             from loom.backends import get_backend
             from loom.config import Config
             backend = get_backend(Config())
         except Exception as e:  # noqa: BLE001
-            print(f"⚠ 无法初始化后端,LLM grader 将跳过:{e}")
+            print(f"⚠ 无法初始化后端(judge-backend={args.judge_backend}):{e}")
 
     results = run_suite(args.cases, backend=backend, judge=args.judge)
     if not results:
         print(f"✗ 在 {args.cases} 下没找到任何 case(需要 <case>/case.json)。")
-        return 1
+        return 2   # infra:数据集缺失,不是质量回归
 
     _print_table(results)
     summ = aggregate(results)
@@ -81,19 +83,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline:
         save_baseline(args.baseline_file, results)
         print(f"\n✓ 已写入基线:{args.baseline_file}")
-        return 0
+        if not args.gate:
+            return 0
+        # --baseline --gate 同传:固化后照常跑门禁,不静默跳过
 
     if args.gate:
         baseline = load_baseline(args.baseline_file)
         if baseline is None:
             print(f"\n✗ 没有基线可比对({args.baseline_file})。先跑一次 --baseline。")
-            return 1
+            return 2   # infra:基线文件缺失,不是质量回归
         regs = compare_to_baseline(results, baseline, tol=args.tol)
         if regs:
             print("\n❌ 检测到回归:")
             for x in regs:
                 print(f"   · {x['case']}:{x['kind']}(基线 {x['was']} → 现在 {x['now']})")
-            return 1
+            return 1   # 质量回归
         print("\n✅ 无回归(与基线一致或更好)。")
     return 0
 

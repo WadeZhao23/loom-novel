@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import key_is_set, load_config, openai_compat_key_is_set
-from .paths import brain_rel
+from .paths import NAV_TRACE_REL, brain_rel
 
 # 单一真相:server.py 也从这里导入,避免清单各存一份漂移
 BRAIN_FILES = ["世界观", "人物卡", "卡章纲", "写作指纹"]   # 外置大脑【四件套强制】
@@ -91,6 +92,14 @@ def run_checks(root: Path) -> list[Check]:
     # f. 可选卡(立项卡/文风参考/违禁词):有无都 ok——纯信息、绝不 ok=False、绝不阻断(同违禁词待遇)
     for n in OPTIONAL_BRAIN:
         checks.append(_c(f"外置大脑 · {n}(可选)", True))
+    # g. 领航员近况(读留痕,纯只读;没有留痕文件 = 没降级过,不出这条,零噪音)
+    trace = root / NAV_TRACE_REL
+    if trace.is_file():
+        n = len(re.findall(r"^## ", trace.read_text(encoding="utf-8", errors="replace"), re.M))
+        checks.append(_c("领航员出题", n == 0,
+                         f"最近留痕里有 {n} 次降级(只保最近20条)",
+                         f"看 {NAV_TRACE_REL} 的「结果」列:backend_error→查key/网络;"
+                         "unparsed/few_options/false_exhausted→升级loom或换模型。修好后删掉这个文件即清零"))
     return checks
 
 

@@ -1,0 +1,208 @@
+"""κ / P·R·F1 纯函数:手算小样本对拍。零真实模型、零外部依赖。"""
+import pytest
+
+from evals.calibration import PRF, cohen_kappa, evaluate_against_targets, load_targets, prf_for_dimension
+from evals.dataset import DIMENSIONS
+from evals.judge import JudgeResult, DimensionVerdict
+
+
+def test_kappa_perfect_agreement():
+    assert cohen_kappa([True, False, True], [True, False, True]) == 1.0
+
+
+def test_kappa_chance_level_near_zero():
+    # 对角与反对角各半,po=0.5;两方各 50% 正例 → pe=0.5 → κ=0
+    a = [True, True, False, False]
+    b = [True, False, True, False]
+    assert abs(cohen_kappa(a, b) - 0.0) < 1e-9
+
+
+def test_kappa_known_value():
+    # 教科书例:po=0.7, pe=0.5 → κ=(0.7-0.5)/(1-0.5)=0.4
+    # 注:brief 原始 b=[T]*3+[F]*2+[T]*2+[F]*3 实际只 6/10 一致(po=0.6→κ=0.2),手算有误,
+    # 已改用真正 7/10 一致的序列对拍(pe=0.5 由 a 自身 50/50 保证,与 b 的分布无关)。
+    a = [True]*5 + [False]*5
+    b = [True]*3 + [False]*2 + [True]*1 + [False]*4   # a∩b 一致 7/10(验证见下方独立核对)
+    assert abs(cohen_kappa(a, b) - 0.4) < 1e-9
+
+
+def test_kappa_length_mismatch_raises():
+    with pytest.raises(ValueError):
+        cohen_kappa([True], [True, False])
+
+
+def test_kappa_single_category_all_false():
+    assert cohen_kappa([False, False], [False, False]) == 1.0   # 都判 absent 且一致
+
+
+def test_prf_perfect():
+    p = prf_for_dimension([True, False, True], [True, False, True])
+    assert p.tp == 2 and p.fp == 0 and p.fn == 0
+    assert p.precision == 1.0 and p.recall == 1.0 and p.f1 == 1.0
+
+
+def test_prf_with_errors():
+    # gold: 1,1,0 ; pred: 1,0,1 → tp=1 fp=1 fn=1 → P=R=0.5 F1=0.5
+    p = prf_for_dimension([True, True, False], [True, False, True])
+    assert (p.tp, p.fp, p.fn) == (1, 1, 1)
+    assert p.precision == 0.5 and p.recall == 0.5 and p.f1 == 0.5
+
+
+def test_prf_no_predictions_precision_none():
+    # 无任何 pred 正例 → precision 未定义(None),recall=0
+    p = prf_for_dimension([True, False], [False, False])
+    assert p.tp == 0 and p.precision is None and p.recall == 0.0
+
+
+def test_targets_preregistered_values():
+    t = load_targets()
+    assert t["kappa_human_human"] == 0.70
+    assert t["kappa_judge_gold"] == 0.60
+    assert t["high_cost_recall"] == 0.85
+    assert isinstance(t["high_cost_dimensions"], list) and t["high_cost_dimensions"]
+    assert "待验收标准" in t["note"] or "非当前事实" in t["note"]   # 诚实性:不冒充结果
+
+
+def test_evaluate_meets_target():
+    r = evaluate_against_targets(0.72, 0.70)
+    assert r["met"] is True and r["value"] == 0.72 and r["target"] == 0.70
+
+
+def test_evaluate_below_target():
+    assert evaluate_against_targets(0.55, 0.60)["met"] is False
+
+
+def test_evaluate_no_data_is_none_not_fail():
+    r = evaluate_against_targets(None, 0.70)
+    assert r["met"] is None       # 无数据 ≠ 未达标,是「待测」
+
+
+def test_high_cost_dimensions_are_real_dimensions():
+    # 跨模块耦合护栏:targets.json 的高代价维必须是真实 DIMENSIONS 成员——
+    # 防将来改维度名/打错字让 Phase 4 硬门禁悄悄指向不存在的维度。
+    from evals.dataset import DIMENSIONS
+    assert set(load_targets()["high_cost_dimensions"]) <= set(DIMENSIONS)
+
+
+def _gold_two_cases():
+    # 两个 case 的金标:case1 只 AI腔命中;case2 只 设定漂移命中
+    return {d: [d == "AI腔", d == "设定漂移"] for d in DIMENSIONS}
+
+
+def test_present_matrix_shape():
+    from evals.calibration import present_matrix
+    labels_c1 = [{"dimension": d, "present": (d == "AI腔")} for d in DIMENSIONS]
+    labels_c2 = [{"dimension": d, "present": (d == "设定漂移")} for d in DIMENSIONS]
+    m = present_matrix([{"labels": labels_c1}, {"labels": labels_c2}])
+    assert m["AI腔"] == [True, False] and m["设定漂移"] == [False, True]
+
+
+def test_report_judge_vs_gold_perfect():
+    from evals.calibration import build_calibration_report
+    gold = _gold_two_cases()
+    judge = _gold_two_cases()                     # Judge 与金标完全一致
+    rep = build_calibration_report(gold, judge, human_pairs=None)
+    assert rep["judge_vs_gold"]["AI腔"]["f1"] == 1.0
+    assert rep["judge_vs_gold"]["设定漂移"]["recall"] == 1.0
+
+
+def test_report_human_kappa_is_pending_when_no_annotations():
+    from evals.calibration import build_calibration_report
+    rep = build_calibration_report(_gold_two_cases(), None, human_pairs=None)
+    assert rep["human_human_kappa"]["status"] == "待标注"      # 不造数
+    assert rep["human_human_kappa"]["n"] == 0
+    assert rep["judge_vs_gold_status"] == "待真机"              # 无 judge 数据
+
+
+def test_write_report_emits_json_and_md(tmp_path):
+    from evals.calibration import build_calibration_report, write_report
+    rep = build_calibration_report(_gold_two_cases(), _gold_two_cases(), None)
+    j, m = write_report(rep, tmp_path)
+    assert j.is_file() and m.is_file()
+    import json as _j
+    assert _j.loads(j.read_text(encoding="utf-8"))["judge_vs_gold"]["AI腔"]["f1"] == 1.0
+    assert "待标注" in m.read_text(encoding="utf-8")            # MD 也如实标空位
+
+
+def test_verdict_matrix_rejects_infra_case():
+    import pytest
+    from evals.judge import JudgeResult
+    from evals.calibration import verdict_matrix
+    infra = JudgeResult("c", [], infra_error=True, error="[infra] boom")
+    with pytest.raises(ValueError):
+        verdict_matrix([infra])            # infra 绝不能被静默当成全 absent
+
+
+def test_aligned_matrices_drops_infra_symmetrically_and_preserves_order():
+    from evals.judge import JudgeResult, DimensionVerdict
+    from evals.calibration import aligned_matrices
+    def _vr(cid, present_dim):
+        vs = [DimensionVerdict(d, d == present_dim, "高" if d == present_dim else None, "", "")
+              for d in DIMENSIONS]
+        return JudgeResult(cid, vs, infra_error=False)
+    gold = [{"id": "c1", "labels": [{"dimension": d, "present": d == "AI腔"} for d in DIMENSIONS]},
+            {"id": "c2", "labels": [{"dimension": d, "present": d == "设定漂移"} for d in DIMENSIONS]},
+            {"id": "c3", "labels": [{"dimension": d, "present": False} for d in DIMENSIONS]}]
+    judge = [_vr("c1", "AI腔"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]"),   # c2 infra
+             _vr("c3", None)]
+    gm, jm, dropped = aligned_matrices(gold, judge)
+    assert dropped == ["c2"]                       # infra 的 c2 记进 dropped
+    assert len(gm["AI腔"]) == 2 and len(jm["AI腔"]) == 2   # 两侧都只剩 c1,c3(对称滤 c2)
+    assert gm["AI腔"] == [True, False]             # c1 命中 AI腔、c3 干净——gold 顺序保留
+    assert jm["AI腔"] == [True, False]             # judge 同序对齐
+
+
+def _vr(cid, present_dim):
+    vs = [DimensionVerdict(d, d == present_dim, "高" if d == present_dim else None, "", "")
+          for d in DIMENSIONS]
+    return JudgeResult(cid, vs, infra_error=False)
+
+
+def _gold_case(cid, present_dim):
+    return {"id": cid, "labels": [{"dimension": d, "present": d == present_dim} for d in DIMENSIONS]}
+
+
+def test_calibrate_discloses_infra_dropped():
+    from evals.calibration import calibrate
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移"), _gold_case("c3", None)]
+    judge = [_vr("c1", "AI腔"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]"),   # c2 掉
+             _vr("c3", None)]
+    rep = calibrate(gold, judge)
+    cov = rep["coverage"]
+    assert cov["n_total"] == 3 and cov["n_evaluated"] == 2 and cov["n_infra_dropped"] == 1
+    assert cov["dropped_case_ids"] == ["c2"]
+    # P/R/F1 只在 c1,c3 上算(c2 未污染):AI腔 c1 命中→tp;c3 干净
+    assert rep["judge_vs_gold"]["AI腔"]["tp"] == 1
+
+
+def test_calibrate_md_discloses_dropped(tmp_path):
+    from evals.calibration import calibrate, write_report
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移")]
+    judge = [_vr("c1", "AI腔"), JudgeResult("c2", [], infra_error=True, error="[infra]")]
+    rep = calibrate(gold, judge)
+    _, m = write_report(rep, tmp_path)
+    md = m.read_text(encoding="utf-8")
+    assert "infra" in md and ("掉" in md or "掉出" in md or "未评" in md)   # MD 必须披露掉数
+
+
+def test_build_report_coverage_pending_when_no_judge():
+    from evals.calibration import build_calibration_report
+    gold = {d: [False] for d in DIMENSIONS}
+    rep = build_calibration_report(gold, None, None)
+    assert rep["coverage"]["n_evaluated"] is None or rep["coverage"]["status"] == "待真机"
+
+
+def test_calibrate_all_infra_reports_honestly_not_crash():
+    # 全部 case infra(真机后端整体挂)→ 不崩,coverage 全披露、judge_vs_gold 留空
+    from evals.calibration import calibrate
+    from evals.judge import JudgeResult
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移")]
+    judge = [JudgeResult("c1", [], infra_error=True, error="[infra]"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]")]
+    rep = calibrate(gold, judge)                    # 修前:ValueError 崩
+    cov = rep["coverage"]
+    assert cov["n_total"] == 2 and cov["n_evaluated"] == 0 and cov["n_infra_dropped"] == 2
+    assert rep["judge_vs_gold"] == {}               # 无可评例→度量段留空,不造假 tp/fp/fn
+    assert "judge_vs_gold_kappa" not in rep          # 不算 κ(空序列)

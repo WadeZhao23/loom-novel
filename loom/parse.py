@@ -197,25 +197,79 @@ def is_substantive(text: str) -> bool:
 # ── 领航员问题卡(journey.next_card 消费;输出约定住 templates/agents/领航员.md) ──
 # 输出约定(prompt ↔ 解析器共置面):
 #   格:题材            ← 可选,仅立项阶段
-#   问:一行问题
-#   - 选项(2-4 个)
-#   无题哨兵:整段含「【无题】」。
-_CARD_Q_RE = re.compile(r"^问[:：]\s*(\S.*)$", re.M)
-_CARD_F_RE = re.compile(r"^格[:：]\s*(\S+)\s*$", re.M)
+#   问:一行问题         ← 容忍 markdown 装饰/编号/「问题」「Q」变体(模型常飘,飘了不该降级)
+#   - 选项(2-4 个)      ← 容忍 * / • / 数字编号作弹头
+#   无题哨兵:全文含「【无题】」且没有问句才算(问句判定在前:句中复述格式规则不算,防模型自我降级)。
+_CARD_Q_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s]*(?:问题?|[Qq])[*_\s]*[:：]\s*(\S.*?)[*_\s]*$")
+_CARD_F_RE = re.compile(r"^\s*[*_#\s]*格[*_\s]*[:：]\s*(\S+?)[*_\s]*$", re.M)
+_CARD_OPT_RE = re.compile(r"^\s*(?:[-*•]|\d+[.、])\s+(\S.*)$")
 
 
 def parse_journey_card(raw: str) -> dict | None:
     """领航员输出 → 问题卡;无题 {"exhausted": True};不成卡 None(调用方降级为自由输入)。"""
-    if "【无题】" in raw:
-        return {"exhausted": True}
     lines = raw.splitlines()
     q_idx = next((i for i, l in enumerate(lines) if _CARD_Q_RE.match(l.strip())), None)
     if q_idx is None:
+        if "【无题】" in raw:   # 没问句才轮到哨兵;有问句时问句赢(防模型复述规则自我降级)
+            return {"exhausted": True}
         return None
-    question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip()
-    options = [l.strip()[2:].strip() for l in lines[q_idx + 1:] if l.strip().startswith("- ")]
+    question = _CARD_Q_RE.match(lines[q_idx].strip()).group(1).strip(" *_").strip()
+    options = [m.group(1).strip(" *_").strip() for l in lines[q_idx + 1:] if (m := _CARD_OPT_RE.match(l))]
     card: dict = {"question": question, "options": [o for o in options if o][:4]}
     f = _CARD_F_RE.search(raw)
     if f:
-        card["field"] = f.group(1).strip()
+        card["field"] = f.group(1).strip(" *_").strip()
     return card
+
+
+# ── 文本工具协议(书房伙伴对话 agent 的工具调用面) ───────────────────────────
+# 约定:`用:<工具名>` 起一个工具块,后续 `键:值` 行到空行/文末止;之后的尾巴文字丢弃。
+# 沿用领航员卡解析同款手艺——`[*_#\s]*` 剥 markdown 装饰、全/半角冒号都认、
+# `.strip(" *_")` 收尾、`(?:\d+[.、]\s*)?` 容忍编号前缀(与 _CARD_Q_RE 同款)。
+# 前后容忍括号/方括号壳:真机实测模型会把 `用:提设定` 照抄历史叙述的括号包成 `(用:提设定)`
+# ——壳里是对的,得认出来,否则漏字不出卡。仍只认「用」紧跟(剥装饰后)冒号,`(用不着…)` 这类
+# 散文(用后不是冒号)不误吞。
+_TOOL_USE_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s（(【\[]*用[*_\s]*[:：]\s*(\S.*?)[*_\s）)】\]]*$")
+_TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
+
+
+def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[str, list[dict]]:
+    """(说话段, [工具调用...])。工具调用 = {"name": str, "params": {键:值}}。FB-B 多候选:
+    一条消息里可连发多个「用:」块,逐块解析成一个工具(领航员想给作者几个方向挑时用)。
+
+    `valid_names` 不给(默认):收全文所有「用:」块;给了:只收「名字 ∈ valid_names」的块——
+    名字不认识的「用:」行不算触发,当普通文本(防中文里孤立的「用:xxx」说话句被误判)。
+    每块 params 从块行下一行起,到 **空行 / 非kv行 / 下一个「用:」触发行** 止(下一个触发行
+    必须终止上一块,否则 `用:提设定` 会被 `_TOOL_KV_RE` 当成 `用=提设定` 吞进 params)。
+    say=第一个【有效】块之前的文本;有效块之间/之后的散文丢弃(协议行由调用方 _strip 清)。
+    """
+    lines = text.splitlines()
+    triggers: list[tuple[int, str]] = []          # 所有「用:」行(有效+无效)
+    for i, l in enumerate(lines):
+        m = _TOOL_USE_RE.match(l)
+        if m:
+            triggers.append((i, m.group(1).strip(" *_").strip()))
+    valid = [(i, n) for (i, n) in triggers if valid_names is None or n in valid_names]
+    if not valid:
+        return text.strip(), []
+    trigger_lines = {i for (i, _) in triggers}    # 任一「用:」行都终止上一块的 params
+    say = "\n".join(lines[:valid[0][0]]).strip()
+    tools: list[dict] = []
+    for (ui, name) in valid:
+        params: dict = {}
+        for j in range(ui + 1, len(lines)):
+            if not lines[j].strip() or j in trigger_lines:
+                break                              # 空行 / 撞到下一个「用:」块 → 本块 params 止
+            m = _TOOL_KV_RE.match(lines[j])
+            if not m:
+                break
+            params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
+        tools.append({"name": name, "params": params})
+    return say, tools
+
+
+def parse_tool_block(text: str, valid_names: set[str] | None = None) -> tuple[str, dict | None]:
+    """(说话段, 第一个工具调用 | None)。`parse_tool_blocks` 的薄兼容层——既有单工具调用点
+    (流式预览裁剪、旧测试)不受 FB-B 多候选影响;多块场景走 `parse_tool_blocks`。"""
+    say, tools = parse_tool_blocks(text, valid_names)
+    return say, (tools[0] if tools else None)

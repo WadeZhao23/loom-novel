@@ -208,8 +208,8 @@ def grade_quality_llm(text: str, setting: str, backend, weight: float = 0.20) ->
             "## 你的任务\n按上面的标准,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。")
     try:
         verdict = backend.complete(CRITIC_质检, user, max_chars=600)
-    except Exception as e:  # noqa: BLE001 — 后端报错不拖垮整跑
-        return GraderResult("质检·LLM", 0.0, True, weight, gating=False, detail=f"(后端调用失败 — {e})")
+    except Exception as e:  # noqa: BLE001 — 后端报错=infra,绝不假通过
+        return GraderResult("质检·LLM", 0.0, False, weight, gating=False, detail=f"[infra] 后端调用失败 — {e}")
     issues = parse_critic_verdict(verdict)
     n = len(issues)
     return GraderResult("质检·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,
@@ -223,8 +223,8 @@ def grade_deslop_llm(text: str, fingerprint: str, backend, weight: float = 0.10)
             "## 你的任务\n按《去AI味》黑名单挑具体命中,严格按格式输出;无命中只回一行「通过」。")
     try:
         verdict = backend.complete(CRITIC_去AI味, user, max_chars=600)
-    except Exception as e:  # noqa: BLE001
-        return GraderResult("去AI味·LLM", 0.0, True, weight, gating=False, detail=f"(后端调用失败 — {e})")
+    except Exception as e:  # noqa: BLE001 — 后端报错=infra,绝不假通过
+        return GraderResult("去AI味·LLM", 0.0, False, weight, gating=False, detail=f"[infra] 后端调用失败 — {e}")
     issues = parse_critic_verdict(verdict)
     n = len(issues)
     return GraderResult("去AI味·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,

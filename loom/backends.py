@@ -196,8 +196,15 @@ def _openai_compat_error(e: Exception) -> LoomBackendError:
 
 class Backend(Protocol):
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None) -> str:
-        """生成。给了 on_chunk 的后端会边生成边回调(流式);不支持流式的后端忽略它、结尾一次性返回。"""
+                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
+        """生成。给了 on_chunk 的后端会边生成边回调(流式);不支持流式的后端忽略它、结尾一次性返回。
+
+        agent_mode(书房伙伴对话通道专用,spec 2026-07-16-navigator-agent-design.md §3):
+        True=解除 CLI 后端(claude/codex)的反 agent 护栏——允许按文本协议输出至多一个「用:」
+        工具块、允许反问;五工序(设定/大纲/写手/编辑/润色/领航员出题)仍传默认 False,
+        护栏原样生效。HTTP 类后端(OpenAI 兼容)和 DemoBackend 没有「护栏」这个概念,
+        接受这个参数但忽略——纯粹是为了让 Backend Protocol 的签名在所有实现间保持一致。
+        """
         ...
 
 
@@ -259,7 +266,11 @@ class OpenAICompatBackend:
         return LoomBackendError(render(self._empty_code, detail=f"model={self.model}"), code=self._empty_code)
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None) -> str:
+                 on_chunk: OnChunk | None = None, on_reasoning: OnChunk | None = None,
+                 agent_mode: bool = False) -> str:
+        # agent_mode 对 HTTP 后端无意义(没有 CLI 反 agent 护栏这回事)——接受、忽略,只为对齐协议签名。
+        # on_reasoning(v2 思考层):思考型模型(DeepSeek)的思维链走独立字段 reasoning_content,
+        # 与正文 content 分开流式;给了就 relay 思考流(不进正文 parts、不落盘,纯 UI 灰字)。
         max_tokens = _budget_tokens(self.provider, max_chars)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
@@ -268,9 +279,21 @@ class OpenAICompatBackend:
                     model=self.model, messages=messages, max_tokens=max_tokens,
                     temperature=0.9, stream=True, timeout=self._stream_timeout,
                 )
-                parts, buf = [], ""
+                parts, buf, rbuf = [], "", ""
                 for ev in stream:
-                    delta = (ev.choices[0].delta.content or "") if ev.choices else ""
+                    if not ev.choices:
+                        continue
+                    d = ev.choices[0].delta
+                    # 思考流:必须在 content 空守卫【之前】读——思考帧 content=None,否则整帧被下面
+                    # continue 丢掉。getattr 兜底:非思考型供应商的 delta 没这属性(直接取会 AttributeError)。
+                    if on_reasoning is not None:
+                        rc = getattr(d, "reasoning_content", None)
+                        if rc:
+                            rbuf += rc
+                            if len(rbuf) >= 12 or rbuf[-1] in "。\n!?!?…,，、":  # 攒几字再发,别一 token 一次(免前端抖)
+                                on_reasoning(rbuf)
+                                rbuf = ""
+                    delta = d.content or ""
                     if not delta:
                         continue
                     parts.append(delta)
@@ -278,6 +301,8 @@ class OpenAICompatBackend:
                     if len(buf) >= 8 or buf[-1] in "。\n!?!?…":  # 攒几字/到句末再发,别一 token 一行
                         on_chunk(buf)
                         buf = ""
+                if rbuf and on_reasoning is not None:
+                    on_reasoning(rbuf)
                 if buf:
                     on_chunk(buf)
                 text = "".join(parts).strip()
@@ -304,17 +329,31 @@ class ClaudeCodeBackend:
         bad = (not m) or ("deepseek" in m) or m.startswith("gpt")
         self.model = "sonnet" if bad else m
 
-    # 护栏:逼 `claude -p` 当"纯文本补全",别当 Claude Code agent(去找文件/反问/解释)
+    # 护栏(五工序默认,agent_mode=False):逼 `claude -p` 当"纯文本补全",别当 Claude Code agent
+    # (去找文件/反问/解释)
     _GUARD = (
         "[严格指令] 你是一个纯文本生成函数,不是助手、不是 agent。只输出要求的成品中文文本本身。"
         "禁止:调用或提及任何工具、查找或读取任何文件、反问、说明你在做什么、"
         "输出「我检查了目录」「请提供」之类的话。你需要的全部材料都在下面,直接用。"
     )
+    # 护栏(书房伙伴对话变体,agent_mode=True;spec §3):伙伴协议本身要求它能输出一行
+    # 「用:工具名」文本块(loom 解析执行,CLI 自己不碰真工具——真实读写仍锁死在
+    # `--allowed-tools ""` 之后),也要能对着作者提一句反问(资料不够时问清楚,别替作者瞎编)。
+    # 解除上面 _GUARD 里「禁止提及工具/禁止反问」这两条,其余「别自称助手、别写与协议无关的旁白」
+    # 的克制仍然保留。
+    _GUARD_AGENT = (
+        "[严格指令] 你在扮演一位写作伙伴,通过纯文本对话交流——你说的每个字都是最终输出,"
+        "不会再有人替你加工。资料不够时,可以向作者提一句反问,而不是替他瞎编。"
+        "需要用工具时,按下面的协议格式输出一行「用:工具名」及参数;这只是文本协议,"
+        "真正的文件读写由 loom 服务端执行,你自己没有、也不要尝试真的调用任何 shell/文件/网络能力。"
+        "除此之外禁止输出「我是 AI」「我检查了目录」这类与协议无关的旁白。"
+    )
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None) -> str:
+                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
+        guard = self._GUARD_AGENT if agent_mode else self._GUARD
         # claude 子进程不做 token 级流式(返回即全量);on_chunk 接受但忽略,前端靠 agent_done 展示。
-        prompt = f"{self._GUARD}\n\n{system}\n\n---\n\n{user}"
+        prompt = f"{guard}\n\n{system}\n\n---\n\n{user}"
         # 关键:用快模型 + 禁工具,把 `claude -p` 压成一次性文本补全。
         # 否则它会以完整 agent 形态运行(调工具、反复探索),大 prompt 直接跑到超时。
         cmd = ["claude", "-p", prompt, "--model", self.model, "--allowed-tools", ""]
@@ -351,17 +390,28 @@ class CodexBackend:
         m = (config.model or "").strip()
         self.model = m if m and "deepseek" not in m else ""
 
-    # 护栏:逼 `codex exec` 当"纯文本补全",别当 Codex agent(改文件/跑命令/反问)
+    # 护栏(五工序默认,agent_mode=False):逼 `codex exec` 当"纯文本补全",别当 Codex agent
+    # (改文件/跑命令/反问)
     _GUARD = (
         "[严格指令] 你是一个纯文本生成函数,不是助手、不是 agent。只输出要求的成品中文文本本身。"
         "禁止:调用或提及任何工具、读写或查找任何文件、执行命令、反问、说明你在做什么、"
         "输出「我检查了目录」「请提供」之类的话。你需要的全部材料都在下面,直接用。"
     )
+    # 护栏(书房伙伴对话变体,agent_mode=True;spec §3):同 ClaudeCodeBackend._GUARD_AGENT——
+    # 允许工具协议行 + 反问,真实执行仍锁死在 `--sandbox read-only`(下方 complete 无条件保留)之后。
+    _GUARD_AGENT = (
+        "[严格指令] 你在扮演一位写作伙伴,通过纯文本对话交流——你说的每个字都是最终输出,"
+        "不会再有人替你加工。资料不够时,可以向作者提一句反问,而不是替他瞎编。"
+        "需要用工具时,按下面的协议格式输出一行「用:工具名」及参数;这只是文本协议,"
+        "真正的文件读写由 loom 服务端执行,你自己没有、也不要尝试真的读写文件或执行命令。"
+        "除此之外禁止输出「我是 AI」「我检查了目录」这类与协议无关的旁白。"
+    )
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None) -> str:
+                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
+        guard = self._GUARD_AGENT if agent_mode else self._GUARD
         # codex 子进程不做 token 级流式(返回即全量);on_chunk 接受但忽略,前端靠 agent_done 展示。
-        prompt = f"{self._GUARD}\n\n{system}\n\n---\n\n{user}"
+        prompt = f"{guard}\n\n{system}\n\n---\n\n{user}"
         timeout = int(os.environ.get("LOOM_CODEX_TIMEOUT", "600"))  # 与 claude 一致放宽,可环境覆盖
         # 关键:read-only 沙箱 + 在临时空目录里跑,codex 既改不了你的稿子、也读不到项目文件;
         # --skip-git-repo-check 避免它因"不在 git 仓库"而中断;最终回复写临时文件以拿到纯文本。
@@ -413,6 +463,17 @@ class DemoBackend:
             return "摘要:(demo 占位摘要)。\n伏笔:\n- 无"
         if "起一个" in system or "章节标题" in system:  # 标题生成(demo 占位)
             return "废矿里的火光"
+        if "领航员" in system:
+            # 「领航员」人设(agents/领航员.md)现在被两条截然不同的调用点复用:
+            # ①journey.next_card 的老式单轮出题(system=人设原文,格式必须能被
+            #   parse_journey_card 解析成「问: + 2-4 候选」的卡);
+            # ②partner.run_turn 的对话循环(system=人设 + partner_tools.render_contract()
+            #   的工具契约段 + skills 索引——同一份人设文件,多拼了「可用工具」那一段)。
+            # 用「可用工具」这个契约段独有的开头词当判据区分两条调用点,不引入新的显式参数
+            # ——system 内容本身已经带够信息,和本文件其它分支同一套「看关键词分流」的路子。
+            if "可用工具" in system:
+                return _demo_nav_partner_reply(user)
+            return _DEMO["nav"]   # 访谈出题:格式必须合规能解析成卡(问: + 2-4 个候选)
         for role, key in (("设定师", "anchor"), ("大纲师", "outline"),
                           ("写手", "draft"), ("编辑", "edit"), ("润色师", "final")):
             if role in head:
@@ -420,7 +481,9 @@ class DemoBackend:
         return "（demo 占位）"
 
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None) -> str:
+                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
+        # agent_mode 不影响 demo 罐头内容——demo 靠 system/user 关键词分流(_pick),
+        # 伙伴对话分支已经用「可用工具」判据单独识别,接受这个参数只为对齐协议签名。
         import time
         text = self._pick(system, user)
         if on_chunk is not None:  # 模拟流式:按小块吐,离线也能看见"一句句写出来"
@@ -449,6 +512,30 @@ _DEMO = {
         "# 写作指纹\n\n## 句式偏好\n- 短句为主,单句成段;偏爱动作收尾\n- 对白只留半句,潜台词留给读者\n\n"
         "## 口头禅 / 高频表达\n- “他没说话。”\n- “就这样。”\n\n## 禁用词\n- 殊不知、仿佛、宛如;不直接点名情绪\n\n"
         "## 节奏\n- 紧处短句快切\n\n## anchor 例句\n> 风停了。他把刀收回鞘里,没回头。\n> 她笑了一下。那笑没到眼睛里。\n"
+    ),
+    "nav": (
+        "问:(demo)这本书的核心冲突先走哪一路?\n"
+        "- (demo 候选)旧秩序崩塌,主角靠金手指逆流翻盘\n"
+        "- (demo 候选)双雄相争,主角在夹缝里闷声发育\n"
+        "- (demo 候选)悬案倒查,每章揭开一层旧真相\n"
+    ),
+    # ---- 领航员·伙伴对话分支(脚本化多轮,见 _demo_nav_partner_reply)----
+    # 四段按对话轮数推进:开场问候→提问→提设定候选(工具协议块)→收尾;免 key 也能把
+    # 「聊天→拍板→落盘」这条链路端到端点一遍。内容全部自报「(demo)」,不冒充真实生成。
+    "nav_partner_greet": (
+        "(demo)你好呀,我是这本书的领航员。准备好就说一声,我们从最要紧的空格开始聊。"
+    ),
+    "nav_partner_ask": (
+        "(demo)先问个直接的:这本书最想让读者记住的一个反差点是什么?"
+    ),
+    "nav_partner_propose": (
+        "(demo)我先把这条记成一张候选卡,你看看对不对——\n"
+        "用:提设定\n"
+        "落点:外置大脑/立项卡.md#题材\n"
+        "内容:(demo 候选)废土复仇流,金手指是「借命」"
+    ),
+    "nav_partner_wrap": (
+        "(demo)这张候选卡先记这儿,你确认后就正式落盘;demo 试玩到这里先告一段落。"
     ),
     "anchor": (
         "【本章设定锚点】\n- 涉及设定:灵气复苏第三年,主角觉醒“逆息”体质,只能在濒死时爆发。\n"
@@ -482,6 +569,25 @@ _DEMO = {
         "火光里,一个女人走进来。\n“好久不见。”\n他认得这声音。\n是师姐。\n他没说话。"
     ),
 }
+
+
+def _demo_nav_partner_reply(user: str) -> str:
+    """领航员·伙伴对话分支的脚本化多轮罐头(spec §8):按对话轮数推进
+    开场问候→提问→提设定候选→收尾,四段之后原地停在「收尾」(demo 不是无限对话)。
+
+    DemoBackend 每请求新建、无状态(§8「实例计数器活不过一轮」),轮数只能从
+    `partner_context.assemble` 拼进 `user` 的对话尾部现推——尾部里每条 assistant 事件
+    渲染成一行「你:...」(见 partner_context._render_event),数这个前缀出现的行数
+    就是「demo 已经说过几轮」,不依赖任何进程内计数器。
+    """
+    turns_so_far = sum(1 for line in user.splitlines() if line.startswith("你:"))
+    if turns_so_far <= 0:
+        return _DEMO["nav_partner_greet"]
+    if turns_so_far == 1:
+        return _DEMO["nav_partner_ask"]
+    if turns_so_far == 2:
+        return _DEMO["nav_partner_propose"]
+    return _DEMO["nav_partner_wrap"]
 
 
 def list_models(provider: str, *, base_url: str = "", api_key: str = "") -> dict:

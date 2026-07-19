@@ -19,7 +19,7 @@ from typing import Callable, Iterator
 
 from . import chapters as chap
 from . import journey as journey_mod
-from . import ledger, paths
+from . import ledger, partner_store, paths, slots as slots_mod
 from .agents import regen_outline as _regen_outline
 from .agents import run_pipeline
 from .backends import PROVIDERS, Backend, cheap_backend, get_backend, provider_catalog
@@ -52,12 +52,15 @@ _locks_guard = threading.Lock()
 
 class ProjectBusyError(RuntimeError):
     """写锁被占(同一本书正有跑模型/落盘任务)。刻意不继承 LoomBackendError/ValueError:
-    入口的 400 网不该兜住它,busy 永远走 409。"""
+    入口的 400 网不该兜住它,busy 永远走 409。code 默认 project_busy(写锁);
+    伙伴轮锁(见下)复用本类,传 code="partner_busy" 让前端区分两种「忙」。"""
 
     code = "project_busy"
 
-    def __init__(self) -> None:
-        super().__init__(BUSY_MESSAGE)
+    def __init__(self, message: str = BUSY_MESSAGE, *, code: str | None = None) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
 
 
 def try_lock(root: Path | str) -> threading.Lock | None:
@@ -82,6 +85,32 @@ def write_lock(root: Path | str) -> Iterator[None]:
         yield
     finally:
         lock.release()
+
+
+# ---------------------------------------------------------------- 伙伴轮锁(独立于写锁)
+# say 端点复刻 /api/write 的「锁随 worker 线程」模式,但用独立字典 _partner_locks:
+# 防两次并发 say 交错写同一 .伙伴对话/当前.jsonl;绝不碰 _locks(写锁)——织章持写锁
+# 跑几分钟期间,say 完全不受影响,书房伙伴照样能聊(spec §10 锁裁量红线)。
+PARTNER_BUSY_MESSAGE = "书房伙伴这轮还在应答,等它说完再问下一句。"
+
+_partner_locks: dict[str, threading.Lock] = {}
+_partner_locks_guard = threading.Lock()
+
+
+def try_partner_lock(root: Path | str) -> threading.Lock | None:
+    """非阻塞拿这本书的伙伴对话轮锁;拿不到返回 None。独立于 try_lock(写锁)。"""
+    with _partner_locks_guard:
+        lock = _partner_locks.setdefault(str(Path(root).resolve()), threading.Lock())
+    return lock if lock.acquire(blocking=False) else None
+
+
+def acquire_partner_lock(root: Path | str) -> threading.Lock:
+    """拿伙伴轮锁或抛 ProjectBusyError(code="partner_busy")。给 say 流式场景:锁随
+    worker 线程持有,调用方自行 release。"""
+    lock = try_partner_lock(root)
+    if lock is None:
+        raise ProjectBusyError(PARTNER_BUSY_MESSAGE, code="partner_busy")
+    return lock
 
 
 # ---------------------------------------------------------------- write
@@ -358,3 +387,94 @@ def diagnose_commit(root: Path | str, picks: dict) -> dict:
     with write_lock(root):
         from . import diagnose
         return diagnose.commit(root, picks)
+
+
+# ---- 书房伙伴(对话拍板;docs/superpowers/plans/2026-07-16-partner-p3-wire-and-migrate.md) ----
+# 红线:对话里的「提设定」只产 proposal 事件(loom/partner_tools.py),不落盘;
+# 唯一落盘出口是 partner_confirm。
+
+
+def partner_history(root: Path | str, *, tail: int | None = None) -> dict:
+    """纯读派生视图,无锁(同 journey_state/project_state)。"""
+    return {"events": partner_store.read_events(Path(root), tail=tail)}
+
+
+def _slot_preview(root: Path, slot_id: str) -> str | None:
+    """现扫 stage_slots 取 slot_id 当前 preview;槽已不存在(改名/删除)返回 None。
+
+    占位模板算「空」("" 非 None):与 partner_tools._handle_tishe 的 before 同口径(filled
+    门)——否则占位落点的 before="" 会和这里的 current(占位preview)对不上,误判 stale。
+    "" = 存在但无实质内容;None = 槽已消失,两者语义不同(guard 分别处理)。"""
+    for spec in journey_mod.STAGES:
+        found = next((s for s in slots_mod.stage_slots(root, spec) if s.id == slot_id), None)
+        if found is not None:
+            return found.preview if found.filled else ""
+    return None
+
+
+def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
+    """拍板落盘:找 proposal → 快照比对 → 按其 slot 定址落盘 → 记一条 confirm 事件。
+
+    幂等(防双击/重发对 file 类落点二次追加):jsonl 里已有该 pid 的 confirm 事件,
+    直接返已落盘结果,不重跑 _land_slot。proposal 过期(find_proposal 返 None)或
+    落点冲突/未知(_land_slot 抛 ValueError,如 filename 撞车、槽位不存在)都不崩,
+    返 {"error": ...}——两种情况都不追加 confirm 事件,原 proposal 仍可重试。
+
+    快照守卫(收敛范围,详见 docs/superpowers/sdd/task-1-report.md):proposal 产生时
+    (partner_tools._handle_tishe)记落点当时的 preview 到 "before";这里落盘前重新扫一次
+    现在的 preview,不一致就当这一格在提案挂起期间被作者手改过,拒绝落盘、不追加 confirm
+    事件(拍板可重试——领航员会重新看一眼再提)。preview 只取前 24 字,能可靠检测 row/line/
+    h2 这类「替换型」落点的改动(现实中的破坏性场景:作者手改覆盖了旧值,双方值都短);
+    对 file 型「追加型」落点(如世界观小节正文),占位模板文案常年 ≥24 字、preview 早已
+    饱和,快照测不出「作者又追加了别的」——这是已知的低危缺口,故意不堵:追加型双落盘
+    最坏后果只是重复内容(非数据丢失),且要触发它需要「提案挂起期间、精确在扫描后落盘前
+    这个窄窗口内」手改同一格,概率极低,不值得为它换更贵的整段内容快照。
+    """
+    root = Path(root)
+    with write_lock(root):
+        existing = next((e for e in partner_store.read_events(root)
+                          if e.get("t") == "confirm" and e.get("id") == pid), None)
+        if existing is not None:
+            return {"landed": existing.get("landed"), "state": journey_mod.journey_state(root)}
+        proposal = partner_store.find_proposal(root, pid)
+        if proposal is None:
+            return {"error": "提案已过期,重新问一次"}
+        # .get() 取字段:proposal 损坏/缺字段(旧版本残留、手改 jsonl)一律当过期处理,
+        # 不许 KeyError 崩(slot/content 是 _land_slot 的必需参数,缺一都没法落盘)。
+        slot_id = proposal.get("slot")
+        content = proposal.get("content")
+        if not slot_id or not content:
+            return {"error": "提案已过期,重新问一次"}
+        before = proposal.get("before")   # 无此字段(旧 proposal)→ 向后兼容,跳过快照比对
+        if before is not None:
+            current = _slot_preview(root, slot_id)
+            # current is None:槽已不存在(改名/删除),留给下面 _land_slot 报「未知槽位」,
+            # 不在这里误判成 stale——两种失败原因不同,措辞不该混在一起。
+            if current is not None and current != before:
+                return {"error": "这一格刚改过,我重新看看再给你提", "stale": True}
+        try:
+            landed = journey_mod._land_slot(root, slot_id, content)
+        except ValueError as e:
+            return {"error": str(e)}
+        partner_store.append_event(root, {"t": "confirm", "id": pid, "ts": ts, "landed": landed})
+        return {"landed": landed, "state": journey_mod.journey_state(root)}
+
+
+def partner_new(root: Path | str, *, stamp: str) -> dict:
+    """归档当前伙伴对话,另起一段(不动书内容,只挪 jsonl 文件)。
+
+    先拿伙伴轮锁再归档(blocker 修复,spec §10.2):say worker 从头到尾持轮锁,
+    「停」在前端提前清 _partnerBusy 后 worker 可能仍在写尾巴事件——此时归档若改名
+    当前.jsonl,worker 的 append 会重建一个没有 user 事件的孤儿文件,旧轮尾巴串进
+    新会话。轮锁被占 → 409 partner_busy,挡住归档直到 worker 收尾放锁。
+    """
+    root = Path(root)
+    guard = try_partner_lock(root)
+    if guard is None:
+        raise ProjectBusyError(PARTNER_BUSY_MESSAGE, code="partner_busy")
+    try:
+        with write_lock(root):
+            partner_store.archive_current(root, stamp)
+            return {"ok": True}
+    finally:
+        guard.release()

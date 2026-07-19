@@ -1,0 +1,23 @@
+{
+  "id": "ds_10_clean_voice",
+  "split": "holdout",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "construction_note": "本例为压 AI 腔误报的干净难负例(holdout)。正文刻意堆叠两类表面可挑的特征——① 反复出现的固定口头式『他没说话。』(3 处);② 多处短句独立收尾作停顿(『凉。』『退路有了。』)。二者均已在 context.setting 的【写作指纹】里显式声明为作者签名节奏,按去AI味『指纹豁免护栏』不算 AI 腔、不该挑,故 AI 腔如实标 present=False。关键守则:全文只放行指纹声明过的特征,未夹带任何未声明的真 AI 腔——无空洞万能句/套话头尾、无直接点名情绪、无『不是…而是』翻转句、无过度连接词堆叠,以免把负例写成正例。其余七维亦均干净:沈砚寡言谨慎、谋定后动,言行与人设一致(非 OOC);世界观按既定灵气复苏/清脉司/矿场规则(无漂移);沈砚正面赴约、接住『子时老井房见』的钩(非断钩);两半矿脉图拼全、取得一条通谷外注销旧巷的退路情报,有实质信息增量(非无爽点);情报来自现场亲历对话、无越界认知(信息边界干净);无已耗物品复现、无时间粒度冲突。",
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者身份败露即被清脉司缉为炉鼎,一条不在官册上的暗道就是活命的本钱。【写作指纹】本书叙事惯用短句独立收尾作停顿;主角沈砚的沉默一律写成固定口头式『他没说话。』,是作者签名节奏,非模板腔。",
+    "characters": "沈砚:逆息体质,寡言谨慎,谋定后动,认死理、只信能拼全在手的东西;吴伯:老矿工,早年走遍矿脉暗道,惜命,不轻易交底。",
+    "prev_hook": "上一章末:老矿工吴伯往沈砚掌心塞了半张发黄的矿脉图,压低嗓子撂下一句『子时,老井房,一个人来』。",
+    "chapter_goal": "接住吴伯『子时老井房见』的钩——沈砚赴约,两半矿脉图拼全,摸清一条通谷外的注销旧巷,把退路这条主线往前落一步。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

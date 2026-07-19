@@ -36,10 +36,13 @@ class CaseResult:
     score: float
     passed: bool
     graders: list[GraderResult] = field(default_factory=list)
+    case_type: str = "quality"        # "quality" | "detector_contract"
+    contract_ok: bool = True          # detector_contract:声明必须命中缺陷的 grader 是否都如约失败
 
     def as_dict(self) -> dict:
         return {"case_id": self.case_id, "title": self.title, "score": self.score,
-                "passed": self.passed, "graders": [g.as_dict() for g in self.graders]}
+                "passed": self.passed, "case_type": self.case_type,
+                "contract_ok": self.contract_ok, "graders": [g.as_dict() for g in self.graders]}
 
 
 def _weighted(graders: list[GraderResult]) -> float:
@@ -68,8 +71,18 @@ def run_case(case_dir: Path, *, backend=None, judge: bool = False) -> CaseResult
         graders.append(grade_quality_llm(text, case.get("setting", ""), backend))
         graders.append(grade_deslop_llm(text, case.get("fingerprint", ""), backend))
 
+    case_type = case.get("case_type", "quality")
+    if case_type == "detector_contract":
+        want_fail = set(case.get("expect_fail_graders", []))
+        by_name = {g.name: g for g in graders}
+        # 契约成立 = 每个声明必须命中缺陷的 grader 都存在且 passed=False
+        contract_ok = bool(want_fail) and all(
+            (name in by_name) and (by_name[name].passed is False) for name in want_fail)
+        return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders),
+                          contract_ok, graders, case_type=case_type, contract_ok=contract_ok)
     passed = all(g.passed for g in graders if g.gating)
-    return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders), passed, graders)
+    return CaseResult(case["id"], case.get("title", case["id"]), _weighted(graders),
+                      passed, graders, case_type=case_type)
 
 
 def _run_style_ab_case(case_dir: Path, case: dict, exp: dict) -> CaseResult:
@@ -116,8 +129,15 @@ def aggregate(results: list[CaseResult]) -> dict:
 # ───────────────────────────── 回归门禁(和基线比对)─────────────────────────────
 
 def save_baseline(path: Path, results: list[CaseResult]) -> None:
-    payload = {"cases": {r.case_id: {"score": r.score, "passed": r.passed} for r in results},
-               "summary": aggregate(results)}
+    payload = {
+        "schema_version": 1,
+        "cases": {r.case_id: {
+            "score": r.score, "passed": r.passed, "case_type": r.case_type,
+            "graders": {g.name: {"score": g.score, "passed": g.passed, "gating": g.gating}
+                        for g in r.graders},
+        } for r in results},
+        "summary": aggregate(results),
+    }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -128,17 +148,22 @@ def load_baseline(path: Path) -> dict | None:
 
 
 def compare_to_baseline(results: list[CaseResult], baseline: dict, tol: float = 0.05) -> list[dict]:
-    """返回回归项:某 case 在基线里通过、现在不通过,或分数比基线低超过 tol。"""
+    """回归项:通过→失败 / 分数下滑超 tol / 新 case 未固化 / baseline case 消失。"""
     base = baseline.get("cases", {})
+    seen = {r.case_id for r in results}
     regressions: list[dict] = []
     for r in results:
         b = base.get(r.case_id)
         if not b:
-            continue  # 新增 case,不算回归
+            regressions.append({"case": r.case_id, "kind": "未固化(新case未进baseline)",
+                                "was": None, "now": r.score})
+            continue
         if b["passed"] and not r.passed:
-            regressions.append({"case": r.case_id, "kind": "通过→失败",
-                                "was": b["score"], "now": r.score})
+            regressions.append({"case": r.case_id, "kind": "通过→失败", "was": b["score"], "now": r.score})
         elif r.score + tol < b["score"]:
-            regressions.append({"case": r.case_id, "kind": f"分数下滑 >{tol}",
-                                "was": b["score"], "now": r.score})
+            regressions.append({"case": r.case_id, "kind": f"分数下滑 >{tol}", "was": b["score"], "now": r.score})
+    for cid in base:
+        if cid not in seen:
+            regressions.append({"case": cid, "kind": "case消失(baseline有现无)",
+                                "was": base[cid]["score"], "now": None})
     return regressions

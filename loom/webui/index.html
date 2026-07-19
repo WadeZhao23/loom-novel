@@ -292,11 +292,6 @@
       <select id="new-genre"><option value="">不选题材</option></select>
       <label class="field-label">一句话设定(可选,AI 铺设定底稿按它起草)</label>
       <textarea id="new-idea" class="draft-idea" placeholder="例:重生成崇祯,开局砍魏忠贤,拯救大明。留空=按书名+题材发挥。"></textarea>
-      <label class="field-label">目标平台(可选,定违禁词自检的松紧)</label>
-      <select id="new-platform">
-        <option value="">不选</option>
-        <option>起点</option><option>番茄</option><option>晋江</option><option>七猫</option>
-      </select>
       <div class="row-end">
         <button id="create-cancel" class="ghost">取消</button>
         <button id="btn-create" class="primary">新建</button>
@@ -447,6 +442,8 @@
     <span id="nav-dot" class="nav-dot hidden"></span>
   </button>
   <div id="nav-popover" class="nav-popover hidden">
+    <div class="nav-pop-head">
+    </div>
     <div id="nav-pop-list" class="nav-pop-list"></div>
     <div id="nav-pop-card" class="journey-card nav-host"></div>
   </div>

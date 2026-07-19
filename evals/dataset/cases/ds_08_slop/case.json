@@ -1,0 +1,25 @@
+{
+  "id": "ds_08_slop",
+  "split": "dev",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者身份暴露即被清脉司缉拿为炉鼎,唯有连夜逃出矿场一条生路。矿场四周有暗渠通向谷外。",
+    "characters": "沈砚:逆息体质,寡言谨慎,做事有条理;周楠:矿场医师,暗中相助。",
+    "prev_hook": "上一章末:周楠塞给沈砚一张画着矿场暗渠走向的草图,低声道『天一黑就走,别回头』。",
+    "chapter_goal": "接住暗渠草图的钩——沈砚照图摸清逃路、收拾细软,定下今夜出逃。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": true, "severity": "高", "evidence_type": "chapter",
+     "evidence": "他的心中充满了复杂的情绪,既有对未知前路的恐惧,也有对这片矿场的不舍与留恋。",
+     "note": "注入三处典型 AI 腔且集中出现:①套话头尾/空洞万能句『在这个世界上,每个人都背着自己的秘密』;②直接点名情绪『他的心中充满了复杂的情绪,既有…恐惧,也有…不舍与留恋』(万能修饰+情绪直呼);③过度连接词+句式过整齐『不仅…而且…因此…必须…』。三类叠加,通篇模板腔,命中 AI 腔判高。evidence 取最典型的直接点名情绪一处。context 未声明任何写作指纹,不适用指纹豁免护栏;未用『不是…而是』翻转句(留确定性 grader)。其余七维保持干净:沈砚外在言行仍寡言谨慎、按部就班逃亡(情绪点名系旁白 AI 腔,非其行为 OOC),设定/钩子/爽点/信息/物品/时间均未注入冲突。",
+     "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

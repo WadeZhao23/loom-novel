@@ -1,0 +1,8 @@
+{
+  "preregistered": "2026-07-17",
+  "note": "以下为待验收标准,非当前事实。先于任何真实校准结果提交进版本库,用 git 历史证明未看完分数倒推阈值(spec §Phase3)。达标才可将对应维度晋级为硬门禁(Phase 4)。",
+  "kappa_human_human": 0.70,
+  "kappa_judge_gold": 0.60,
+  "high_cost_recall": 0.85,
+  "high_cost_dimensions": ["信息边界", "设定漂移"]
+}

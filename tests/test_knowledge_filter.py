@@ -21,6 +21,8 @@ def test_filled_card_is_fed(project):
 
 def test_project_card_hints_stripped_but_platform_kept(project):
     # 立项卡真内容(平台行)与占位括注混排:括注剥掉、平台行保留,不许整份误杀
+    card = project / "外置大脑/立项卡.md"   # FB-平台后模板不预填,显式填平台验「真内容保留」
+    card.write_text(card.read_text(encoding="utf-8").replace("平台:\n", "平台:起点\n", 1), encoding="utf-8")
     _, items = _knowledge_items(project, 1, "设定师")
     got = {rel: t for rel, t in items}
     assert "外置大脑/立项卡.md" in got

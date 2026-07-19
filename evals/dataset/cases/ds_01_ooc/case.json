@@ -1,0 +1,25 @@
+{
+  "id": "ds_01_ooc",
+  "split": "dev",
+  "version": 1,
+  "source": {"origin": "constructed", "license": "self-authored", "deidentified": true},
+  "context": {
+    "setting": "灵气复苏第三年。逆息体质者吸灵反噬,身份一旦暴露会被宗门当炉鼎抓走——保密是活命底线。",
+    "characters": "沈砚:逆息体质,寡言谨慎,底线=绝不向陌生人透露体质;周楠:矿场医师,与沈砚初识,立场未明。",
+    "prev_hook": "上一章末:周楠隔着矿道问『你的伤,为什么灵气靠近反而加重?』",
+    "chapter_goal": "接住追问钩;沈砚用旧伤搪塞过去,保住秘密,埋周楠起疑线。"
+  },
+  "labels": [
+    {"dimension": "人物OOC", "present": true, "severity": "高", "evidence_type": "chapter",
+     "evidence": "我是逆息体质,灵气进不了脉,只会撕经络。",
+     "note": "注入:沈砚对初识、立场未明的周楠和盘托出体质——直接踩穿 characters 里写死的保密底线,违背性格与立场。",
+     "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "设定漂移", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "断钩子", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "无爽点", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "信息边界", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "物品状态连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "时间连续性", "present": false, "annotator": "构造注入(gold-by-construction)"},
+    {"dimension": "AI腔", "present": false, "annotator": "构造注入(gold-by-construction)"}
+  ]
+}

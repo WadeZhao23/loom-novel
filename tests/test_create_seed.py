@@ -25,7 +25,8 @@ def test_idea_and_platform_land(tmp_path):
 def test_defaults_untouched(tmp_path):
     root = scaffold_init("素书", parent=tmp_path)
     assert load_config(root).idea == ""
-    assert "平台:起点" in (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+    card = (root / "外置大脑/立项卡.md").read_text(encoding="utf-8")
+    assert "平台:" in card and "平台:起点" not in card   # FB-平台:建书不再预填平台,平台行留空(可选可跳)
 
 
 def test_idea_survives_save_config_roundtrip(tmp_path):

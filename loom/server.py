@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,7 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import events, usecases
+from . import events, partner, usecases
 from .backends import (PROVIDERS, LoomBackendError, cheap_backend, get_backend, list_models,
                        probe as probe_backend, provider_catalog, validate_model)
 from .config import Config, load_config, save_config, set_provider_key
@@ -683,6 +684,91 @@ def write(b: WriteBody):
             yield json.dumps(ev, ensure_ascii=False) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+# ----------------------------- 书房伙伴(对话) -----------------------------
+class PartnerSayBody(BaseModel):
+    root: str
+    text: str
+
+
+class PartnerConfirmBody(BaseModel):
+    root: str
+    id: str
+
+
+@app.post("/api/partner/say")
+def partner_say(b: PartnerSayBody):
+    """对话一轮,ndjson 流(user/assistant/assistant_delta/tool/result/proposal/error)。
+    锁裁量红线(spec §10):独立 partner 轮锁,完全不碰书写锁——织章持写锁跑几分钟期间,
+    say 照样能聊,只挡两次并发 say 交错写同一 .伙伴对话/当前.jsonl。backend 用主模型
+    (get_backend),不走 cheap_backend:对话是主体验。"""
+    root = Path(b.root)
+    lock = usecases.acquire_partner_lock(root)   # 拿不到 → ProjectBusyError(partner_busy) → 409
+
+    q: queue.Queue = queue.Queue()
+    cancel = threading.Event()
+
+    def worker():
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        try:
+            cfg = load_config(root)
+            partner.run_turn(root, b.text, get_backend(cfg), emit=q.put, ts=ts,
+                             should_cancel=cancel.is_set)
+        except LoomBackendError as e:
+            # partner 流信封是 {"t":...,"ts":...}(非 /api/write 的 type-keyed),error 事件跟随;
+            # code 透传,前端据此附可操作提示;e.code 为 None 时不出 code 键
+            err_ev = {"t": "error", "text": str(e), "ts": ts}
+            if e.code:
+                err_ev["code"] = e.code
+            q.put(err_ev)
+        except (ValueError, FileNotFoundError) as e:
+            q.put({"t": "error", "text": str(e), "ts": ts})
+        except Exception as e:  # 兜底,别让流挂死
+            q.put({"t": "error", "text": f"意外错误:{e}", "ts": ts})
+        finally:
+            lock.release()   # 锁跟着 worker 走(响应流着,轮还没完),在哨兵 None 之前放
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        try:
+            while True:
+                ev = q.get()
+                if ev is None:
+                    break
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+        finally:
+            # 客户端断连(前端 abort)→ 生成器被关闭 → 置取消旗,worker 下一轮边界停并放锁。
+            # 正常收尾(哨兵 None break)时 worker 已 return,置旗是无副作用的 no-op(spec §10.3)。
+            cancel.set()
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.post("/api/partner/confirm")
+def partner_confirm_ep(b: PartnerConfirmBody):
+    """拍板落盘(非流式,走真书写锁):找 proposal → 落进对应槽位 → 记 confirm 事件。"""
+    try:
+        return usecases.partner_confirm(Path(b.root), b.id, ts=time.strftime("%Y%m%d-%H%M%S"))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.post("/api/partner/new")
+def partner_new_ep(b: RootBody):
+    """归档当前伙伴对话、另起一段(走真书写锁;不动书内容,只挪 jsonl 文件)。"""
+    try:
+        return usecases.partner_new(Path(b.root), stamp=time.strftime("%Y%m%d-%H%M%S"))
+    except (LoomBackendError, ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+
+
+@app.get("/api/partner/history")
+def partner_history_ep(root: str):
+    """纯读派生视图,无锁(同 journey_state)。"""
+    return usecases.partner_history(Path(root))
 
 
 # 静态界面挂在最后(/api/* 已先匹配)
