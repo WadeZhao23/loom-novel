@@ -134,4 +134,4 @@ evals/gating.json               维度→{observe|soft|hard};初始全 observe
 - Phase 1:`docs/superpowers/plans/2026-07-17-eval-phase1-generation-suite.md`
 - Phase 2:`docs/superpowers/plans/2026-07-17-eval-phase2-dataset-rubric.md`
 - Phase 3:`docs/superpowers/plans/2026-07-17-eval-phase3-judge-calibration.md`
-- Phase 4:`docs/superpowers/plans/2026-07-17-eval-phase4-layered-ci.md`(待写)
+- Phase 4:`docs/superpowers/plans/2026-07-17-eval-phase4-layered-ci.md`
