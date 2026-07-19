@@ -131,15 +131,30 @@ def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list |
     悄悄丢了 dropped,报告会把「子集上算的 P/R/F1」标成「已计算」而不说明只在几例上算。
     传了 dropped_infra 才会在 coverage 段体现掉数;缺省时 coverage 段如实标「待真机/未评」。
     """
+    # judge 是 {dim:[bool per evaluated case]}。全部 case 都 infra 时 aligned_matrices 仍返回
+    # 非空 dict、但每维值为空 list(judge_matrix={dim:[]})——`if judge:` 对此判真,会走进
+    # prf_for_dimension/cohen_kappa 对空序列计算,cohen_kappa([],[]) 直接 raise ValueError,
+    # 让「全 infra 时如实报告 coverage」这条兜底路径本身崩溃。改用 has_evaluated(至少 1
+    # 个已评 case)做守卫:无已评例 → 跳过度量、judge_vs_gold 留空,不产假数也不崩。
+    n_eval = len(next(iter(judge.values()))) if judge else 0
+    has_evaluated = bool(judge) and n_eval > 0
+
+    if has_evaluated:
+        judge_vs_gold_status = "已计算"
+    elif not judge:
+        judge_vs_gold_status = "待真机"
+    else:
+        judge_vs_gold_status = "全infra掉出,无可评例"
+
     report: dict = {
         "dimensions": list(DIMENSIONS),
         "targets": load_targets(),
         "judge_vs_gold": {},
-        "judge_vs_gold_status": "待真机" if not judge else "已计算",
+        "judge_vs_gold_status": judge_vs_gold_status,
         "human_human_kappa": {"status": "待标注", "n": 0, "value": None,
                               "note": "人-人一致性需两名标注者对 calibration split 独立标注后计算"},
     }
-    if judge:
+    if has_evaluated:
         for d in DIMENSIONS:
             report["judge_vs_gold"][d] = prf_for_dimension(gold[d], judge[d]).as_dict()
         flat_gold = [x for d in DIMENSIONS for x in gold[d]]
@@ -151,12 +166,14 @@ def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list |
         report["human_human_kappa"] = {"status": "已计算", "n": len(a),
                                        "value": cohen_kappa(a, b), "note": ""}
 
-    n_eval = None
-    if judge:
-        # judge 是 {dim:[bool per evaluated case]},取任一维长度即已评例数
-        n_eval = len(next(iter(judge.values()))) if judge else 0
+    if has_evaluated:
+        cov_status = "已计算"
+    elif not judge:
+        cov_status = "待真机"
+    else:
+        cov_status = "全infra掉出,无可评例"
     report["coverage"] = {
-        "status": "已计算" if judge else "待真机",
+        "status": cov_status,
         "n_total": n_total,
         "n_evaluated": n_eval,
         "n_infra_dropped": len(dropped_infra) if dropped_infra is not None else None,

@@ -192,3 +192,17 @@ def test_build_report_coverage_pending_when_no_judge():
     gold = {d: [False] for d in DIMENSIONS}
     rep = build_calibration_report(gold, None, None)
     assert rep["coverage"]["n_evaluated"] is None or rep["coverage"]["status"] == "待真机"
+
+
+def test_calibrate_all_infra_reports_honestly_not_crash():
+    # 全部 case infra(真机后端整体挂)→ 不崩,coverage 全披露、judge_vs_gold 留空
+    from evals.calibration import calibrate
+    from evals.judge import JudgeResult
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移")]
+    judge = [JudgeResult("c1", [], infra_error=True, error="[infra]"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]")]
+    rep = calibrate(gold, judge)                    # 修前:ValueError 崩
+    cov = rep["coverage"]
+    assert cov["n_total"] == 2 and cov["n_evaluated"] == 0 and cov["n_infra_dropped"] == 2
+    assert rep["judge_vs_gold"] == {}               # 无可评例→度量段留空,不造假 tp/fp/fn
+    assert "judge_vs_gold_kappa" not in rep          # 不算 κ(空序列)
