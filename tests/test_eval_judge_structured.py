@@ -71,3 +71,32 @@ def test_dimension_verdict_as_dict_roundtrip():
     v = DimensionVerdict("AI腔", True, "低", "翻转句", "命中")
     assert v.as_dict() == {"dimension": "AI腔", "present": True, "severity": "低",
                            "evidence": "翻转句", "reason": "命中"}
+
+
+def test_extra_unknown_dimension_beyond_full_set_raises():
+    """8 维齐全(不触发缺维度兜底)+ 第 9 个越界维——只有越界维度守卫能拦。"""
+    items = json.loads(_full_verdict())                 # 8 维合法
+    items.append({"dimension": "文学性", "present": False, "severity": None,
+                  "evidence": "", "reason": "越界"})     # 第9维越界
+    with pytest.raises(JudgeParseError):
+        parse_judge_verdict(json.dumps(items, ensure_ascii=False))
+
+
+def test_duplicate_dimension_raises():
+    """8 唯一维 + 1 条重复维(内容矛盾)——删守卫会「后覆盖前」静默吞掉矛盾。"""
+    items = json.loads(_full_verdict())                 # 8 唯一维
+    dup = dict(items[0]); dup["present"] = True; dup["severity"] = "高"
+    dup["evidence"] = "x"; dup["reason"] = "矛盾的重复维"
+    items.append(dup)                                    # 第9项=第0维的矛盾重复
+    with pytest.raises(JudgeParseError):
+        parse_judge_verdict(json.dumps(items, ensure_ascii=False))
+
+
+def test_present_non_bool_raises():
+    """present 非 bool 且取值 falsy(0)、severity 仍为 null——若走 present=False 分支的
+    severity 检查(severity is None → 不拦),就不会被顺带拦住,只有 present-bool 守卫能拦。
+    （注意不能用 "true" 这类真值字符串：它会让代码落入 present truthy 分支,
+    被 severity not in SEVERITIES 的检查顺带拦下,测试就钉不住 present 守卫本身。）"""
+    raw = _full_verdict(断钩子={"present": 0})           # 0 非 bool,且 falsy
+    with pytest.raises(JudgeParseError):
+        parse_judge_verdict(raw)
