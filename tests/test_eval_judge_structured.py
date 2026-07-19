@@ -201,3 +201,16 @@ def test_judge_case_non_string_backend_output_is_infra_not_crash():
     r = judge_case(_case_stub(), FakeBackend(lambda s, u: []))
     assert r.infra_error is True and r.verdicts == []
     assert "[infra]" in r.error
+
+
+def test_cli_calibrate_demo_all_infra_reports_honestly(tmp_path, monkeypatch):
+    # demo 后端吐罐头非 JSON → 全 case infra → 报告 coverage 如实全 dropped,不崩、退出码 0
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    from evals.judge import main
+    rdir = tmp_path / "rep"
+    code = main(["--backend", "demo", "--calibrate", "--report-dir", str(rdir)])
+    assert code == 0
+    import json
+    rep = json.loads((rdir / "report.json").read_text(encoding="utf-8"))
+    assert rep["coverage"]["n_infra_dropped"] == rep["coverage"]["n_total"]   # 全掉
+    assert rep["coverage"]["n_evaluated"] == 0

@@ -169,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="demo=占位后端(只证链路,demo 不吐合法 JSON→会 infra,属预期);configured=真后端(要 key)")
     ap.add_argument("--dataset-dir", type=Path, default=None)
     ap.add_argument("--out", type=Path, default=None, help="verdicts.jsonl 落盘路径")
+    ap.add_argument("--calibrate", action="store_true", help="judge 完跑校准并写报告(金标 labels vs verdicts)")
+    ap.add_argument("--report-dir", type=Path, default=None, help="校准报告落盘目录")
     args = ap.parse_args(argv)
 
     cases = discover_cases(args.dataset_dir)
@@ -188,8 +190,11 @@ def main(argv: list[str] | None = None) -> int:
     backend = get_backend(Config())
 
     results = []
+    gold_cases = []
     for cdir in cases:
-        r = judge_case(load_case(cdir), backend)
+        gold_case = load_case(cdir)
+        gold_cases.append(gold_case)
+        r = judge_case(gold_case, backend)
         results.append(r)
         flag = "⚠infra" if r.infra_error else "✓"
         hits = sum(1 for v in r.verdicts if v.present)
@@ -198,6 +203,15 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text("\n".join(json.dumps(r.as_dict(), ensure_ascii=False) for r in results),
                             encoding="utf-8")
         print(f"→ 写入 {args.out}")
+
+    if args.calibrate:
+        from .calibration import calibrate, write_report
+        report = calibrate(gold_cases, results)   # gold_cases 与 results 同 case 顺序
+        rdir = args.report_dir or (Path("evals/runs") / f"judge-{len(results)}cases")
+        j, m = write_report(report, rdir)
+        cov = report["coverage"]
+        print(f"→ 校准报告:{j}(评 {cov['n_evaluated']}/{cov['n_total']} 例,"
+              f"infra 掉 {cov['n_infra_dropped']})")
     return 0
 
 
