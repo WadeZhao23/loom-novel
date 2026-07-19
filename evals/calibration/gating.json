@@ -1,7 +1,7 @@
 {
-  "note": "维度门禁策略。observe=只记录不拦截;soft=出警告不拦截;hard=参与门禁拦截。初始全 observe——任一维度晋级 soft/hard 必须有 Phase 3 校准报告(达标 κ/recall)为证,不得凭印象晋级(spec §Phase3/4、ADR-0002)。",
+  "note": "维度门禁策略。observe=只记录不拦截;soft=出警告不拦截;hard=参与门禁拦截。初始全 observe——任一维度晋级 soft/hard 必须有 Phase 3 校准报告(达标 κ/recall)为证,不得凭印象晋级(spec §Phase3/4、ADR-0002)。信息边界已据 report.json 校准达标晋级 hard(2026-07-19),recall=1.0≥0.85。",
   "dimensions": {
     "人物OOC": "observe", "设定漂移": "observe", "断钩子": "observe", "无爽点": "observe",
-    "信息边界": "observe", "物品状态连续性": "observe", "时间连续性": "observe", "AI腔": "observe"
+    "信息边界": "hard", "物品状态连续性": "observe", "时间连续性": "observe", "AI腔": "observe"
   }
 }

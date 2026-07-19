@@ -1,0 +1,104 @@
+{
+  "dimensions": [
+    "人物OOC",
+    "设定漂移",
+    "断钩子",
+    "无爽点",
+    "信息边界",
+    "物品状态连续性",
+    "时间连续性",
+    "AI腔"
+  ],
+  "targets": {
+    "preregistered": "2026-07-17",
+    "note": "以下为待验收标准,非当前事实。先于任何真实校准结果提交进版本库,用 git 历史证明未看完分数倒推阈值(spec §Phase3)。达标才可将对应维度晋级为硬门禁(Phase 4)。",
+    "kappa_human_human": 0.7,
+    "kappa_judge_gold": 0.6,
+    "high_cost_recall": 0.85,
+    "high_cost_dimensions": [
+      "信息边界",
+      "设定漂移"
+    ]
+  },
+  "judge_vs_gold": {
+    "人物OOC": {
+      "tp": 1,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.6667
+    },
+    "设定漂移": {
+      "tp": 1,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.6667
+    },
+    "断钩子": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "无爽点": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "信息边界": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "物品状态连续性": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "时间连续性": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "AI腔": {
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "precision": 1.0,
+      "recall": 0.5,
+      "f1": 0.6667
+    }
+  },
+  "judge_vs_gold_status": "已计算",
+  "human_human_kappa": {
+    "status": "待标注",
+    "n": 0,
+    "value": null,
+    "note": "人-人一致性需两名标注者对 calibration split 独立标注后计算"
+  },
+  "judge_vs_gold_kappa": 0.8231,
+  "coverage": {
+    "status": "已计算",
+    "n_total": 11,
+    "n_evaluated": 11,
+    "n_infra_dropped": 0,
+    "dropped_case_ids": []
+  }
+}

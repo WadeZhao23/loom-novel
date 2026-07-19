@@ -33,7 +33,7 @@ jobs:
             echo "✗ 缺 DEEPSEEK_API_KEY secret —— 真 Judge 无法跑(这是 infra 缺失,不是质量 PASS)"
             exit 2
           fi
-          python -m evals.judge --backend configured --calibrate --report-dir eval-real-report
+          python -m evals.judge --backend configured --calibrate --gate --report-dir eval-real-report
       - name: 上传校准报告
         if: always()
         uses: actions/upload-artifact@v4

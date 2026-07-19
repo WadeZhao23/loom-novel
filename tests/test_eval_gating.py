@@ -1,12 +1,17 @@
-"""维度门禁策略:初始全 observe,校准达标才晋级(本 Phase 只建机制不晋级)。"""
+"""维度门禁策略:默认 observe,校准达标才晋级——信息边界已据真校准报告晋级 hard。"""
 from evals.calibration import gate_hard_dimensions, gate_policy, load_gating, load_targets
 from evals.dataset import DIMENSIONS
 
 
-def test_gating_covers_all_dims_initially_observe():
+def test_gating_covers_all_dims_observe_except_calibration_backed_promotions():
+    # 未被校准报告背书晋级的维度仍须是 observe(无校准不硬门禁);
+    # 已晋级的维度由 test_current_hard_is_exactly_信息边界 单独钉死是谁。
     g = load_gating()
+    hard = {d for d, p in g["dimensions"].items() if p == "hard"}
     for d in DIMENSIONS:
-        assert g["dimensions"][d] == "observe"      # 初始全 observe(无校准前不硬门禁)
+        if d in hard:
+            continue
+        assert g["dimensions"][d] == "observe"      # 未晋级维度:无校准不硬门禁
     assert "校准" in g["note"] or "达标" in g["note"]
 
 
@@ -20,9 +25,31 @@ def test_gate_policy_reads_declared():
     assert gate_policy("设定漂移", g) == "observe"   # 未声明 → observe
 
 
-def test_gating_has_no_hard_dimensions_yet():
-    """护栏:本 Phase 只建机制,不晋级任何维度——gating.json 里不该出现 hard。"""
-    assert "hard" not in load_gating()["dimensions"].values()
+def test_hard_dims_are_calibration_backed_high_cost():
+    """晋级纪律:任何 hard 维度必须①是预注册高代价维、②有已提交校准报告为证。
+    防凭印象把维度翻 hard(spec §Phase3/4:校准达标才晋级)。"""
+    import json
+    from pathlib import Path
+    from evals.calibration import load_gating, load_targets
+    g = load_gating()["dimensions"]
+    hard = [d for d, p in g.items() if p == "hard"]
+    high_cost = set(load_targets()["high_cost_dimensions"])
+    for d in hard:
+        assert d in high_cost, f"{d} 晋级 hard 但不是高代价维"
+    report = Path("evals/calibration/report.json")
+    if hard:
+        assert report.is_file(), "有 hard 维度但缺 evals/calibration/report.json 校准证据"
+        jvg = json.loads(report.read_text(encoding="utf-8"))["judge_vs_gold"]
+        target = load_targets()["high_cost_recall"]
+        for d in hard:
+            assert jvg[d]["recall"] is not None and jvg[d]["recall"] >= target, \
+                f"{d} 是 hard 但校准报告里 recall 未达 {target}"
+
+
+def test_current_hard_is_exactly_信息边界():
+    from evals.calibration import load_gating
+    g = load_gating()["dimensions"]
+    assert [d for d, p in g.items() if p == "hard"] == ["信息边界"]   # 本期只晋级这一项
 
 
 def test_gating_dimensions_exactly_match_dataset():

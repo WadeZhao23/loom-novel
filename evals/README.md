@@ -359,8 +359,8 @@ PR / push ──→ ci.yml(每次都跑)
                    报告生成失败只降级留痕,绝不否决已通过的门禁)
 
 手动 / 每周一 ──→ eval-real.yml(workflow_dispatch + schedule)
-                └─ evals.judge --backend configured --calibrate(真调 LLM Judge,要 key)
-                   → 校准报告上传 artifact
+                └─ evals.judge --backend configured --calibrate --gate(真调 LLM Judge,要 key)
+                   → 对 hard 维度真拦截 + 校准报告上传 artifact
 ```
 
 **为什么分层**:fork PR 读不到仓库 secret(GitHub 的机制,防 fork 恶意代码窃密),`pull_request_target` 又会把 secret 暴露给 fork 代码(pwn request)。所以真 Judge 只挂 `workflow_dispatch`+`schedule`(仅仓库自身触发),PR CI 永远零 key、零成本、双平台稳过。`eval-real.yml` 用最小 `contents: read` 权限,不碰发版流程。
@@ -371,9 +371,43 @@ PR / push ──→ ci.yml(每次都跑)
 > 名字 `DEEPSEEK_API_KEY`(或所配 provider 的 key 名),值填你的 key。
 > 没加时 workflow 会 `exit 2` 如实报「缺 key = infra 缺失」,**不会伪装成质量 PASS**。
 
-**门禁策略 `evals/calibration/gating.json`**:每个维度一个策略——`observe`(只记录不拦截)/ `soft`(警告不拦截)/ `hard`(参与门禁拦截)。**现在 8 维全 `observe`**。任一维度要晋级 `soft`/`hard`,必须先有 Phase 3 校准报告证明它达标(κ/recall 过预注册阈值),不凭印象晋级(ADR-0002)。晋级本身是一次可审查的 `gating.json` diff,不在本期。
+**门禁策略 `evals/calibration/gating.json`**:每个维度一个策略——`observe`(只记录不拦截)/ `soft`(警告不拦截)/ `hard`(参与门禁拦截)。任一维度要晋级 `soft`/`hard`,必须先有 Phase 3 校准报告证明它达标(κ/recall 过预注册阈值),不凭印象晋级(ADR-0002)。晋级本身是一次可审查的 `gating.json` diff——2026-07-19 已发生第一次,见下一节「门控真拦截」。
 
 **评测报告 `evals/report.py`**:把三套 suite 的结果(Fixture 门禁 / Generation manifest / Judge 校准)合成 JSON + MD 上传 artifact,构成「commit → 模型 → prompt hash → 结论」的可追溯链。报告**禁止只看加权总分**:高代价维(信息边界 / 设定漂移)的 recall 在校准段**单列**;缺哪源就如实标「未跑 / 待真机」,不造数;真 Judge 一次 infra 掉了 case,报告披露「N 例中 M 例掉出、只在 K 例上算」,不把子集标成全量。
+
+## 门控真拦截:第一个 hard 维度(2026-07-19)
+
+`evals/calibration/gating.json` 现状:**8 维里只有「信息边界」是 `hard`,其余 7 维仍 `observe`**。
+
+```json
+"信息边界": "hard"   // 其余 7 维:人物OOC / 设定漂移 / 断钩子 / 无爽点 /
+                     // 物品状态连续性 / 时间连续性 / AI腔 —— 仍 observe
+```
+
+**`hard` 拦的是什么**:这不是「书写得好不好」的门禁,是**元门禁**——只在 `eval-real.yml`
+真跑 `evals.judge --calibrate --gate` 时生效,断言「信息边界」这一维 Judge 相对构造性金标
+的 recall 没有掉破预注册阈值 `0.85`(`evals/calibration/targets.json` 的
+`high_cost_recall`)。红灯的含义是**「Judge 本身退化了、不能再信它的判断」**,不是「某一章
+写得不合格」——产品侧 gates 从不基于这个门禁拦用户的稿子(守 ADR-0002/0006)。
+
+**晋级凭什么**:不是凭印象,是有已提交的真机校准报告为证——
+[`evals/calibration/report.json`](calibration/report.json) /
+[`report.md`](calibration/report.md)(deepseek-v4-pro 直调,11 例数据集全评、0 例 infra
+掉出,整体 Judge-金标 κ=0.8231;信息边界 precision=1.0 / recall=1.0 ≥ 0.85 达标)。
+出处、生成命令、commit、日期见 [`PROVENANCE.md`](calibration/PROVENANCE.md)。
+`tests/test_eval_gating.py::test_hard_dims_are_calibration_backed_high_cost` 把这条纪律
+钉成护栏测试:任何 `hard` 维度都必须①是预注册高代价维、②report.json 里 recall 达标,
+防止未来有人不带证据地把维度手动改成 `hard`。
+
+**小样本 caveat(别当统计验证读)**:11 例数据集里信息边界只有 1 个金标正例,
+recall=1.0 = 「抓到了那一个例子」,不是统计意义上的验证;金标是构造性的(标签因缺陷是
+注入的而为真,不是人工共识),人-人一致性 κ 仍待标注。详细边界见
+[`PROVENANCE.md`](calibration/PROVENANCE.md)。
+
+**为什么 AI腔 没有一起晋级**:同一份报告里 AI腔 recall=0.5(漏判 1 例孤立翻转句,
+说明当前 rubric 有缺口),没有达到 0.85 阈值,所以保持 `observe`;设定漂移虽然也是预注册
+高代价维,但本次 precision 只有 0.5(在一个 case 上过度归因),同样不具备晋级证据,继续
+`observe`。数据集做大、或人工标注补上之后再重新评估要不要扩大晋级范围。
 
 ## 为什么要有它(写给作者自己)
 
