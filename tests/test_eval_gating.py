@@ -61,3 +61,11 @@ def test_gate_warns_on_unmeasurable_hard_dim():
     gating = {"dimensions": {"信息边界": "hard"}}
     ok, failures, warns = gate_hard_dimensions(_report_with({"信息边界": None}), gating, load_targets())
     assert ok is True and failures == [] and any("信息边界" in w for w in warns)  # 无正例→跳过不失败
+
+
+def test_gate_boundary_recall_equals_target_passes():
+    # recall 恰好等于 target 应通过(≥ 非严格 >)——钉死边界,防重构悄悄引入 > 回归
+    gating = {"dimensions": {"信息边界": "hard"}}
+    target = load_targets()["high_cost_recall"]
+    ok, failures, warns = gate_hard_dimensions(_report_with({"信息边界": target}), gating, load_targets())
+    assert ok is True and failures == []
