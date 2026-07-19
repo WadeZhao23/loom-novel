@@ -1,6 +1,4 @@
 """κ / P·R·F1 纯函数:手算小样本对拍。零真实模型、零外部依赖。"""
-import math
-
 import pytest
 
 from evals.calibration import PRF, cohen_kappa, prf_for_dimension
