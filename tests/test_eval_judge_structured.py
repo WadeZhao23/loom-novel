@@ -3,8 +3,17 @@ import json
 
 import pytest
 
+from conftest import FakeBackend, ScriptedBackend
 from evals.dataset import DIMENSIONS
-from evals.judge import DimensionVerdict, JudgeParseError, build_judge_prompt, load_rubric, parse_judge_verdict
+from evals.judge import (
+    DimensionVerdict,
+    JudgeParseError,
+    JudgeResult,
+    build_judge_prompt,
+    judge_case,
+    load_rubric,
+    parse_judge_verdict,
+)
 
 
 def _full_verdict(**overrides):
@@ -146,3 +155,36 @@ def test_build_prompt_no_numeric_score_language():
     # ADR-0002:不许诱导模型打「总体分」
     for banned in ("总体文学分", "综合评分", "打分", "评分(0", "score"):
         assert banned not in system
+
+
+def _case_stub():
+    return {"id": "t", "context": {"setting": "s", "characters": "c",
+            "prev_hook": "p", "chapter_goal": "g"}, "chapter": "正文"}
+
+
+def test_judge_case_clean_all_absent():
+    be = FakeBackend(lambda s, u: _full_verdict())
+    r = judge_case(_case_stub(), be)
+    assert r.infra_error is False
+    assert len(r.verdicts) == 8 and all(not v.present for v in r.verdicts)
+
+
+def test_judge_case_backend_failure_is_infra_not_fake_pass():
+    def boom(s, u):
+        raise RuntimeError("后端炸了")
+    r = judge_case(_case_stub(), FakeBackend(boom))
+    assert r.infra_error is True                 # 后端挂了绝不假通过(P0-C)
+    assert "[infra]" in r.error
+    assert r.verdicts == []
+
+
+def test_judge_case_malformed_output_is_infra():
+    r = judge_case(_case_stub(), FakeBackend(lambda s, u: "通过"))  # 自由文本非 JSON
+    assert r.infra_error is True and "[infra]" in r.error
+
+
+def test_judge_result_as_dict_shape():
+    r = judge_case(_case_stub(), FakeBackend(lambda s, u: _full_verdict()))
+    d = r.as_dict()
+    assert d["case_id"] == "t" and d["infra_error"] is False
+    assert len(d["verdicts"]) == 8 and d["verdicts"][0]["dimension"] == DIMENSIONS[0]

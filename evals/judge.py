@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from loom.evalapi import CRITIC_质检, CRITIC_去AI味
 
 from .dataset import DIMENSIONS, SEVERITIES
+from .metering import MeteringBackend
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -120,3 +122,83 @@ def build_judge_prompt(context: dict, chapter: str, rubric_text: str) -> tuple[s
         "## 你的任务\n按上面 8 维判据逐维评,严格输出 JSON 数组(8 个对象)。"
     )
     return system, user
+
+
+@dataclass
+class JudgeResult:
+    case_id: str
+    verdicts: list[DimensionVerdict] = field(default_factory=list)
+    infra_error: bool = False
+    error: str = ""
+    elapsed_s: float = 0.0
+
+    def as_dict(self) -> dict:
+        return {"case_id": self.case_id, "infra_error": self.infra_error, "error": self.error,
+                "elapsed_s": self.elapsed_s, "verdicts": [v.as_dict() for v in self.verdicts]}
+
+
+def judge_case(case: dict, backend, *, rubric_text: str | None = None) -> JudgeResult:
+    """跑一例结构化 Judge。后端异常 OR 解析失败 → infra_error(不假通过 P0-C)。"""
+    rubric_text = load_rubric() if rubric_text is None else rubric_text
+    system, user = build_judge_prompt(case.get("context", {}), case.get("chapter", ""), rubric_text)
+    metered = MeteringBackend(backend)
+    t0 = time.perf_counter()
+    try:
+        raw = metered.complete(system, user, max_chars=1500)
+    except Exception as e:  # noqa: BLE001 — 后端报错=infra,绝不假通过
+        return JudgeResult(case.get("id", "?"), [], True, f"[infra] 后端调用失败 — {e}",
+                           round(time.perf_counter() - t0, 3))
+    try:
+        verdicts = parse_judge_verdict(raw)
+    except JudgeParseError as e:
+        return JudgeResult(case.get("id", "?"), [], True, f"[infra] verdict 解析失败 — {e}",
+                           round(time.perf_counter() - t0, 3))
+    return JudgeResult(case.get("id", "?"), verdicts, False, "", round(time.perf_counter() - t0, 3))
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import os
+    from .dataset import discover_cases, load_case
+
+    ap = argparse.ArgumentParser(description="loom 结构化 Judge(手动/定时跑,不进 PR CI)")
+    ap.add_argument("--case", help="case id;缺省跑全部数据集")
+    ap.add_argument("--backend", choices=["demo", "configured"], default="demo",
+                    help="demo=占位后端(只证链路,demo 不吐合法 JSON→会 infra,属预期);configured=真后端(要 key)")
+    ap.add_argument("--dataset-dir", type=Path, default=None)
+    ap.add_argument("--out", type=Path, default=None, help="verdicts.jsonl 落盘路径")
+    args = ap.parse_args(argv)
+
+    cases = discover_cases(args.dataset_dir)
+    if not cases:
+        print("✗ 没有校准数据集 case(evals/dataset/cases/<id>/case.json)")
+        return 2
+    if args.case:
+        cases = [c for c in cases if c.name == args.case]
+        if not cases:
+            print(f"✗ 找不到 case:{args.case}")
+            return 2
+
+    backend = None
+    if args.backend == "demo":
+        os.environ["LOOM_DEMO"] = "1"
+    from loom.evalapi import get_backend, Config
+    backend = get_backend(Config())
+
+    results = []
+    for cdir in cases:
+        r = judge_case(load_case(cdir), backend)
+        results.append(r)
+        flag = "⚠infra" if r.infra_error else "✓"
+        hits = sum(1 for v in r.verdicts if v.present)
+        print(f"{flag} {r.case_id}  命中 {hits}/8 维  {r.error}")
+    if args.out:
+        args.out.write_text("\n".join(json.dumps(r.as_dict(), ensure_ascii=False) for r in results),
+                            encoding="utf-8")
+        print(f"→ 写入 {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
