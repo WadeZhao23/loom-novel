@@ -63,6 +63,15 @@ def test_missing_dimension_rejected(tmp_path):
         load_case(_write_case(tmp_path, labels=labels))
 
 
+def test_non_str_dimension_rejected_not_typeerror(tmp_path):
+    # P2.T1 残留守卫的回归钉:8 条里混一个 int dimension(非单元素)——
+    # 无守卫时 sorted([...str..., 123]) 裸 TypeError;守卫在→DatasetError。
+    labels = _blank_labels()
+    labels[3] = {"dimension": 123, "present": False, "annotator": "t"}
+    with pytest.raises(DatasetError, match="字符串"):
+        load_case(_write_case(tmp_path, labels=labels))
+
+
 def test_chapter_evidence_must_be_substring(tmp_path):
     labels = _blank_labels(设定漂移={"present": True, "severity": "高",
                                     "evidence_type": "chapter", "evidence": "正文里根本没有这句",
