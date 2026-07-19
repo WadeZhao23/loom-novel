@@ -1404,7 +1404,7 @@ function pcProposal(ev) {
   if (landed) {
     const done = document.createElement("div");
     done.className = "pc-proposal-done";
-    done.textContent = `✓ 已落盘 → ${landed}`;
+    done.textContent = `✓ 已落库 → ${landed}`;
     card.appendChild(done);
     return card;
   }
@@ -1423,7 +1423,7 @@ function pcProposal(ev) {
   actions.className = "pc-proposal-actions";
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "jc-btn";
-  confirmBtn.textContent = ev.before ? "替换" : "就这么定";
+  confirmBtn.textContent = "落库";
   if (_weaving) {   // 织章进行中:确认键置灰(spec §2,锁裁量红线——confirm 走真书写锁,与织章互斥)
     confirmBtn.disabled = true;
     confirmBtn.title = "织章进行中,跑完即可拍板";
@@ -1468,7 +1468,7 @@ function humanizeSlot(slotId) {
 function findConfirmLanded(id) {
   const events = (PARTNER && PARTNER.events) || [];
   const hit = events.find((e) => e && e.t === "confirm" && e.id === id);
-  return hit ? (hit.landed || "已落盘") : null;
+  return hit ? (hit.landed || "已落库") : null;
 }
 
 // FB-B 模型A:这一格是否已被【同轮兄弟候选】落盘(同槽备选选了一个,其余变灰,不留点了必撞 stale 的死键)
@@ -1514,7 +1514,7 @@ async function partnerConfirm(id, btnEl) {
     if (!PARTNER) PARTNER = { events: [] };
     PARTNER.events.push({ t: "confirm", id, landed: out.landed });
     if (out.state) JOURNEY = out.state;
-    toast("已落盘 → " + out.landed);
+    toast("已落库 → " + out.landed);
     paintJourney();
     if (navMode() === "center") paintNavCenterChrome();
     refresh();
