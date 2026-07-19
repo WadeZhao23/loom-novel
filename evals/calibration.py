@@ -77,6 +77,26 @@ def gate_policy(dimension: str, gating: dict) -> str:
     return gating.get("dimensions", {}).get(dimension, "observe")
 
 
+def gate_hard_dimensions(report: dict, gating: dict, targets: dict) -> tuple[bool, list, list]:
+    """对每个 policy=hard 的维度,断言 recall ≥ high_cost_recall target。
+    recall=None(无金标正例/未评)→ 记 warning 跳过,不算失败(测不了的不能拦)。
+    返回 (ok, failures, warnings)。这是「校准过的 Judge 必须保持校准」的元门禁。"""
+    target = targets["high_cost_recall"]
+    jvg = report.get("judge_vs_gold", {})
+    failures, warnings = [], []
+    for dim, policy in gating.get("dimensions", {}).items():
+        if policy != "hard":
+            continue
+        m = jvg.get(dim)
+        recall = m.get("recall") if m else None
+        if recall is None:
+            warnings.append(f"{dim}:无金标正例/未评,无法门禁(跳过)")
+            continue
+        if recall < target:
+            failures.append(f"{dim}:recall {recall} < 目标 {target}")
+    return (not failures, failures, warnings)
+
+
 def evaluate_against_targets(metric_value: float | None, target: float) -> dict:
     """指标 vs 预注册阈值的纯比较。value=None(无数据)→ met=None(待测,非未达标)。"""
     met = None if metric_value is None else (metric_value >= target)

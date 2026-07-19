@@ -214,3 +214,10 @@ def test_cli_calibrate_demo_all_infra_reports_honestly(tmp_path, monkeypatch):
     rep = json.loads((rdir / "report.json").read_text(encoding="utf-8"))
     assert rep["coverage"]["n_infra_dropped"] == rep["coverage"]["n_total"]   # 全掉
     assert rep["coverage"]["n_evaluated"] == 0
+
+
+def test_cli_calibrate_gate_demo_all_infra_is_infra_2(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    from evals.judge import main
+    code = main(["--backend", "demo", "--calibrate", "--gate", "--report-dir", str(tmp_path / "r")])
+    assert code == 2          # 全 infra + --gate → infra 退出码,不伪装通过

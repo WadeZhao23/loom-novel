@@ -171,7 +171,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=None, help="verdicts.jsonl 落盘路径")
     ap.add_argument("--calibrate", action="store_true", help="judge 完跑校准并写报告(金标 labels vs verdicts)")
     ap.add_argument("--report-dir", type=Path, default=None, help="校准报告落盘目录")
+    ap.add_argument("--gate", action="store_true",
+                    help="--calibrate 后对 hard 维度强制判定(须配 --calibrate);"
+                         "全 infra→2,hard 维掉破 target→1,保持达标→0")
     args = ap.parse_args(argv)
+
+    if args.gate and not args.calibrate:
+        print("✗ --gate 须配 --calibrate(无校准报告可判)")
+        return 2
 
     cases = discover_cases(args.dataset_dir)
     if not cases:
@@ -212,6 +219,21 @@ def main(argv: list[str] | None = None) -> int:
         cov = report["coverage"]
         print(f"→ 校准报告:{j}(评 {cov['n_evaluated']}/{cov['n_total']} 例,"
               f"infra 掉 {cov['n_infra_dropped']})")
+
+        if args.gate:
+            from .calibration import gate_hard_dimensions, load_gating, load_targets
+            if cov.get("n_total") and not cov.get("n_evaluated"):
+                print("✗ 全部 case infra,无可评例 → 门禁无法判定(infra,不伪装通过)")
+                return 2
+            ok, failures, warnings = gate_hard_dimensions(report, load_gating(), load_targets())
+            for w in warnings:
+                print(f"⚠ {w}")
+            if not ok:
+                print("❌ hard 维度掉破 target:")
+                for f in failures:
+                    print(f"   · {f}")
+                return 1
+            print("✅ 所有 hard 维度保持达标(或无 hard 维度)")
     return 0
 
 
