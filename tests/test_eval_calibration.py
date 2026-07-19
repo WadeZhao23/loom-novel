@@ -2,6 +2,7 @@
 import pytest
 
 from evals.calibration import PRF, cohen_kappa, evaluate_against_targets, load_targets, prf_for_dimension
+from evals.dataset import DIMENSIONS
 
 
 def test_kappa_perfect_agreement():
@@ -80,3 +81,43 @@ def test_high_cost_dimensions_are_real_dimensions():
     # 防将来改维度名/打错字让 Phase 4 硬门禁悄悄指向不存在的维度。
     from evals.dataset import DIMENSIONS
     assert set(load_targets()["high_cost_dimensions"]) <= set(DIMENSIONS)
+
+
+def _gold_two_cases():
+    # 两个 case 的金标:case1 只 AI腔命中;case2 只 设定漂移命中
+    return {d: [d == "AI腔", d == "设定漂移"] for d in DIMENSIONS}
+
+
+def test_present_matrix_shape():
+    from evals.calibration import present_matrix
+    labels_c1 = [{"dimension": d, "present": (d == "AI腔")} for d in DIMENSIONS]
+    labels_c2 = [{"dimension": d, "present": (d == "设定漂移")} for d in DIMENSIONS]
+    m = present_matrix([{"labels": labels_c1}, {"labels": labels_c2}])
+    assert m["AI腔"] == [True, False] and m["设定漂移"] == [False, True]
+
+
+def test_report_judge_vs_gold_perfect():
+    from evals.calibration import build_calibration_report
+    gold = _gold_two_cases()
+    judge = _gold_two_cases()                     # Judge 与金标完全一致
+    rep = build_calibration_report(gold, judge, human_pairs=None)
+    assert rep["judge_vs_gold"]["AI腔"]["f1"] == 1.0
+    assert rep["judge_vs_gold"]["设定漂移"]["recall"] == 1.0
+
+
+def test_report_human_kappa_is_pending_when_no_annotations():
+    from evals.calibration import build_calibration_report
+    rep = build_calibration_report(_gold_two_cases(), None, human_pairs=None)
+    assert rep["human_human_kappa"]["status"] == "待标注"      # 不造数
+    assert rep["human_human_kappa"]["n"] == 0
+    assert rep["judge_vs_gold_status"] == "待真机"              # 无 judge 数据
+
+
+def test_write_report_emits_json_and_md(tmp_path):
+    from evals.calibration import build_calibration_report, write_report
+    rep = build_calibration_report(_gold_two_cases(), _gold_two_cases(), None)
+    j, m = write_report(rep, tmp_path)
+    assert j.is_file() and m.is_file()
+    import json as _j
+    assert _j.loads(j.read_text(encoding="utf-8"))["judge_vs_gold"]["AI腔"]["f1"] == 1.0
+    assert "待标注" in m.read_text(encoding="utf-8")            # MD 也如实标空位

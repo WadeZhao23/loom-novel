@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from .dataset import DIMENSIONS
+
 
 def cohen_kappa(a: list, b: list) -> float:
     """两个等长标签序列的 Cohen's κ。完全一致→1.0;单一类别且一致→1.0。"""
@@ -69,3 +71,75 @@ def evaluate_against_targets(metric_value: float | None, target: float) -> dict:
     """指标 vs 预注册阈值的纯比较。value=None(无数据)→ met=None(待测,非未达标)。"""
     met = None if metric_value is None else (metric_value >= target)
     return {"target": target, "value": metric_value, "met": met}
+
+
+def present_matrix(cases_labels: list[dict]) -> dict:
+    """[{labels:[{dimension,present}...]}...] → {dimension: [present per case]}。"""
+    out = {d: [] for d in DIMENSIONS}
+    for case in cases_labels:
+        by_dim = {l["dimension"]: bool(l["present"]) for l in case["labels"]}
+        for d in DIMENSIONS:
+            out[d].append(by_dim.get(d, False))
+    return out
+
+
+def verdict_matrix(judge_results: list) -> dict:
+    """[JudgeResult(非 infra)] → {dimension: [present per case]}。infra 的 case 需调用方先滤掉。"""
+    out = {d: [] for d in DIMENSIONS}
+    for r in judge_results:
+        by_dim = {v.dimension: v.present for v in r.verdicts}
+        for d in DIMENSIONS:
+            out[d].append(by_dim.get(d, False))
+    return out
+
+
+def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list | None) -> dict:
+    """校准报告。judge/human 缺 → 对应段如实留空位(待真机/待标注),绝不造数。"""
+    report: dict = {
+        "dimensions": list(DIMENSIONS),
+        "targets": load_targets(),
+        "judge_vs_gold": {},
+        "judge_vs_gold_status": "待真机" if not judge else "已计算",
+        "human_human_kappa": {"status": "待标注", "n": 0, "value": None,
+                              "note": "人-人一致性需两名标注者对 calibration split 独立标注后计算"},
+    }
+    if judge:
+        for d in DIMENSIONS:
+            report["judge_vs_gold"][d] = prf_for_dimension(gold[d], judge[d]).as_dict()
+        flat_gold = [x for d in DIMENSIONS for x in gold[d]]
+        flat_judge = [x for d in DIMENSIONS for x in judge[d]]
+        report["judge_vs_gold_kappa"] = cohen_kappa(flat_gold, flat_judge)
+    if human_pairs:
+        a = [x for pair in human_pairs for x in pair[0]]
+        b = [x for pair in human_pairs for x in pair[1]]
+        report["human_human_kappa"] = {"status": "已计算", "n": len(a),
+                                       "value": cohen_kappa(a, b), "note": ""}
+    return report
+
+
+def _md_report(report: dict) -> str:
+    lines = ["# LLM-Judge 校准报告", "",
+             f"预注册阈值:{report['targets']['note']}", "",
+             "## 人-人一致性",
+             f"- 状态:{report['human_human_kappa']['status']}(N={report['human_human_kappa']['n']})",
+             f"- κ:{report['human_human_kappa']['value']}", "",
+             f"## Judge vs 金标(状态:{report['judge_vs_gold_status']})", ""]
+    if report["judge_vs_gold"]:
+        lines.append("| 维度 | tp | fp | fn | precision | recall | f1 |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for d in report["dimensions"]:
+            m = report["judge_vs_gold"][d]
+            lines.append(f"| {d} | {m['tp']} | {m['fp']} | {m['fn']} | "
+                         f"{m['precision']} | {m['recall']} | {m['f1']} |")
+        lines.append("")
+        lines.append(f"整体 Judge-金标 κ:{report.get('judge_vs_gold_kappa')}")
+    return "\n".join(lines) + "\n"
+
+
+def write_report(report: dict, out_dir: Path) -> tuple[Path, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    j = out_dir / "report.json"
+    m = out_dir / "report.md"
+    j.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    m.write_text(_md_report(report), encoding="utf-8")
+    return j, m
