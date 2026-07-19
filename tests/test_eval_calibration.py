@@ -121,3 +121,32 @@ def test_write_report_emits_json_and_md(tmp_path):
     import json as _j
     assert _j.loads(j.read_text(encoding="utf-8"))["judge_vs_gold"]["AI腔"]["f1"] == 1.0
     assert "待标注" in m.read_text(encoding="utf-8")            # MD 也如实标空位
+
+
+def test_verdict_matrix_rejects_infra_case():
+    import pytest
+    from evals.judge import JudgeResult
+    from evals.calibration import verdict_matrix
+    infra = JudgeResult("c", [], infra_error=True, error="[infra] boom")
+    with pytest.raises(ValueError):
+        verdict_matrix([infra])            # infra 绝不能被静默当成全 absent
+
+
+def test_aligned_matrices_drops_infra_symmetrically_and_preserves_order():
+    from evals.judge import JudgeResult, DimensionVerdict
+    from evals.calibration import aligned_matrices
+    def _vr(cid, present_dim):
+        vs = [DimensionVerdict(d, d == present_dim, "高" if d == present_dim else None, "", "")
+              for d in DIMENSIONS]
+        return JudgeResult(cid, vs, infra_error=False)
+    gold = [{"id": "c1", "labels": [{"dimension": d, "present": d == "AI腔"} for d in DIMENSIONS]},
+            {"id": "c2", "labels": [{"dimension": d, "present": d == "设定漂移"} for d in DIMENSIONS]},
+            {"id": "c3", "labels": [{"dimension": d, "present": False} for d in DIMENSIONS]}]
+    judge = [_vr("c1", "AI腔"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]"),   # c2 infra
+             _vr("c3", None)]
+    gm, jm, dropped = aligned_matrices(gold, judge)
+    assert dropped == ["c2"]                       # infra 的 c2 记进 dropped
+    assert len(gm["AI腔"]) == 2 and len(jm["AI腔"]) == 2   # 两侧都只剩 c1,c3(对称滤 c2)
+    assert gm["AI腔"] == [True, False]             # c1 命中 AI腔、c3 干净——gold 顺序保留
+    assert jm["AI腔"] == [True, False]             # judge 同序对齐

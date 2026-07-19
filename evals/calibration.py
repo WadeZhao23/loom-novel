@@ -84,13 +84,43 @@ def present_matrix(cases_labels: list[dict]) -> dict:
 
 
 def verdict_matrix(judge_results: list) -> dict:
-    """[JudgeResult(非 infra)] → {dimension: [present per case]}。infra 的 case 需调用方先滤掉。"""
+    """[JudgeResult(非 infra)] → {dimension: [present per case]}。
+
+    infra 的 case 必须在调用前被调用方滤除——绝不在此处静默把「后端/解析失败」当成
+    「Judge 判全维干净」(那会伪造 8 维全 False,悄悄拉低高代价维 recall)。遇到任何
+    infra_error(或空 verdicts)一律 fail-loud,而不是默默吞掉。
+    """
     out = {d: [] for d in DIMENSIONS}
     for r in judge_results:
+        if r.infra_error or not r.verdicts:
+            raise ValueError(
+                f"verdict_matrix 拒绝 infra case(case_id={r.case_id!r})——"
+                "infra case 必须在调用前滤除,别喂进 verdict_matrix,否则会把「后端/解析"
+                "失败」静默伪装成「Judge 判全维干净」污染 P/R/F1。"
+            )
         by_dim = {v.dimension: v.present for v in r.verdicts}
         for d in DIMENSIONS:
             out[d].append(by_dim.get(d, False))
     return out
+
+
+def aligned_matrices(gold_cases: list[dict], judge_results: list) -> tuple[dict, dict, list]:
+    """按 case_id 对齐金标与 Judge 结果,滤掉 infra,返回 (gold_matrix, judge_matrix, dropped_infra_ids)。
+
+    保证两 matrix 同 case 顺序(按 gold_cases 顺序取两侧都在的 case),从结构上杜绝
+    「等长但顺序不同」的静默位置错位——build_calibration_report 按下标 zip 两个已塑好
+    的 matrix,不检查 case_id,若调用方手工对齐时两侧丢了不同 case 但恰好等长,
+    prf_for_dimension 的等长守卫挡不住。Phase 4 接线应走这个入口,而非手工对齐。
+
+    gold_cases 每项需含 'id' 和 'labels';judge_results 是 list[JudgeResult]。
+    """
+    dropped = [r.case_id for r in judge_results if r.infra_error]
+    ok = {r.case_id: r for r in judge_results if not r.infra_error}
+    gold_by_id = {c["id"]: c for c in gold_cases}
+    aligned_ids = [c["id"] for c in gold_cases if c["id"] in ok]   # 按 gold 顺序取交集
+    gold_matrix = present_matrix([gold_by_id[i] for i in aligned_ids])
+    judge_matrix = verdict_matrix([ok[i] for i in aligned_ids])    # 此时 ok 里都非 infra,verdict_matrix 不会 raise
+    return gold_matrix, judge_matrix, dropped
 
 
 def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list | None) -> dict:
