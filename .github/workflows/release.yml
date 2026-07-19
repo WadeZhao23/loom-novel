@@ -114,8 +114,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Release 正文只取当前版本那一节:release-notes.md 保留全历史,但每个 Release 页面不再
+          # 拖着一长串旧版本(从「## <版本> 有什么」到下一个「## 」之前)。
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v h="## $VER 有什么" '$0==h{p=1} p&&/^## /&&$0!=h{exit} p{print}' \
+            packaging/release-notes.md > release-body.md
+          [ -s release-body.md ] || cp packaging/release-notes.md release-body.md   # 兜底:没匹配到用全文
           gh release create "$GITHUB_REF_NAME" art/*.zip \
             --repo "$GITHUB_REPOSITORY" \
             --title "Loom $GITHUB_REF_NAME" \
-            --notes-file packaging/release-notes.md \
+            --notes-file release-body.md \
           || gh release upload "$GITHUB_REF_NAME" art/*.zip --repo "$GITHUB_REPOSITORY" --clobber
