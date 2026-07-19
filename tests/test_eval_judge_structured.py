@@ -121,6 +121,25 @@ def test_build_prompt_carries_engine_critic_criteria():
     assert "写作指纹" in CRITIC_去AI味 and "写作指纹" in system
 
 
+def test_json_instruction_overrides_freetext_output():
+    system, _ = build_judge_prompt({"setting": "s", "characters": "c",
+                                    "prev_hook": "p", "chapter_goal": "g"}, "x", load_rubric())
+    # 消歧:必须显式声明「忽略上面的自由文本输出说明」且「干净维度也要 present=false 对象」
+    assert "忽略" in system
+    assert "8 维" in system or "8维" in system or "完整" in system
+    # 反向自证:CRITIC 的自由文本输出壳确实同时在 system 里(所以才需要消歧)
+    assert "只回一行" in system or "每条一行" in system
+
+
+def test_json_instruction_bridges_note_and_reason_field_names():
+    system, _ = build_judge_prompt({"setting": "s", "characters": "c",
+                                    "prev_hook": "p", "chapter_goal": "g"}, "x", load_rubric())
+    # rubric 操作化细则全文用 note 指说明字段,JSON schema 用 reason——两者都须在 system 里,
+    # 且 JSON 指令段须显式桥接,消除 note/reason 双名歧义。
+    assert "note" in system and "reason" in system
+    assert "note" in system.split("## 输出格式")[-1]  # 桥接语落在 JSON 指令段内,不是巧合命中
+
+
 def test_build_prompt_no_numeric_score_language():
     system, _ = build_judge_prompt({"setting": "s", "characters": "c",
                                     "prev_hook": "p", "chapter_goal": "g"}, "x", load_rubric())
