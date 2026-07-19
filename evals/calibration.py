@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def cohen_kappa(a: list, b: list) -> float:
@@ -54,3 +56,16 @@ def prf_for_dimension(gold: list[bool], pred: list[bool]) -> PRF:
     precision = round(precision, 4) if precision is not None else None
     recall = round(recall, 4) if recall is not None else None
     return PRF(tp, fp, fn, precision, recall, f1)
+
+
+TARGETS_PATH = Path(__file__).resolve().parent / "calibration" / "targets.json"
+
+
+def load_targets() -> dict:
+    return json.loads(TARGETS_PATH.read_text(encoding="utf-8"))
+
+
+def evaluate_against_targets(metric_value: float | None, target: float) -> dict:
+    """指标 vs 预注册阈值的纯比较。value=None(无数据)→ met=None(待测,非未达标)。"""
+    met = None if metric_value is None else (metric_value >= target)
+    return {"target": target, "value": metric_value, "met": met}

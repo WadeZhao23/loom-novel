@@ -1,7 +1,7 @@
 """κ / P·R·F1 纯函数:手算小样本对拍。零真实模型、零外部依赖。"""
 import pytest
 
-from evals.calibration import PRF, cohen_kappa, prf_for_dimension
+from evals.calibration import PRF, cohen_kappa, evaluate_against_targets, load_targets, prf_for_dimension
 
 
 def test_kappa_perfect_agreement():
@@ -50,3 +50,26 @@ def test_prf_no_predictions_precision_none():
     # 无任何 pred 正例 → precision 未定义(None),recall=0
     p = prf_for_dimension([True, False], [False, False])
     assert p.tp == 0 and p.precision is None and p.recall == 0.0
+
+
+def test_targets_preregistered_values():
+    t = load_targets()
+    assert t["kappa_human_human"] == 0.70
+    assert t["kappa_judge_gold"] == 0.60
+    assert t["high_cost_recall"] == 0.85
+    assert isinstance(t["high_cost_dimensions"], list) and t["high_cost_dimensions"]
+    assert "待验收标准" in t["note"] or "非当前事实" in t["note"]   # 诚实性:不冒充结果
+
+
+def test_evaluate_meets_target():
+    r = evaluate_against_targets(0.72, 0.70)
+    assert r["met"] is True and r["value"] == 0.72 and r["target"] == 0.70
+
+
+def test_evaluate_below_target():
+    assert evaluate_against_targets(0.55, 0.60)["met"] is False
+
+
+def test_evaluate_no_data_is_none_not_fail():
+    r = evaluate_against_targets(None, 0.70)
+    assert r["met"] is None       # 无数据 ≠ 未达标,是「待测」
