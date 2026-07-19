@@ -123,8 +123,14 @@ def aligned_matrices(gold_cases: list[dict], judge_results: list) -> tuple[dict,
     return gold_matrix, judge_matrix, dropped
 
 
-def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list | None) -> dict:
-    """校准报告。judge/human 缺 → 对应段如实留空位(待真机/待标注),绝不造数。"""
+def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list | None,
+                              dropped_infra: list | None = None, n_total: int | None = None) -> dict:
+    """校准报告。judge/human 缺 → 对应段如实留空位(待真机/待标注),绝不造数。
+
+    dropped_infra/n_total(可选,默认 None):披露因 infra 掉出的 case——若调用方对齐后
+    悄悄丢了 dropped,报告会把「子集上算的 P/R/F1」标成「已计算」而不说明只在几例上算。
+    传了 dropped_infra 才会在 coverage 段体现掉数;缺省时 coverage 段如实标「待真机/未评」。
+    """
     report: dict = {
         "dimensions": list(DIMENSIONS),
         "targets": load_targets(),
@@ -144,13 +150,39 @@ def build_calibration_report(gold: dict, judge: dict | None, human_pairs: list |
         b = [x for pair in human_pairs for x in pair[1]]
         report["human_human_kappa"] = {"status": "已计算", "n": len(a),
                                        "value": cohen_kappa(a, b), "note": ""}
+
+    n_eval = None
+    if judge:
+        # judge 是 {dim:[bool per evaluated case]},取任一维长度即已评例数
+        n_eval = len(next(iter(judge.values()))) if judge else 0
+    report["coverage"] = {
+        "status": "已计算" if judge else "待真机",
+        "n_total": n_total,
+        "n_evaluated": n_eval,
+        "n_infra_dropped": len(dropped_infra) if dropped_infra is not None else None,
+        "dropped_case_ids": list(dropped_infra) if dropped_infra is not None else [],
+    }
     return report
+
+
+def calibrate(gold_cases: list, judge_results: list) -> dict:
+    """端到端安全入口:对齐(滤 infra)→ 算 P/R/F1+κ → 报告自动披露掉数。
+    Phase 4 接线只准走这个,别手工 aligned_matrices 后把 dropped 丢了(会掩盖 infra 掉数)。"""
+    gold_matrix, judge_matrix, dropped = aligned_matrices(gold_cases, judge_results)
+    return build_calibration_report(gold_matrix, judge_matrix, human_pairs=None,
+                                    dropped_infra=dropped, n_total=len(judge_results))
 
 
 def _md_report(report: dict) -> str:
     lines = ["# LLM-Judge 校准报告", "",
-             f"预注册阈值:{report['targets']['note']}", "",
-             "## 人-人一致性",
+             f"预注册阈值:{report['targets']['note']}", ""]
+    cov = report.get("coverage", {})
+    if cov.get("n_infra_dropped"):
+        lines += [f"⚠ 覆盖:共 {cov['n_total']} 例,{cov['n_infra_dropped']} 例因 infra 掉出"
+                  f"({cov['dropped_case_ids']}),P/R/F1 只在 {cov['n_evaluated']} 例上算。", ""]
+    elif cov.get("status") == "待真机":
+        lines += ["覆盖:待真机(未跑真实 Judge)。", ""]
+    lines += ["## 人-人一致性",
              f"- 状态:{report['human_human_kappa']['status']}(N={report['human_human_kappa']['n']})",
              f"- κ:{report['human_human_kappa']['value']}", "",
              f"## Judge vs 金标(状态:{report['judge_vs_gold_status']})", ""]

@@ -3,6 +3,7 @@ import pytest
 
 from evals.calibration import PRF, cohen_kappa, evaluate_against_targets, load_targets, prf_for_dimension
 from evals.dataset import DIMENSIONS
+from evals.judge import JudgeResult, DimensionVerdict
 
 
 def test_kappa_perfect_agreement():
@@ -150,3 +151,44 @@ def test_aligned_matrices_drops_infra_symmetrically_and_preserves_order():
     assert len(gm["AI腔"]) == 2 and len(jm["AI腔"]) == 2   # 两侧都只剩 c1,c3(对称滤 c2)
     assert gm["AI腔"] == [True, False]             # c1 命中 AI腔、c3 干净——gold 顺序保留
     assert jm["AI腔"] == [True, False]             # judge 同序对齐
+
+
+def _vr(cid, present_dim):
+    vs = [DimensionVerdict(d, d == present_dim, "高" if d == present_dim else None, "", "")
+          for d in DIMENSIONS]
+    return JudgeResult(cid, vs, infra_error=False)
+
+
+def _gold_case(cid, present_dim):
+    return {"id": cid, "labels": [{"dimension": d, "present": d == present_dim} for d in DIMENSIONS]}
+
+
+def test_calibrate_discloses_infra_dropped():
+    from evals.calibration import calibrate
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移"), _gold_case("c3", None)]
+    judge = [_vr("c1", "AI腔"),
+             JudgeResult("c2", [], infra_error=True, error="[infra]"),   # c2 掉
+             _vr("c3", None)]
+    rep = calibrate(gold, judge)
+    cov = rep["coverage"]
+    assert cov["n_total"] == 3 and cov["n_evaluated"] == 2 and cov["n_infra_dropped"] == 1
+    assert cov["dropped_case_ids"] == ["c2"]
+    # P/R/F1 只在 c1,c3 上算(c2 未污染):AI腔 c1 命中→tp;c3 干净
+    assert rep["judge_vs_gold"]["AI腔"]["tp"] == 1
+
+
+def test_calibrate_md_discloses_dropped(tmp_path):
+    from evals.calibration import calibrate, write_report
+    gold = [_gold_case("c1", "AI腔"), _gold_case("c2", "设定漂移")]
+    judge = [_vr("c1", "AI腔"), JudgeResult("c2", [], infra_error=True, error="[infra]")]
+    rep = calibrate(gold, judge)
+    _, m = write_report(rep, tmp_path)
+    md = m.read_text(encoding="utf-8")
+    assert "infra" in md and ("掉" in md or "掉出" in md or "未评" in md)   # MD 必须披露掉数
+
+
+def test_build_report_coverage_pending_when_no_judge():
+    from evals.calibration import build_calibration_report
+    gold = {d: [False] for d in DIMENSIONS}
+    rep = build_calibration_report(gold, None, None)
+    assert rep["coverage"]["n_evaluated"] is None or rep["coverage"]["status"] == "待真机"
