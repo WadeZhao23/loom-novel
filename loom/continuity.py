@@ -150,16 +150,31 @@ def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: in
         # 没全名但只有简称/外号在正文 → 有风险但证据不够硬,不在纯函数里报
         # 直接检查:特殊状态角色出现在正文但没有提到状态恢复
         if name not in body:
-            # 尝试查别名(去掉姓只看名,或带特殊字符)
-            for alias in (name[1:], name.split("·")[-1]) if "·" in name else (name[1:],):
-                if len(alias) >= 2 and alias in body:
-                    out.append(BugItem(
-                        3, "人设",
-                        f"「{name}」前情处于{state_line},本章仅以简称/别名出现,未交代状态变化",
-                        evidence=name[:60],
-                        prior=f"第{m}章账本:{state_line}",
-                        fix=f"补足全称或交代状态变化"))
-                    break
+            # 别名匹配:去姓(单姓/复姓)、·尾名、单字姓后缀匹配
+            aliases = []
+            if len(name) >= 2:
+                aliases.append(name[1:])
+                if name[0] in "慕容南宫欧阳西门上官端木独孤诸葛":
+                    aliases.append(name[2:])
+            if "·" in name:
+                aliases.append(name.split("·")[-1])
+            aliases.append(name[0])
+            aliases.append(name[0] + "姑娘")
+            aliases.append(name[0] + "公子")
+            aliases.append(name[0] + "前辈")
+            aliases.append(name[0] + "兄")
+            aliases.append(name[0] + "老")
+            aliases.append(name[0] + "某")
+            for alias in set(a for a in aliases if len(a) >= 1):
+                if alias not in body:
+                    continue
+                out.append(BugItem(
+                    3, "人设",
+                    f"「{name}」前情处于特殊状态:{state_line},本章仅以别名/简称出现",
+                    evidence=alias,
+                    prior=f"第{m}章账本:{state_line}",
+                    fix=f"补足全称并交代状态变化"))
+                break
         elif state_line not in body[:500]:
             # 全名出现但没提状态变化
             out.append(BugItem(
@@ -170,24 +185,61 @@ def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: in
                 fix=f"在文中交代{name.split(chr(58))[0] if ':' in name else name}当前状态"))
     return out
 
+_PUNC_RE = re.compile(r'[\s·、，。！？：；\-—…()（【】『』「」《》/]')
+
+
+def _normalize(s: str) -> str:
+    """归一化:去标点符号、去空格,用于模糊匹配。"""
+    return _PUNC_RE.sub("", s)
+
+
+
+def _fuzzy_entity_in_body(entity: str, body: str) -> str | None:
+    """精确&模糊匹配实体是否在正文中出现。
+    返回匹配到的原文片段(报证据用),没匹配到返回 None。
+    模糊策略:剥标点、取右边(keyword)部分「仙阶金丹·高品质」→ 取「高品质」。"""
+    # 1. 精确匹配
+    if entity in body:
+        return entity
+    # 2. 归一化后匹配(如「远古药胚」变「远古药胚」与「远古 药胚」同)
+    ne = _normalize(entity)
+    nb = _normalize(body)
+    if len(ne) >= 2 and ne in nb:
+        return entity
+    # 3. 取「·」后的子名(如「仙阶金丹·高品质」→「高品质」)
+    for part in entity.split('·'):
+        p = part.strip()
+        if len(p) >= 2 and p in body:
+            return p
+    # 4. 取两字以上关键词(全称去掉前两个字去匹配,如「炼体药胚」→「药胚」)
+    if len(entity) > 4:
+        core = entity[2:]
+        if len(core) >= 2 and core in body:
+            return core
+    return None
+
+
 def detect_consumed_reuse(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str) -> list[BugItem]:
-    """账本前章已标消耗类的 [物品] 实体名(精确≥2字)出现在本章正文 → 致命候选。
-    诚实局限:别名/简称靠 LLM 兜,这里只精确匹配保底;回忆式提及也会报(非阻断,作者定夺)。"""
+    """账本前章已标消耗类的 [物品] 实体出现在本章正文 → 致命候选。
+    精确+模糊匹配:别名/简称按归一化、取尾名、去前缀兜底。"""
     out: list[BugItem] = []
     seen: set[str] = set()
     for m in sorted(k for k in book if k < chapter_n):
         for kind, content in book[m]:
-            change = content.split("|", 1)[0]   # 只看变更描述段,别让证据引文里的动词误命中(如「耗尽力气」)
+            change = content.split("|", 1)[0]
             if kind != "物品" or not any(k in change for k in statebook._CONSUMED_KW):
                 continue
             entity = re.split(r"[:：]", content, 1)[0].strip()
-            if len(entity) < 2 or entity in seen or entity not in body:
+            if len(entity) < 2 or entity in seen:
+                continue
+            match = _fuzzy_entity_in_body(entity, body)
+            if not match:
                 continue
             seen.add(entity)
             out.append(BugItem(
                 5, "物品",
-                f"「{entity}」第{m}章已消耗/失去,本章正文再次出现使用",
-                evidence=_sentence_of(body, entity),
+                f"「{entity}」第{m}章已消耗/失去,本章以{match}形式再次使用",
+                evidence=_sentence_of(body, match),
                 prior=f"第{m}章账本:「{content}」",
                 fix=f"改掉「{entity}」的来源(换成尚存的材料/道具),或删去这次使用"))
     return out
@@ -239,7 +291,7 @@ def merge_items(det: list[BugItem], llm: list[BugItem]) -> list[BugItem]:
 
 _SCAN_SYSTEM = """你是**连续性审读员**(除虫),只诊断、不改写。我给你:本章终稿、状态账本摘录、\
 最近两章正文结尾、卡章纲(含AI回顾)、硬设定。逐类检查本章与前情的矛盾:
-物品(已消耗/失去的东西再次出现使用)、人设(行为违背人物底线/身段/与境界差不符的姿态)、\
+物品(已消耗/失去的东西再次出现使用——注意别名/简称,如账本记「炼体药胚:耗尽」正文出现「药胚」也算)、人设(行为违背人物底线/身段/与境界差不符的姿态——注意角色别名如「苏某」「苏前辈」代指「苏清瑶」)、\
 规则(金手指/体系的数值条款与账本或前章不一致)、时间(时间词粒度与前情时刻不符,如昨夜的事说成昨日)、\
 衔接(与前几章已定事实冲突)。**宁缺毋滥**:确凿的矛盾才报,每条带两处证据。
 输出(严格,两段,分隔行原样保留):

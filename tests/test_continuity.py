@@ -336,3 +336,54 @@ def test_statebook_listed_in_state(project):
         elif "children" in b:
             rels.extend(c["rel"] for c in b["children"])
     assert "外置大脑/状态账本.md" in rels
+
+# ── G3: 别名/简称模糊匹配 ────────
+
+def test_consumed_reuse_fuzzy_normalize():
+    """归一化匹配:带空格的消耗实体"""
+    book = {1: [('物品', '远古 药胚:已吞服消耗 | 证据:吞下')]}
+    items = detect_consumed_reuse(book, 2, '远古药胚已炼化。')
+    assert len(items) == 1
+
+
+def test_consumed_reuse_fuzzy_dot_part():
+    """·尾名匹配:仙阶金丹·高品质 → 匹配高品质"""
+    book = {1: [('物品', '仙阶金丹·高品质:耗尽 | 证据:用尽')]}
+    items = detect_consumed_reuse(book, 2, '高品质的丹药所剩无几。')
+    assert len(items) == 1
+
+
+def test_consumed_reuse_fuzzy_core():
+    """去前缀匹配(>4字):上古炼体药胚 → 炼体药胚"""
+    book = {1: [('物品', '上古炼体药胚:已耗尽 | 证据:用尽')]}
+    items = detect_consumed_reuse(book, 2, '炼体药胚的药力已经散尽。')
+    assert len(items) == 1
+
+
+def test_consumed_reuse_short_entity_no_fuzzy():
+    """短实体(2字)不做去前缀模糊,避免误报"""
+    book = {1: [('物品', '药胚:已耗尽 | 证据:用尽')]}
+    items = detect_consumed_reuse(book, 2, '药渣堆了一地。')
+    assert items == []  # 药渣 ≠ 药胚,且短实体不触发 fuzzy
+
+
+def test_char_continuity_alias_surname_only():
+    """角色以「姓+称呼」出现,前情有特殊状态"""
+    book = {1: [('状态', '苏清瑶:闭关冲击金丹 | 证据:闭生死关')]}
+    items = detect_char_continuity(book, 2, '苏前辈的修炼室大门紧闭。', {'苏清瑶'})
+    assert len(items) == 1
+
+
+def test_char_continuity_alias_first_char():
+    """角色以单姓出现,前情有特殊状态"""
+    book = {1: [('状态', '苏清瑶:闭关冲击金丹 | 证据:闭生死关')]}
+    items = detect_char_continuity(book, 2, '苏某在此等候多时。', {'苏清瑶'})
+    assert len(items) == 1
+
+
+def test_char_continuity_no_alias_match():
+    """别名都匹配不上,不报"""
+    book = {1: [('状态', '苏清瑶:闭关冲击金丹 | 证据:闭生死关')]}
+    items = detect_char_continuity(book, 2, '陈墨走入庭院。', {'苏清瑶', '陈墨'})
+    assert items == []
+
