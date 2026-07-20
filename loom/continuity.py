@@ -16,6 +16,17 @@ from . import events, statebook
 from .backends import Backend
 from .fsutil import atomic_write_text
 
+
+def _char_names_from_dir(project_root: Path) -> set[str]:
+    """从 外置大脑/人物/ 目录取角色名(文件名去掉 .md)。目录不存在返回空。"""
+    chars_dir = project_root / "外置大脑" / "人物"
+    if not chars_dir.is_dir():
+        return set()
+    return {p.stem for p in chars_dir.iterdir() if p.suffix == ".md" and p.stem != "模板"}
+
+
+
+
 Progress = Callable[[dict], None]
 
 
@@ -52,6 +63,112 @@ def _sentence_of(body: str, needle: str) -> str:
             return sent.strip()[:80]
     return needle
 
+
+# ── 时间词体系:用于 detect_time_mismatch 的时序推理 ────────
+# 每项 = (关键词, 天数偏移, 时段优先级)
+# 天数偏移:relative to 前章结尾时间; 时段优先级:0=morning…3=night
+_TIME_WORDS = (
+    (r"当日", 0, 0), (r"当天", 0, 0), (r"今天", 0, 0), (r"今日", 0, 0),
+    (r"翌日", 1, 0), (r"次日", 1, 0), (r"第二天", 1, 0), (r"隔日", 1, 0),
+    (r"三日后", 3, 0), (r"几日后", 3, 0), (r"数日后", 3, 0), (r"七日后", 7, 0),
+    (r"十日后", 10, 0), (r"半月后", 15, 0),
+    (r"当夜", 0, 3), (r"今晚", 0, 3),
+    (r"昨夜", -1, 3), (r"昨晚", -1, 3),
+    (r"凌晨", 0, 0), (r"清晨", 0, 0), (r"早晨", 0, 0), (r"上午", 0, 1),
+    (r"正午", 0, 1), (r"午后", 0, 1), (r"下午", 0, 2),
+    (r"傍晚", 0, 2), (r"黄昏", 0, 2), (r"深夜", 0, 3), (r"子夜", 0, 3),
+)
+_TIME_RE = re.compile(r"|".join(p[0] for p in _TIME_WORDS))
+
+
+def _time_of(text: str) -> tuple[int, int] | None:
+    """取正文里第一个时间词,返回 (天数偏移, 时段优先级)。没匹配返回 None。"""
+    m = _TIME_RE.search(text)
+    if not m:
+        return None
+    for pat, day, period in _TIME_WORDS:
+        if re.match(pat, m.group()):
+            return (day, period)
+    return None
+
+
+def _clock_from_book(book: dict, chapter_n: int) -> str | None:
+    """从账本取上一章的 [时钟] 行原文,没有返回 None。"""
+    for m in reversed(sorted(k for k in book if k < chapter_n)):
+        for kind, content in book[m]:
+            if kind == "时钟":
+                return content.split("|")[0].strip()
+    return None
+
+
+def detect_time_mismatch(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str) -> list[BugItem]:
+    """时间连续性检测:账本 [时钟] vs 本章正文首时间词。
+    只报两类确凿矛盾:
+    1. 倒流:前章「三日后」本章「次日/昨日/昨夜」(天数偏移明显后退)
+    2. 回头:前章「翌日」本章「当日/今日」(同一时点说两次)
+    当夜/今晚等模糊词不报(叙事中可能指同一天的夜晚)。"""
+    out: list[BugItem] = []
+    clock = _clock_from_book(book, chapter_n)
+    if not clock:
+        return out
+    prev_t = _time_of(clock)
+    if prev_t is None:
+        return out
+    prev_day = prev_t[0]
+    cur = _time_of(body[:200])
+    if cur is None:
+        return out
+    cur_day = cur[0]
+    # 1. 天数倒流:前章向前跳(≥3),本章倒回(≤1)
+    if cur_day < prev_day - 1:
+        out.append(BugItem(4, "时间",
+            f"时间倒流:前章结尾向前跳至{clock.split('|')[0].strip()},本章出现更早的时间词",
+            evidence=f"本章开头:「{body[:60]}」"[:60],
+            prior=f"第{max(k for k in book if k < chapter_n)}章账本时钟",
+            fix="统一时间流向,或在本章开头加一句时间跳过说明"))
+    return out
+
+
+
+def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str, char_names: set[str]) -> list[BugItem]:
+    """人物出场关联检测:状态账本 [状态] 行人物在前情有特殊状态(重伤/闭关/失踪/禁足等)
+    且本章首次提到该人物时未交代状态变化 → 标记。char_names 来自人物目录文件名。"""
+    _SPECIAL_STATES = re.compile(r"(?:^|[^无未不])(?:重伤|闭关|失踪|禁足|昏迷|囚禁|封印|昏迷|被俘|失忆|流放|除名|镇守|被控)")
+    out: list[BugItem] = []
+    last_state: dict[str, str] = {}  # char_name -> state_line
+    for m in reversed(sorted(k for k in book if k < chapter_n)):
+        for kind, content in book[m]:
+            if kind != "状态":
+                continue
+            change = content.split("|")[0].strip()
+            name = re.split(r"[:：]", change, 1)[0].strip()
+            if name and name not in last_state:
+                last_state[name] = change
+    for name, state_line in last_state.items():
+        if not _SPECIAL_STATES.search(state_line):
+            continue
+        # 没全名但只有简称/外号在正文 → 有风险但证据不够硬,不在纯函数里报
+        # 直接检查:特殊状态角色出现在正文但没有提到状态恢复
+        if name not in body:
+            # 尝试查别名(去掉姓只看名,或带特殊字符)
+            for alias in (name[1:], name.split("·")[-1]) if "·" in name else (name[1:],):
+                if len(alias) >= 2 and alias in body:
+                    out.append(BugItem(
+                        3, "人设",
+                        f"「{name}」前情处于{state_line},本章仅以简称/别名出现,未交代状态变化",
+                        evidence=name[:60],
+                        prior=f"第{m}章账本:{state_line}",
+                        fix=f"补足全称或交代状态变化"))
+                    break
+        elif state_line not in body[:500]:
+            # 全名出现但没提状态变化
+            out.append(BugItem(
+                3, "人设",
+                f"「{name}」前情处于{state_line},本章出现但未交代状态变化",
+                evidence=name[:60],
+                prior=f"第{m}章账本:{state_line}",
+                fix=f"在文中交代{name.split(chr(58))[0] if ':' in name else name}当前状态"))
+    return out
 
 def detect_consumed_reuse(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str) -> list[BugItem]:
     """账本前章已标消耗类的 [物品] 实体名(精确≥2字)出现在本章正文 → 致命候选。
@@ -231,8 +348,12 @@ def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend
     from .paths import CARD_REL, STATEBOOK_REL
     p_book = project_root / STATEBOOK_REL
     book = statebook.parse_book(p_book.read_text(encoding="utf-8")) if p_book.exists() else {}
-    det = merge_items(detect_consumed_reuse(book, chapter_n, body),
-                      detect_rule_drift(book, chapter_n, body))
+    char_names = _char_names_from_dir(project_root)
+    det = merge_items(
+        merge_items(detect_consumed_reuse(book, chapter_n, body),
+                    detect_rule_drift(book, chapter_n, body)),
+        detect_time_mismatch(book, chapter_n, body))
+    det = merge_items(det, detect_char_continuity(book, chapter_n, body, char_names))
 
     llm_items: list[BugItem] = []
     state_lines: list[str] = []

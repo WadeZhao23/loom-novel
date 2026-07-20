@@ -1,6 +1,6 @@
 """连续性除虫:确定性双检测(零 LLM)+ LLM 扫描(Task 4 补)。守只报告不改稿。"""
 from loom import statebook
-from loom.continuity import BugItem, detect_consumed_reuse, detect_rule_drift, merge_items
+from loom.continuity import BugItem, detect_consumed_reuse, detect_rule_drift, merge_items,     detect_time_mismatch, detect_char_continuity
 
 
 def _book():
@@ -47,6 +47,78 @@ def test_merge_dedup_prefers_deterministic():
     out = merge_items([a], [b, c])
     assert out[0].desc == "det 版" and len(out) == 2
 
+
+
+
+# ── G1: 时间连续性检测 ────────
+
+def _time_book():
+    return {1: [('时钟', '当夜深夜:深夜突破至炼气三层 | 证据:xxx')],
+            2: [('时钟', '翌日清晨:离开宗门前往遗迹 | 证据:xxx')],
+            3: [('物品', '玉佩:已破碎 | 证据:坠落')]}
+
+
+def test_time_mismatch_no_clock_skip():
+    """第一章无前情时钟,应跳过不报。"""
+    items = detect_time_mismatch(_time_book(), 1, '当日,他起得很早。')
+    assert items == []
+
+
+def test_time_mismatch_time_flow_forward():
+    """前章翌日清晨,本章当夜 → 合理(同一天不同时段)"""
+    items = detect_time_mismatch(_time_book(), 3, '当夜,月色如洗。')
+    assert items == []
+
+
+def test_time_mismatch_time_reverse():
+    """前章翌日清晨,本章昨日 → 矛盾(倒流)"""
+    items = detect_time_mismatch(_time_book(), 3, '昨夜之事他已不再计较。')
+    assert len(items) == 1 and '倒流' in items[0].desc
+
+
+def test_time_mismatch_no_timeword():
+    """本章开头没时间词 → 跳过"""
+    items = detect_time_mismatch(_time_book(), 3, '他推开窗户,外面正在下雨。')
+    assert items == []
+
+
+def test_time_mismatch_three_days_after_then_next_day():
+    """前章三日后,本章次日 → 倒流矛盾"""
+    book = {1: [('时钟', '三日后:抵达遗迹 | 证据:跋涉')]}
+    items = detect_time_mismatch(book, 2, '次日,他们开始挖掘。')
+    assert len(items) == 1 and items[0].stars == 4
+
+
+# ── G1: 人物出场关联检测 ────────
+
+def _char_book():
+    return {1: [('状态', '江澈:炼气巅峰 | 证据:入定'),
+                ('状态', '苏清瑶:闭关冲击金丹 | 证据:闭生死关')],
+            2: [('状态', '江澈:炼气巅峰(无重伤) | 证据:完好')]}
+
+
+def test_char_continuity_no_special_state():
+    """角色无特殊状态,正常出场不报"""
+    items = detect_char_continuity(_char_book(), 3, '江澈推开院门。', {'江澈', '苏清瑶', '陈墨'})
+    assert items == []
+
+
+def test_char_continuity_special_state_unresolved():
+    """角色前情特殊状态(闭关),本章出现但未交代变化"""
+    items = detect_char_continuity(_char_book(), 3, '苏清瑶从丹房走出,面色如常。', {'江澈', '苏清瑶'})
+    assert len(items) == 1 and '闭关' in items[0].desc
+
+
+def test_char_continuity_alias():
+    """角色以简称出现,前情有特殊状态"""
+    items = detect_char_continuity(_char_book(), 3, '清瑶的丹炉已冷却多日。', {'江澈', '苏清瑶'})
+    assert len(items) == 1 and 'alias' in items[0].desc or '简称' in items[0].desc
+    
+
+def test_char_continuity_other_char_not_in_book():
+    """角色不在账本里 → 跳过"""
+    items = detect_char_continuity(_char_book(), 3, '陈墨扛着剑走来。', {'江澈', '苏清瑶'})
+    assert items == []
 
 def test_parse_scan_two_segments():
     from loom.continuity import parse_scan
