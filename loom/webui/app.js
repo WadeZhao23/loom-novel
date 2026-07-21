@@ -2907,7 +2907,16 @@ async function applyBugFix(chapter, it) {
   await openFile(`正文/第${chapter}章.md`, true, chapter);
   const ed = $("editor");
   const needle = (it["本章证据"] || "").trim();
-  let idx = needle ? ed.value.indexOf(needle) : -1;
+  // 证据偏移是后端对「正文体(不含标题行)」算的,编辑器含首行 # 标题 → 候选=偏移+标题前缀长,逐字核验后再信
+  let idx = -1;
+  const off = it["证据偏移"];
+  if (needle && typeof off === "number" && off >= 0) {
+    const title = ed.value.match(/^#[^\n]*\n\n/);
+    for (const cand of [off + (title ? title[0].length : 0), off]) {
+      if (ed.value.substr(cand, needle.length) === needle) { idx = cand; break; }
+    }
+  }
+  if (idx < 0) idx = needle ? ed.value.indexOf(needle) : -1;
   if (idx < 0) { toast("没定位到证据句——请手动选中要改的段落,再用「重写选中」", true); return; }
   // 吸附到所在段落(空行为界),预填修改示例进行内改写面板
   const before = ed.value.lastIndexOf("\n\n", idx);

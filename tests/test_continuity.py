@@ -387,3 +387,61 @@ def test_char_continuity_no_alias_match():
     items = detect_char_continuity(book, 2, '陈墨走入庭院。', {'苏清瑶', '陈墨'})
     assert items == []
 
+# ── G2: JSON 结构化输出 ────────
+
+def test_parse_scan_json_full():
+    """JSON 格式:报告条目 + 入账行都解析;类别枚举外归「其他」;严重度夹到 1-5。"""
+    from loom.continuity import parse_scan
+    raw = ('{"除虫报告": ['
+           '{"严重度": 5, "类别": "物品", "问题": "药胚复活", "本章证据": "取出远古药胚", '
+           '"前情证据": "第2章「吞入腹中」", "落点": "正文", "修改示例": "改为本源精血"},'
+           '{"严重度": 9, "类别": "剧情", "问题": "自造类别", "本章证据": "x", "落点": "设定"}],'
+           '"状态入账": ["- [物品] 破禁丹:炼成 | 证据:「炼成破禁丹」", "无效行"]}')
+    items, lines = parse_scan(raw)
+    assert len(items) == 2
+    assert items[0].stars == 5 and items[0].kind == "物品" and items[0].fix == "改为本源精血"
+    assert items[0].target == "正文" and items[0].evidence == "取出远古药胚"
+    assert items[1].stars == 5 and items[1].kind == "其他" and items[1].target == "设定"
+    assert lines == ["- [物品] 破禁丹:炼成 | 证据:「炼成破禁丹」"]   # 不合式行滤掉
+
+
+def test_parse_scan_json_fenced_and_empty():
+    """围栏/废话包裹的 JSON 也认;空数组=通过。"""
+    from loom.continuity import parse_scan
+    items, lines = parse_scan('好的,结果如下:\n```json\n{"除虫报告": [], "状态入账": []}\n```')
+    assert items == [] and lines == []
+
+
+def test_parse_scan_json_broken_falls_back_to_legacy():
+    """JSON 炸了/结构不对 → 降级旧双段格式,老响应照解析(新旧兼容)。"""
+    from loom.continuity import parse_scan
+    raw = ("===除虫报告===\n"
+           "- ⭐⭐⭐⭐ | 时间 | 时间倒流 | 本章证据:「昨日」 | 前情证据:第3章「三日后」 | 落点:正文\n"
+           "===状态入账===\n"
+           "- [时钟] 章末:当日深夜")
+    items, lines = parse_scan(raw)
+    assert len(items) == 1 and items[0].stars == 4 and items[0].kind == "时间"
+    assert lines == ["- [时钟] 章末:当日深夜"]
+
+
+def test_parse_scan_json_bad_stars_default():
+    """严重度给不了数字按 3;缺「问题」的条目丢弃。"""
+    from loom.continuity import parse_scan
+    items, _ = parse_scan('{"除虫报告": [{"严重度": "?", "类别": "人设", "问题": "下跪"}, {"类别": "物品"}], "状态入账": []}')
+    assert len(items) == 1 and items[0].stars == 3 and items[0].kind == "人设"
+
+
+def test_scan_chapter_fills_evidence_offset(project):
+    """证据偏移:确定性 + LLM 条目都算出正文体字符偏移,前端可直接定位。"""
+    from conftest import FakeBackend, const
+    from loom.continuity import scan_chapter
+    statebook.append_section(project, 2, ["- [物品] 远古药胚:已吞服消耗 | 证据:「吞入腹中」"])
+    body = "他望向窗外。\n\n江澈取出远古药胚,炼成破禁丹。"
+    be = FakeBackend(const('{"除虫报告": [{"严重度": 2, "类别": "衔接", "问题": "窗外景接不上", '
+                           '"本章证据": "他望向窗外", "前情证据": "第3章「屋内」", "落点": "正文"}], "状态入账": []}'))
+    rep = scan_chapter(project, 4, body, be)
+    by_kind = {i["类别"]: i for i in rep["issues"]}
+    assert by_kind["物品"]["证据偏移"] == body.find("江澈取出远古药胚,炼成破禁丹。")
+    assert by_kind["衔接"]["证据偏移"] == 0          # 「他望向窗外」在文首
+    assert body[by_kind["衔接"]["证据偏移"]:][:5] == "他望向窗外"
+
