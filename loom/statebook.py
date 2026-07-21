@@ -6,6 +6,8 @@
 - 删章摘除/重编号搬运由 chapters.py 与 [AI回顾]/[AI补充] 同批调用,模式照抄 recap。
 - 存活快照(进大纲师/写手 prompt):近 _WINDOW 章四类行原样;远章只留「消耗类物品行+全部规则行」
   ——防「第2章吞掉的药胚第40章复活」「因果锁定 100% 漂成 10%」;[状态][时钟] 滚动窗外丢弃。
+- 远章延寿两类(G4):[状态] 行变更描述含重大突破/伤势巨变词(金丹→元婴这种不滚出窗外);
+  [物品] 行含伏笔标记(藏在某处未用的)视同消耗类永存,不随窗口丢失。
 """
 
 from __future__ import annotations
@@ -19,6 +21,10 @@ from .paths import STATEBOOK_REL
 _SEC_RE = re.compile(r"^##\s*第(\d+)章\s*$")
 _LINE_RE = re.compile(r"^-\s*\[(物品|状态|规则|时钟)\]\s*(.+?)\s*$")
 _CONSUMED_KW = ("消耗", "失去", "损毁", "赠出", "用尽", "吞服", "服用", "报废", "耗尽")
+# 伏笔型物品:藏在某处未使用的——变更描述带这些词即视同消耗类永存(宁多留不漏记,多留只是快照长几行)
+_FORESHADOW_KW = ("伏笔", "藏", "封存", "收好", "未用")
+# 重大状态变化:境界大突破/伤势巨变——这种状态行不滚出窗口(「金丹→元婴」后文处处要对得上)
+_MAJOR_STATE_KW = ("突破", "进阶", "晋阶", "晋升", "渡劫", "飞升", "重伤", "陨落", "身亡", "痊愈", "苏醒")
 _WINDOW = 8   # 与 budget.WINDOW 同窗口;独立常量——账本折叠语义与回顾折叠不同,别误共用
 
 _HEADER = (
@@ -80,7 +86,7 @@ def snapshot_for(project_root: Path, upto_n: int) -> str:
         recent = n > upto_n - _WINDOW
         for kind, content in book[n]:
             change = content.split("|", 1)[0]   # 只看变更描述段,别让证据引文里的动词误命中(如「耗尽力气」)
-            keep = recent or kind == "规则" or (kind == "物品" and any(k in change for k in _CONSUMED_KW))
+            keep = recent or kind == "规则" or (kind == "物品" and any(k in change for k in _CONSUMED_KW + _FORESHADOW_KW)) or (kind == "状态" and any(k in change for k in _MAJOR_STATE_KW))
             if keep:
                 out.append(f"- 第{n}章 [{kind}] {content}")
     return "\n".join(out)
