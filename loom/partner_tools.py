@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -150,6 +151,109 @@ def _handle_tishe(root: Path, 落点: str = "", 内容: str = "") -> dict:
     return {"slot": slot, "content": content, "before": before}
 
 
+# ── 全文搜索(搜正文/搜设定) ──────────────────────────────────────────
+
+_SEARCH_MAX_RESULTS = 10      # 最多返回 10 条
+_SEARCH_MAX_CHARS = 200       # 单条 ≤200 字
+_SEARCH_CONTEXT_LINES = 2     # 匹配行前后各 2 行
+
+
+def _search_files(root: Path, rel_glob: str) -> list[Path]:
+    """按 glob 搜文件,按文件名数字序排序(正文文件)或字典序(设定)。"""
+    base = Path(root)
+    return sorted(
+        [p for p in base.glob(rel_glob) if p.is_file()],
+        key=lambda p: (
+            int(m.group(1)) if (m := re.search(r"第(\d+)章", p.stem)) else 0,
+            p.name,
+        ),
+    )
+
+
+def _extract_lines(text: str, match_line: int, total_lines: int) -> str:
+    """从文本中提取匹配行前后各 2 行的上下文,裁到 ≤200 字。"""
+    lines = text.splitlines()
+    start = max(0, match_line - _SEARCH_CONTEXT_LINES)
+    end = min(len(lines), match_line + _SEARCH_CONTEXT_LINES + 1)
+    snippet = "\n".join(lines[start:end])
+    if len(snippet) > _SEARCH_MAX_CHARS:
+        snippet = snippet[:_SEARCH_MAX_CHARS] + "…"
+    return snippet
+
+
+def _handle_search_text(root: Path, query: str, chapter: str = "") -> str:
+    """搜索正文/目录下 md 文件,按文件名数字序排序,全文扫描返回匹配结果。"""
+    if not query:
+        raise ValueError("搜正文需要关键词(query)。")
+    q = query.strip()
+    body_root = Path(root) / paths.BODY_DIR
+    if not body_root.is_dir():
+        return "(暂无正文章节)"
+    files = _search_files(root, f"{paths.BODY_DIR}/*.md")
+    if chapter:
+        files = [f for f in files if chapter in f.stem]
+    results: list[str] = []
+    for f in files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if re.search(re.escape(q), line, re.IGNORECASE) and len(results) < _SEARCH_MAX_RESULTS:
+                snippet = _extract_lines(text, i, len(lines))
+                results.append(f"{f.stem} | L{i+1}:{snippet}")
+        if len(results) >= _SEARCH_MAX_RESULTS:
+            break
+    if not results:
+        return f"(在正文中未找到「{q}」相关结果)"
+    return "\n---\n".join(results)
+
+
+def _search_brain_file(root: Path, rel: str) -> list[Path]:
+    """返回外置大脑目标文件/目录下的 .md 文件。"""
+    p = Path(root) / rel
+    if p.is_file():
+        return [p]
+    if p.is_dir():
+        return sorted(p.glob("*.md"))
+    return []
+
+
+def _handle_search_brain(root: Path, query: str) -> str:
+    """搜索外置大脑设定文件:世界观/人物/卡章纲/违禁词等。"""
+    if not query:
+        raise ValueError("搜设定需要关键词(query)。")
+    q = query.strip()
+    # 外置大脑设定文件清单
+    brain_targets: list[str] = [
+        paths.WORLD_REL,
+        paths.CHARS_REL,
+        paths.CARD_REL,
+        paths.BANNED_REL,
+        paths.PROJECT_CARD_REL,
+        paths.STATEBOOK_REL,
+        paths.WORLD_DIR_REL,
+        paths.CHARS_DIR_REL,
+    ]
+    results: list[str] = []
+    for rel in brain_targets:
+        files = _search_brain_file(root, rel)
+        for f in files:
+            text = f.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            for i, line in enumerate(lines):
+                if re.search(re.escape(q), line, re.IGNORECASE) and len(results) < _SEARCH_MAX_RESULTS:
+                    snippet = _extract_lines(text, i, len(lines))
+                    results.append(f"{f.parent.name}/{f.stem} | L{i+1}:{snippet}")
+                if len(results) >= _SEARCH_MAX_RESULTS:
+                    break
+            if len(results) >= _SEARCH_MAX_RESULTS:
+                break
+        if len(results) >= _SEARCH_MAX_RESULTS:
+            break
+    if not results:
+        return f"(在外置大脑中未找到「{q}」相关结果)"
+    return "\n---\n".join(results)
+
+
 REGISTRY: dict[str, ToolSpec] = {
     "读文件": ToolSpec(
         name="读文件", params=("路径",),
@@ -166,6 +270,16 @@ REGISTRY: dict[str, ToolSpec] = {
         name="提设定", params=("落点", "内容"),
         desc="产出候选卡(proposal),不写盘;作者拍板确认才落盘。",
         handler=_handle_tishe, mutates=True,
+    ),
+    "搜正文": ToolSpec(
+        name="搜正文", params=("query", "chapter"),
+        desc="全文搜索正文中的关键词(大小写不敏感),可选限定章名;返回匹配段落及其上下文(前后各2行),单条≤200字,最多10条。",
+        handler=_handle_search_text, mutates=False,
+    ),
+    "搜设定": ToolSpec(
+        name="搜设定", params=("query",),
+        desc="全文搜索外置大脑设定文件中的关键词(大小写不敏感),包括世界观、人物卡、卡章纲、违禁词等;返回匹配段落及其上下文(前后各2行),单条≤200字,最多10条。",
+        handler=_handle_search_brain, mutates=False,
     ),
 }
 
