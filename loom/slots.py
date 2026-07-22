@@ -139,6 +139,58 @@ def _dir_container_slots(root: Path, dir_rel: str, order: tuple[str, ...], *, en
     return out
 
 
+# ── 卷/arc 支持(M4) ────────────────────────────────────────────────
+# 卡章纲里 `## 第N卷·卷名` H2 标题被视为分卷标记。
+# 领航员「看地基」时能看到卷名和归属该卷的章节范围。
+
+_VOLUME_H2_RE = re.compile(r"^##\s*第(\d+)卷[·・.\s]*(.+?)\s*$", re.M)
+
+
+def _volume_slots(root: Path, rel: str) -> list[Slot]:
+    """从卡章纲文件解析 `## 第N卷·卷名` H2 卷级结构。
+
+    除卷 H2 对应的 slot 外,还新增一个汇总 slot「卷结构」显示全书已定义哪些卷。
+    """
+    p = root / rel
+    if not p.is_file():
+        return []
+    text = p.read_text(encoding="utf-8", errors="replace")
+    volumes = []
+    for m in _VOLUME_H2_RE.finditer(text):
+        n = int(m.group(1))
+        name = m.group(2).strip()
+        volumes.append((n, name))
+    if not volumes:
+        return []
+    out: list[Slot] = []
+    # 每卷一个 summary slot
+    for n, name in volumes:
+        label = f"第{n}卷·{name}"
+        out.append(Slot(
+            id=f"{rel}#卷{n}",
+            label=label[:10],
+            container=rel,
+            at="h2",
+            key=f"第{n}卷·{name}",
+            hint="分卷 arc 标记",
+            filled=True,
+            preview=_preview(f"第{n}卷·{name}")
+        ))
+    # 汇总卷结构
+    vol_list = "、".join(f"第{n}卷·{name}" for n, name in volumes)
+    out.append(Slot(
+        id=f"{rel}#@volumes",
+        label="卷结构",
+        container=rel,
+        at="h2",
+        key="@volumes",
+        hint=f"全书共 {len(volumes)} 卷:{vol_list}",
+        filled=True,
+        preview=_preview(vol_list)
+    ))
+    return out
+
+
 def stage_slots(root: Path, spec: StageSpec) -> list[Slot]:
     if spec.key == "立项":
         return _project_slots(root)
@@ -147,5 +199,8 @@ def stage_slots(root: Path, spec: StageSpec) -> list[Slot]:
     if spec.key == "人物":
         return _dir_container_slots(root, paths.CHARS_DIR_REL, spec.slot_order, entity=True)
     if spec.key == "卡章纲":
-        return _row_slots(root, paths.CARD_REL)   # 章行「- 第N章:」/「- 大弧:」都是 row 形态
+        # M4:章行 + 卷级 H2 结构
+        rows = _row_slots(root, paths.CARD_REL)
+        vols = _volume_slots(root, paths.CARD_REL)
+        return rows + vols
     return []   # voice:P2 需要时再加
