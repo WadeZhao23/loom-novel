@@ -757,9 +757,34 @@ def _fatigue_factory(project_root: Path, chapter_n: int, anchors: list[str]):
     return _run
 
 
+def _chengyu_factory(project_root: Path, chapter_n: int, anchors: list[str]):
+    """成语堆砌检测器工厂(S4)。"""
+    def _run(text: str) -> list:
+        from .detectors import detect_chengyu_piling
+        return detect_chengyu_piling(text)
+    return _run
+
+
+def _parallel_factory(project_root: Path, chapter_n: int, anchors: list[str]):
+    """排比句滥用检测器工厂(S4)。"""
+    def _run(text: str) -> list:
+        from .detectors import detect_parallel_abuse
+        return detect_parallel_abuse(text)
+    return _run
+
+
+def _transition_factory(project_root: Path, chapter_n: int, anchors: list[str]):
+    """转折词密集检测器工厂(S4)。"""
+    def _run(text: str) -> list:
+        from .detectors import detect_excessive_transitions
+        return detect_excessive_transitions(text)
+    return _run
+
+
 # 确定性预筛注册表:每项是 (root, chapter_n, anchors) -> (text -> list[Issue]) 的工厂。
 # 新接检测器(如三库整合调研里相中的)只在这里加一行——单项异常各自吞掉,绝不拖累出稿。
-DETECTORS = (_aitell_factory, _fatigue_factory)
+DETECTORS = (_aitell_factory, _fatigue_factory,
+             _chengyu_factory, _parallel_factory, _transition_factory)
 
 
 def _deslop_detector(project_root: Path, chapter_n: int):
