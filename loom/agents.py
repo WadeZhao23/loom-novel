@@ -681,8 +681,9 @@ def run_pipeline(
         # 质检/去AI味 关卡:独立复审→回炉(挑硬伤、不打分、不硬阻断)。残留写进留痕,继续往下。
         if role in _GATES and config.gate_rounds > 0:
             label, rubric_label, gate_reads, need_prev = _GATES[role]
-            critic = gates.load_critic(project_root, rubric_label)
-            revise = gates.load_revise(project_root, rubric_label)
+            custom_rubric = getattr(config, "custom_rubric", "")
+            critic = gates.load_critic(project_root, rubric_label, custom_rubric=custom_rubric)
+            revise = gates.load_revise(project_root, rubric_label, custom_rubric=custom_rubric)
             gk = _read_files(project_root, gate_reads, _noop)
             if need_prev and prev:
                 gk += "\n\n【上一章章末(看本章有没有接住它的钩子)】\n" + prev[-800:]

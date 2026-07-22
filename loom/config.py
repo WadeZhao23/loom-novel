@@ -29,6 +29,7 @@ class Config:
     gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
     foreshadow_distance: int = 8       # 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写第N章时进留痕提醒(纯提示、不回炉、不阻断);0=关
     continuity_scan: bool = True       # 每章终稿后自动除虫(跨章连续性,非阻断附赠);False=只手动
+    custom_rubric: str = ""             # 可选:用户自定义 rubric 文件路径(相对项目根);配了则替代默认 rubric
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -74,6 +75,7 @@ def load_config(project_root: Path) -> Config:
         gate_rounds=int(gate.get("轮数", gate.get("rounds", 1))),
         foreshadow_distance=int(gate.get("伏笔提醒章距", gate.get("foreshadow_distance", 8))),
         continuity_scan=bool(gate.get("除虫", gate.get("continuity_scan", True))),
+        custom_rubric=gate.get("custom_rubric", ""),
     )
 
 

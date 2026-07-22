@@ -151,13 +151,27 @@ def _read_rubric(project_root: Path, filename: str) -> str:
     return ""
 
 
-def load_critic(project_root: Path, label: str) -> str:
-    """加载复审员(critic)rubric。label='质检' → skills/质检rubric.md"""
+def load_critic(project_root: Path, label: str, *, custom_rubric: str = "") -> str:
+    """加载复审员(critic)rubric。label='质检' → skills/质检rubric.md。
+
+    custom_rubric(可选,来自 Config.custom_rubric):指向用户自定义 rubric 文件(相对项目根);
+    给了且文件存在就替代默认 rubric。"""
+    if custom_rubric:
+        p = project_root / custom_rubric
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
     return _read_rubric(project_root, f"{label}rubric.md")
 
 
-def load_revise(project_root: Path, label: str) -> str:
-    """加载回炉者(revise)rubric。label='质检' → skills/质检revise.md"""
+def load_revise(project_root: Path, label: str, *, custom_rubric: str = "") -> str:
+    """加载回炉者(revise)rubric。label='质检' → skills/质检revise.md。
+
+    custom_rubric(可选,来自 Config.custom_rubric):使用了 custom_rubric 时,
+    也将 revsise 指向同一自定义文件的 revise 段(同一文件),或退回到默认。"""
+    if custom_rubric:
+        p = project_root / custom_rubric
+        if p.exists():
+            return p.read_text(encoding="utf-8").strip()
     return _read_rubric(project_root, f"{label}revise.md")
 
 
