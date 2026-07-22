@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -26,6 +27,72 @@ from .errors import render
 
 # 流式回调:每收到一小段生成文本就调一次(让前端"看着它一句句写出来")。
 OnChunk = Callable[[str], None]
+
+# ── Token 用量 ────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Usage:
+    """一次 complete 调用的 token 用量。各字段 None = 未知。"""
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+    @classmethod
+    def from_openai(cls, resp_usage: object) -> Usage | None:
+        """从 OpenAI 兼容 API 的 response.usage 提取 Usage。无 usage 返回 None。"""
+        if resp_usage is None:
+            return None
+        try:
+            return cls(
+                prompt_tokens=int(getattr(resp_usage, "prompt_tokens", 0) or 0),
+                completion_tokens=int(getattr(resp_usage, "completion_tokens", 0) or 0),
+                total_tokens=int(getattr(resp_usage, "total_tokens", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            return None
+
+    def __bool__(self) -> bool:
+        """有至少一个字段有值时为 True。"""
+        return any(x is not None and x > 0 for x in (self.prompt_tokens, self.completion_tokens, self.total_tokens))
+
+    def __add__(self, other: Usage | None) -> Usage:
+        if other is None:
+            return Usage(prompt_tokens=self.prompt_tokens,
+                         completion_tokens=self.completion_tokens,
+                         total_tokens=self.total_tokens)
+        def _add(a: int | None, b: int | None) -> int | None:
+            if a is not None and b is not None:
+                return a + b
+            return a if a is not None else b
+        return Usage(
+            prompt_tokens=_add(self.prompt_tokens, other.prompt_tokens),
+            completion_tokens=_add(self.completion_tokens, other.completion_tokens),
+            total_tokens=_add(self.total_tokens, other.total_tokens),
+        )
+
+    def __radd__(self, other: Usage | int) -> Usage:
+        """支持 sum() 聚合:初始值 sum([u1, u2]) 的第一个 u 直接返回,此后调用 __add__。
+        sum() 的 initial=0 会导致 int+Usage → 回退此处,此时忽略 int。"""
+        return Usage(prompt_tokens=self.prompt_tokens, completion_tokens=self.completion_tokens,
+                     total_tokens=self.total_tokens) if isinstance(other, int) else other + self
+
+
+class CompletionResult(str):
+    """字符串兼容的完成结果,附加 usage 元数据。
+
+    所有把返回值当 str 用的既有代码继续工作:
+      text = backend.complete(...)   # text 是 str
+    需要 usage 的代码:
+      result = backend.complete(...)
+      usage = getattr(result, 'usage', None)
+    """
+    usage: Usage | None = None
+
+    def __new__(cls, text: str, usage: Usage | None = None) -> CompletionResult:
+        obj = super().__new__(cls, text)
+        obj.usage = usage
+        return obj
 
 
 # ----------------------------- 供应商路由表(唯一真相) -----------------------------
@@ -196,8 +263,11 @@ def _openai_compat_error(e: Exception) -> LoomBackendError:
 
 class Backend(Protocol):
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
-                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
-        """生成。给了 on_chunk 的后端会边生成边回调(流式);不支持流式的后端忽略它、结尾一次性返回。
+                 on_chunk: OnChunk | None = None, agent_mode: bool = False) -> CompletionResult:
+        """生成。返回 CompletionResult(str 子类,含可选的 usage 元数据)。
+
+        给了 on_chunk 的后端会边生成边回调(流式);不支持流式的后端忽略它、结尾一次性返回。
+        既有代码将返回值当 str 用,完全兼容。
 
         agent_mode(书房伙伴对话通道专用,spec 2026-07-16-navigator-agent-design.md §3):
         True=解除 CLI 后端(claude/codex)的反 agent 护栏——允许按文本协议输出至多一个「用:」
@@ -241,6 +311,7 @@ class OpenAICompatBackend:
         family = spec.get("error_family", "generic")   # 异常映射按注册表字段分发(S7)
         self._empty_code = "deepseek_empty_response" if family == "deepseek" else "model_empty_response"
         self._map = _deepseek_error if family == "deepseek" else _openai_compat_error
+        self.usage_history: list[Usage] = []  # S3: 每次 complete 的 token 用量
 
         if provider != "deepseek" and not self.model:
             raise LoomBackendError(render("model_name_missing"), code="model_name_missing")
@@ -306,16 +377,20 @@ class OpenAICompatBackend:
                 if buf:
                     on_chunk(buf)
                 text = "".join(parts).strip()
+                usage = Usage.from_openai(getattr(stream, "usage", None))
             else:
                 resp = self._client.chat.completions.create(
                     model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
                 )
                 text = (resp.choices[0].message.content or "").strip()
+                usage = Usage.from_openai(getattr(resp, "usage", None))
         except Exception as e:  # 网络/限流/鉴权/余额 —— 映射成可操作的友好错误
             raise self._map(e) from e
         if not text:  # 200 空响应(多半模型名不对)→ 报错,绝不把空串往下传去覆盖用户数据
             raise self._empty()
-        return text
+        if usage:
+            self.usage_history.append(usage)
+        return CompletionResult(text, usage=usage)
 
 
 class ClaudeCodeBackend:
@@ -328,6 +403,7 @@ class ClaudeCodeBackend:
         m = (config.model or "").strip()
         bad = (not m) or ("deepseek" in m) or m.startswith("gpt")
         self.model = "sonnet" if bad else m
+        self.usage_history: list[Usage] = []  # S3
 
     # 护栏(五工序默认,agent_mode=False):逼 `claude -p` 当"纯文本补全",别当 Claude Code agent
     # (去找文件/反问/解释)
@@ -372,7 +448,7 @@ class ClaudeCodeBackend:
         if not text:  # 跑完却没吐正文 → 报错,别把空往下传
             raise LoomBackendError(render("backend_empty_response", detail=f"model={self.model}"),
                                    code="backend_empty_response")
-        return text
+        return CompletionResult(text)
 
 
 class CodexBackend:
@@ -389,6 +465,7 @@ class CodexBackend:
         # (订阅登录下默认模型即可,硬塞一个模型名反而可能"未知模型")。
         m = (config.model or "").strip()
         self.model = m if m and "deepseek" not in m else ""
+        self.usage_history: list[Usage] = []  # S3
 
     # 护栏(五工序默认,agent_mode=False):逼 `codex exec` 当"纯文本补全",别当 Codex agent
     # (改文件/跑命令/反问)
@@ -441,7 +518,7 @@ class CodexBackend:
         if not text:  # 跑完却没拿到正文 → 报错,别把空往下传
             raise LoomBackendError(render("backend_empty_response", detail=f"model={self.model or '默认'}"),
                                    code="backend_empty_response")
-        return text
+        return CompletionResult(text)
 
 
 class DemoBackend:
@@ -452,6 +529,7 @@ class DemoBackend:
 
     def __init__(self, config: Config) -> None:
         self._chars = config.chapter_chars
+        self.usage_history: list[Usage] = []  # S3
 
     def _pick(self, system: str, user: str) -> str:
         head = system.strip().splitlines()[0]
@@ -496,9 +574,9 @@ class DemoBackend:
                     time.sleep(0.02)
             if buf:
                 on_chunk(buf)
-            return text.strip()
+            return CompletionResult(text.strip())
         time.sleep(0.7)  # 让录屏里五个 agent 一个一个亮起来
-        return text
+        return CompletionResult(text)
 
 
 _DEMO = {

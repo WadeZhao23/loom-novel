@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import events, gates, paths
-from .backends import Backend, LoomBackendError
+from .backends import Backend, LoomBackendError, Usage
 from .chaptertext import compose, strip_title
 from .config import Config
 from .errors import render
@@ -728,6 +728,14 @@ def run_pipeline(
     _flag_overlong(project_root, chapter_n, final_body, config.chapter_chars, progress)  # 超长只留痕,不拦稿
     _scan_continuity(project_root, chapter_n, final_body, critic_backend or backend,
                      config, progress, hardfacts)
+    # S3: token 汇总
+    usage_hist = getattr(backend, "usage_history", None)
+    if usage_hist:
+        total = sum(usage_hist, Usage(0, 0, 0))
+        if total:
+            progress(events.info(
+                f"Token 用量: prompt {total.prompt_tokens} + completion {total.completion_tokens}"
+                f" = {total.total_tokens} total"))
     progress(events.chapter_done(chapter=chapter_n, path=path, title=title,
                                   chars=len(final_body), preview=final_body[:300], text=final))
     return path, final

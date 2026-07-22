@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from loom.backends import CompletionResult
 from loom.scaffold import init as scaffold_init
 
 
@@ -32,7 +33,7 @@ class FakeBackend:
         out = self.responder(system, user) if callable(self.responder) else self.responder
         if on_chunk and out:
             on_chunk(out)
-        return out
+        return CompletionResult(out) if isinstance(out, str) else out
 
 
 def const(value: str):
@@ -80,4 +81,4 @@ class ScriptedBackend:
                     on_chunk(chunk)
             else:
                 on_chunk(out)
-        return out
+        return CompletionResult(out) if isinstance(out, str) else out
