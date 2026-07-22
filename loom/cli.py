@@ -157,8 +157,13 @@ def seed(sample: Path = typer.Option(None, "--样本", "--sample", "-s"),
         _die(str(e))
 
 
-@app.command(help="跑 5 个 Agent 写第 N 章。")
-def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, "--force", "-f")) -> None:
+@app.command(help="跑 5 个 Agent 写第 N 章。支持增量重写:跳过设定师/大纲师。")
+def write(chapter: int = typer.Argument(...),
+          force: bool = typer.Option(False, "--force", "-f"),
+          from_writer: bool = typer.Option(False, "--from-writer",
+                                           help="轻量模式:跳过设定师+大纲师,从写手开始"),
+          skip_outliner: bool = typer.Option(False, "--skip-outliner",
+                                             help="跳过设定师(保留大纲师)")) -> None:
     from . import usecases
 
     try:
@@ -170,9 +175,12 @@ def write(chapter: int = typer.Argument(...), force: bool = typer.Option(False, 
                   "chapter_exists": f"第 {chapter} 章已写完。要重写加 --force。"}
                  .get(rej["code"], rej["error"]))   # 新 code(brain_incomplete)用 precheck 自带文案,不 KeyError
         config = load_config(root)
-        console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字[/dim]\n")
+        start_step = 2 if from_writer else (1 if skip_outliner else 0)
+        mode_label = {0: "完整流水线", 1: "跳过设定师", 2: "从写手开始"}[start_step]
+        console.print(f"[dim]后端:{config.provider} · {config.model} · 终稿≈{config.chapter_chars}字 · 模式:{mode_label}[/dim]\n")
         with usecases.write_lock(root):
-            usecases.write_chapter(root, chapter, _render, force=force, slow=0.3)
+            usecases.write_chapter(root, chapter, _render, force=force, slow=0.3,
+                                   start_step=start_step)
     except (LoomBackendError, FileNotFoundError, ValueError) as e:
         _die(str(e))
 

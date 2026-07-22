@@ -139,13 +139,17 @@ def write_precheck(root: Path | str, chapter: int, force: bool = False) -> dict 
 
 
 def write_chapter(root: Path | str, chapter: int, progress: Progress, *,
-                  force: bool = False, slow: float = 0.25) -> None:
-    """跑 5 Agent 写第 N 章。不拿锁:流式场景锁随 worker 线程(调用方 acquire_lock / write_lock)。"""
+                  force: bool = False, slow: float = 0.25,
+                  start_step: int = 0) -> None:
+    """跑 5 Agent 写第 N 章。不拿锁:流式场景锁随 worker 线程(调用方 acquire_lock / write_lock)。
+
+    start_step: 跳过前 N 道工序。0=完整流水线(默认);1=跳过设定师;2=跳过设定师+大纲师。
+    """
     root = Path(root)
     cfg = load_config(root)
     # out 不存在=上次没跑完(断点),resume 跳过已落盘且上游未变的工序,省计费
     run_pipeline(root, chapter, get_backend(cfg), cfg, progress, slow=slow, resume=not force,
-                 critic_backend=cheap_backend(cfg))
+                 critic_backend=cheap_backend(cfg), start_step=start_step)
 
 
 # ---------------------------------------------------------------- learn

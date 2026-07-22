@@ -604,6 +604,7 @@ def run_pipeline(
     slow: float = 0.0,
     resume: bool = True,
     critic_backend: Backend | None = None,
+    start_step: int = 0,
 ) -> tuple[Path, str]:
     """跑一章。返回 (终稿路径, 终稿文本)。进度通过 progress 回调发出。
 
@@ -611,6 +612,9 @@ def run_pipeline(
     上游(reads 文件 / 已累积产物 / 上一章正文)任一变化,从该工序起重算。
 
     critic_backend 给了就让质检/去AI味的**复审员**走它(通常是便宜模型);写作/回炉仍用 backend。
+
+    start_step: 跳过前 N 道工序。0=完整流水线(默认,从设定师开始);
+        1=跳过设定师从大纲师开始;2=跳过设定师+大纲师从写手开始。
     """
     from . import ledger, resume as resume_mod
 
@@ -642,10 +646,37 @@ def run_pipeline(
 
     if resume:
         start_idx, workspace = resume_mod.resume_point(project_root, chapter_n, _sig, _upstream_v1)
+        # start_step 强制跳过前 N 道工序(增量重写模式)
+        if start_step > 0:
+            start_idx = max(start_idx, start_step)
         for role in PIPELINE[:start_idx]:
             progress(events.agent_skip(role, "已完成且上游未变"))
     else:
-        start_idx, workspace = 0, []
+        start_idx = start_step
+        workspace = []
+
+    # start_step > 0: 预填被跳过工序的产物到工作区,确保下游工序能读到
+    if start_step >= 1:
+        # 跳过设定师:用 hardfacts/knowledge 作为设定锚点
+        from . import budget as _budget
+        a_setter, items = _knowledge_items(project_root, chapter_n, "设定师")
+        knowledge_text = "\n\n".join(f"【{rel}】\n{text.strip()}" for rel, text in items)
+        if hardfacts:
+            knowledge_text += "\n\n## 硬设定(逐字照搬)\n" + hardfacts
+        if state_snap:
+            knowledge_text += "\n\n## 当前状态\n" + state_snap
+        ws_anchor = (a_setter.produces, knowledge_text)
+        if not any(t[0] == a_setter.produces for t in workspace):
+            workspace.append(ws_anchor)
+    if start_step >= 2:
+        # 跳过设定师+大纲师:从现有 .细纲/ 读细纲
+        outline_p = _outline_path(project_root, chapter_n)
+        if outline_p.is_file():
+            outline_text = outline_p.read_text(encoding="utf-8").strip()
+            if outline_text:
+                ws_outline = (load_agent(project_root, "大纲师").produces, outline_text)
+                if not any(t[0] == load_agent(project_root, "大纲师").produces for t in workspace):
+                    workspace.append(ws_outline)
 
     for spec in STEPS[start_idx:]:
         role = spec.role
