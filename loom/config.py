@@ -31,6 +31,7 @@ class Config:
     continuity_scan: bool = True       # 每章终稿后自动除虫(跨章连续性,非阻断附赠);False=只手动
     custom_rubric: str = ""             # 可选:用户自定义 rubric 文件路径(相对项目根);配了则替代默认 rubric
     custom_gates: dict[str, str] = field(default_factory=dict)  # [gate.custom] 段:自定义 Gate 名称→ rubric 文件路径
+    multi_rubric: list[str] = field(default_factory=list)  # [gate.multi_rubric]: 多候选 rubric 文件路径列表
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -66,6 +67,7 @@ def load_config(project_root: Path) -> Config:
     novel = data.get("novel", {})
     gate = data.get("gate", {})
     custom_gates = dict(gate.get("custom", {}))
+    multi_rubric = list(gate.get("multi_rubric", []))
     return Config(
         provider=backend.get("provider", "deepseek"),
         model=backend.get("model", "deepseek-v4-pro"),
@@ -79,6 +81,7 @@ def load_config(project_root: Path) -> Config:
         continuity_scan=bool(gate.get("除虫", gate.get("continuity_scan", True))),
         custom_rubric=gate.get("custom_rubric", ""),
         custom_gates=custom_gates,
+        multi_rubric=multi_rubric,
     )
 
 

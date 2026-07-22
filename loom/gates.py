@@ -218,6 +218,127 @@ def run_gate(
     return GateResult(text, rounds, False, last)
 
 
+# ── 多候选 Gate(M6):用多个 rubric 各审一次,结果合并 ─────────────────────
+
+
+def run_multi_rubric_gate(
+    backend: Backend,
+    *,
+    label: str,
+    owner_role: str,
+    default_critic: str,       # 默认 rubric 的 critic 系统提示词
+    default_revise: str,       # 默认 rubric 的 revise 系统提示词
+    multi_rubric: list[str],   # 额外 rubric 文件路径列表
+    project_root: Path,
+    draft: str,
+    knowledge: str,
+    produces: str,
+    rounds: int,
+    max_chars: int,
+    progress: Progress = _noop,
+    detector: Callable[[str], list[Issue]] | None = None,
+    critic_backend: Backend | None = None,
+) -> GateResult:
+    """跑多候选 Gate:先用默认 rubric 审,再用每份额外 rubric 审,结果合并去重后回炉。
+
+    rounds 语义:1=只跑默认 rubric(与原来一样);>=2 且有多份 rubric 时,
+    先跑默认 rubric,再依次跑额外 rubric 作为独立视角,所有 issues 合并后回炉一次。
+    保持向后兼容:rounds=1 且无 multi_rubric 时退化为单次诊断。
+    """
+    if rounds <= 0:
+        return GateResult(draft, 0, True, [])
+
+    text = draft
+    all_issues: list[Issue] = []
+    rubric_count = 1 + len(multi_rubric)  # 默认 + 额外
+    effective_rounds = min(rounds, rubric_count)  # 实际跑几个视角
+
+    # 阶段 1:默认 rubric 诊断
+    progress(events.gate_start(f"{label}(默认视角)", owner_role, 1))
+    critic_user = (
+        f"## 设定与标准\n{knowledge}\n\n## 待复审的本章稿\n{text}\n\n"
+        "## 你的任务\n按上面的标准,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。"
+    )
+    verdict = (critic_backend or backend).complete(default_critic, critic_user, max_chars=600)
+    issues = _parse_verdict(verdict)
+    all_issues.extend(issues)
+    if issues:
+        detail = _enrich_issues(issues, text)
+        progress(events.gate_issues(f"{label}(默认视角)", owner_role, 1,
+                                     [i.as_dict() for i in issues], issues_detail=detail))
+    else:
+        progress(events.gate_pass(f"{label}(默认视角)", owner_role, 1))
+
+    # 阶段 2:每个额外 rubric 跑一次纯诊断
+    for idx, rubric_path in enumerate(multi_rubric):
+        if idx + 2 > effective_rounds:
+            break  # 只跑够 rounds 次
+
+        extra_critic = _load_rubric_file(project_root, rubric_path)
+        if not extra_critic:
+            progress(events.warn(f"额外 rubric 文件不存在:{rubric_path},跳过"))
+            continue
+
+        r = idx + 2  # 当前轮次编号
+        perspective = f"{label}(视角{r})"
+        progress(events.gate_start(perspective, owner_role, r))
+        extra_user = (
+            f"## 审查标准\n{extra_critic}\n\n## 待复审的本章稿\n{text}\n\n"
+            "## 你的任务\n以不同视角审查,只挑硬伤、给证据,严格按格式输出;无硬伤只回一行「通过」。"
+        )
+        extra_verdict = (critic_backend or backend).complete(
+            extra_critic, extra_user, max_chars=600)
+        extra_issues = _parse_verdict(extra_verdict)
+        if extra_issues:
+            all_issues.extend(extra_issues)
+            detail = _enrich_issues(extra_issues, text)
+            progress(events.gate_issues(perspective, owner_role, r,
+                                         [i.as_dict() for i in extra_issues], issues_detail=detail))
+        else:
+            progress(events.gate_pass(perspective, owner_role, r))
+
+    # 合并去重
+    if all_issues:
+        all_issues = _merge_issues([], all_issues)  # 去重
+        # 如果给了 detector,再合流
+        if detector is not None:
+            all_issues = _merge_issues(detector(text), all_issues)
+
+    if not all_issues:
+        return GateResult(text, effective_rounds, True, [])
+
+    # 阶段 3:所有 issues 合并,回炉一次
+    progress(events.gate_revise(label, owner_role, effective_rounds))
+    issue_lines = "\n".join(
+        f"- {i.kind}:{i.desc}" + (f"(证据:「{i.evidence}」)" if i.evidence else "")
+        for i in all_issues
+    )
+    revise_user = (
+        f"## 设定与方法论\n{knowledge}\n\n## 本章稿\n{text}\n\n"
+        f"## 复审挑出的硬伤(多视角汇总,只修这些,别动没问题的地方)\n{issue_lines}\n\n"
+        "## 你的任务\n针对性修好上面的硬伤,只输出修订后的整章正文,不要解释、不要列清单。"
+    )
+    chunk_cb = lambda d, role=owner_role: progress(events.agent_chunk(role, d))
+    text = backend.complete(default_revise, revise_user, max_chars=max_chars, on_chunk=chunk_cb)
+
+    # 跑满后仍有残留
+    progress(events.gate_exhausted(label, owner_role, effective_rounds,
+                                    [i.as_dict() for i in all_issues]))
+    return GateResult(text, effective_rounds, False, all_issues)
+
+
+def _load_rubric_file(project_root: Path, path: str) -> str:
+    """从项目根加载 rubric 文件。支持相对路径和 skills/ 快捷路径。"""
+    p = project_root / path
+    if p.exists():
+        return p.read_text(encoding="utf-8").strip()
+    # 尝试 skills/ 前缀
+    p2 = project_root / "skills" / path
+    if p2.exists():
+        return p2.read_text(encoding="utf-8").strip()
+    return ""
+
+
 # ── Rubric 文件加载(rubric 存储在 skills/*.md,运行时加载) ─────────────────
 
 

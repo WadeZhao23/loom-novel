@@ -718,13 +718,25 @@ def run_pipeline(
             gk = _read_files(project_root, gate_reads, _noop)
             if need_prev and prev:
                 gk += "\n\n【上一章章末(看本章有没有接住它的钩子)】\n" + prev[-800:]
-            gres = gates.run_gate(
-                backend, label=label, owner_role=role, critic_system=critic, revise_system=revise,
-                draft=output, knowledge=gk, produces=agent.produces,
-                rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
-                critic_backend=critic_backend,
-                detector=_deslop_detector(project_root, chapter_n) if spec.deslop else None,
-            )
+            multi = getattr(config, "multi_rubric", None)
+            if multi:
+                gres = gates.run_multi_rubric_gate(
+                    backend, label=label, owner_role=role,
+                    default_critic=critic, default_revise=revise,
+                    multi_rubric=multi, project_root=project_root,
+                    draft=output, knowledge=gk, produces=agent.produces,
+                    rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
+                    critic_backend=critic_backend,
+                    detector=_deslop_detector(project_root, chapter_n) if spec.deslop else None,
+                )
+            else:
+                gres = gates.run_gate(
+                    backend, label=label, owner_role=role, critic_system=critic, revise_system=revise,
+                    draft=output, knowledge=gk, produces=agent.produces,
+                    rounds=config.gate_rounds, max_chars=max_chars, progress=progress,
+                    critic_backend=critic_backend,
+                    detector=_deslop_detector(project_root, chapter_n) if spec.deslop else None,
+                )
             output = gres.text
             if gres.remaining:
                 _save_gate_remaining(project_root, chapter_n, label, gres.remaining, progress)
