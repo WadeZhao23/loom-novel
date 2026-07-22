@@ -33,13 +33,14 @@ def _noop(event: dict) -> None:
 
 
 # 质检/去AI味 关卡:挂在某一棒产出之后。挑硬伤→回炉,不打分、不硬阻断(见 ADR-0006)。
-# role -> (人看的名字, 复审提示词, 回炉提示词, 复审要读的设定/方法论, 是否带上一章看钩子)
-_GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
+# role -> (人看的名字, rubric 标签, 复审要读的设定/方法论, 是否带上一章看钩子)
+# rubric 内容从 skills/{rubric_label}rubric.md 和 skills/{rubric_label}revise.md 加载。
+_GATES: dict[str, tuple[str, str, list[str], bool]] = {
     # 世界观/人物 双形态都列上:_read_files 对缺失路径静默跳过(_noop),单文件老书/目录新书各取其一
-    "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
+    "编辑": ("质检", "质检",
             ["skills/评估自检.md", paths.CHARS_REL, paths.CHARS_DIR_REL,
              paths.WORLD_REL, paths.WORLD_DIR_REL, paths.CARD_REL, paths.STATEBOOK_REL], True),
-    "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
+    "润色师": ("去AI味", "去AI味",
              ["skills/去AI味.md", paths.FINGERPRINT_REL], False),
 }
 
@@ -679,7 +680,9 @@ def run_pipeline(
 
         # 质检/去AI味 关卡:独立复审→回炉(挑硬伤、不打分、不硬阻断)。残留写进留痕,继续往下。
         if role in _GATES and config.gate_rounds > 0:
-            label, critic, revise, gate_reads, need_prev = _GATES[role]
+            label, rubric_label, gate_reads, need_prev = _GATES[role]
+            critic = gates.load_critic(project_root, rubric_label)
+            revise = gates.load_revise(project_root, rubric_label)
             gk = _read_files(project_root, gate_reads, _noop)
             if need_prev and prev:
                 gk += "\n\n【上一章章末(看本章有没有接住它的钩子)】\n" + prev[-800:]

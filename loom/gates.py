@@ -124,7 +124,30 @@ def run_gate(
     return GateResult(text, rounds, False, last)
 
 
-# ── 两道内置 gate 的复审/回炉提示词(rubric 仍以 skills/*.md 为准,这里只是「诊断模式」外壳) ──
+# ── Rubric 文件加载(rubric 存储在 skills/*.md,运行时加载) ─────────────────
+
+
+def _read_rubric(project_root: Path, filename: str) -> str:
+    """从 project_root/skills/ 目录读取 rubric 文件内容,不存在返回空串。"""
+    p = project_root / "skills" / filename
+    if p.exists():
+        return p.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def load_critic(project_root: Path, label: str) -> str:
+    """加载复审员(critic)rubric。label='质检' → skills/质检rubric.md"""
+    return _read_rubric(project_root, f"{label}rubric.md")
+
+
+def load_revise(project_root: Path, label: str) -> str:
+    """加载回炉者(revise)rubric。label='质检' → skills/质检revise.md"""
+    return _read_rubric(project_root, f"{label}revise.md")
+
+
+# ── 向后兼容:模块级常量 ─────────────────────────────────────────────
+# 运行时(agents.py)已改为从 skills/ 文件加载 rubric;
+# 以下常量留作既有测试和 evals/ 代码的向后兼容,不再被 agents.py 引用。
 
 CRITIC_质检 = (
     "你是**独立质检员**,只诊断、不改写。依据给你的《评估自检》标准 + 这本书的设定"
