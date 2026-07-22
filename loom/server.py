@@ -28,6 +28,27 @@ from .usecases import ProjectBusyError
 
 WEBUI_DIR = Path(__file__).parent / "webui"
 
+# ── Gate 结果存储(供 /api/write/gate-detail 查询) ──────────────────────────
+_gate_detail_store: dict[str, list] = {}
+_gate_detail_lock = threading.Lock()
+
+
+def _store_gate_detail(root: str, chapter: int, detail_list: list) -> None:
+    """线程安全地存储 gate 结果。"""
+    key = f"{root}:{chapter}"
+    with _gate_detail_lock:
+        if key not in _gate_detail_store:
+            _gate_detail_store[key] = []
+        _gate_detail_store[key].extend(detail_list)
+
+
+def _get_gate_detail(root: str, chapter: int) -> list:
+    """查询已存储的 gate 结果。"""
+    key = f"{root}:{chapter}"
+    with _gate_detail_lock:
+        return list(_gate_detail_store.get(key, []))
+
+
 app = FastAPI(title="Loom")
 
 # 本地服务的两道安全闸(本地无鉴权模型成立的前提):
@@ -660,10 +681,17 @@ def write(b: WriteBody):
     lock = usecases.acquire_lock(root)   # 拿不到 → ProjectBusyError → 409(流式场景锁随 worker)
 
     q: queue.Queue = queue.Queue()
+    root_str = str(root)
+
+    def _gate_aware_put(ev: dict) -> None:
+        """写章进度回调:拦截 gate_issues 事件,积累 issues_detail。"""
+        if ev.get("type") == "gate_issues" and "issues_detail" in ev:
+            _store_gate_detail(root_str, b.chapter, ev["issues_detail"])
+        q.put(ev)
 
     def worker():
         try:
-            usecases.write_chapter(root, b.chapter, q.put, force=b.force, slow=0.25)
+            usecases.write_chapter(root, b.chapter, _gate_aware_put, force=b.force, slow=0.25)
         except LoomBackendError as e:
             q.put(events.error(str(e), code=e.code))   # code 透传,前端据此附可操作提示
         except (ValueError, FileNotFoundError) as e:
@@ -684,6 +712,18 @@ def write(b: WriteBody):
             yield json.dumps(ev, ensure_ascii=False) + "\n"
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+class GateDetailBody(BaseModel):
+    root: str
+    chapter: int
+
+
+@app.post("/api/write/gate-detail")
+def gate_detail_ep(b: GateDetailBody):
+    """返回结构化 Gate 审稿结果:包含每条 Issue 的 category/severity/paragraph_index/original_text/suggestion。"""
+    detail = _get_gate_detail(b.root, b.chapter)
+    return {"ok": True, "gate_detail": detail}
 
 
 # ----------------------------- 书房伙伴(对话) -----------------------------

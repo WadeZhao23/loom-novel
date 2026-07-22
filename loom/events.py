@@ -110,9 +110,16 @@ def gate_pass(label: str, role: str, round: int) -> dict:
 
 
 @_event
-def gate_issues(label: str, role: str, round: int, issues: list) -> dict:
-    """复审挑出硬伤清单(中文键 类别/问题/证据 是既有前端契约,别动)。"""
-    return {"type": "gate_issues", "label": label, "role": role, "round": round, "issues": issues}
+def gate_issues(label: str, role: str, round: int, issues: list, issues_detail: list | None = None) -> dict:
+    """复审挑出硬伤清单(中文键 类别/问题/证据 是既有前端契约,别动)。
+
+    issues_detail(可选):每条 {category, severity, paragraph_index, original_text, suggestion}
+    的增强数据,供前端审稿报告面板使用。
+    """
+    ev = {"type": "gate_issues", "label": label, "role": role, "round": round, "issues": issues}
+    if issues_detail is not None:
+        ev["issues_detail"] = issues_detail
+    return ev
 
 
 @_event

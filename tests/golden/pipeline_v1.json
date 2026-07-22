@@ -174,6 +174,15 @@
        "问题": "连续 6 个四字格密集出现(阈值 5)"
       }
      ],
+     "issues_detail": [
+      {
+       "category": "AI腔-句式",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。",
+       "paragraph_index": null,
+       "severity": 3,
+       "suggestion": "建议:请修正「连续 6 个四字格密集出现(阈值 5)」"
+      }
+     ],
      "label": "去AI味",
      "role": "润色师",
      "round": 1,
@@ -449,6 +458,36 @@
        "问题": "连续 6 个四字格密集出现(阈值 5)"
       }
      ],
+     "issues_detail": [
+      {
+       "category": "跨章·章首雷同",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「本章开头与第1章开头高度雷同(套路化开篇)」"
+      },
+      {
+       "category": "跨章·章末雷同",
+       "original_text": "铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「本章结尾与第1章结尾高度雷同(套路化收尾)」"
+      },
+      {
+       "category": "跨章·近重复句",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「与第1章某句几乎雷同(整句复用)」"
+      },
+      {
+       "category": "AI腔-句式",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。",
+       "paragraph_index": null,
+       "severity": 3,
+       "suggestion": "建议:请修正「连续 6 个四字格密集出现(阈值 5)」"
+      }
+     ],
      "label": "去AI味",
      "role": "润色师",
      "round": 1,
@@ -682,6 +721,36 @@
        "类别": "成语堆砌",
        "证据": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递",
        "问题": "连续 6 个四字格密集出现(阈值 5)"
+      }
+     ],
+     "issues_detail": [
+      {
+       "category": "跨章·章首雷同",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「本章开头与第2章开头高度雷同(套路化开篇)」"
+      },
+      {
+       "category": "跨章·章末雷同",
+       "original_text": "铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「本章结尾与第2章结尾高度雷同(套路化收尾)」"
+      },
+      {
+       "category": "跨章·近重复句",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的",
+       "paragraph_index": null,
+       "severity": 0,
+       "suggestion": "建议:请修正「与第1章某句几乎雷同(整句复用)」"
+      },
+      {
+       "category": "AI腔-句式",
+       "original_text": "寅时三刻,铜锣未响。\n\n沈砚睁开眼,矿灯昏黄。\n\n他记得三年后的那一刀,也记得递刀的人。",
+       "paragraph_index": null,
+       "severity": 3,
+       "suggestion": "建议:请修正「连续 6 个四字格密集出现(阈值 5)」"
       }
      ],
      "label": "去AI味",

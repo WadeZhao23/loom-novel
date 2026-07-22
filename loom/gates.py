@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -40,6 +41,8 @@ class Issue:
     category: str = ""
     severity: int = 0
     paragraph_index: int | None = None
+    original_text: str = ""     # 原文中出问题的段落文本
+    suggestion: str = ""        # 修改建议
 
     def __post_init__(self) -> None:
         if not self.category:
@@ -50,6 +53,10 @@ class Issue:
                     "category": self.category, "severity": self.severity}
         if self.paragraph_index is not None:
             d["paragraph_index"] = self.paragraph_index
+        if self.original_text:
+            d["original_text"] = self.original_text
+        if self.suggestion:
+            d["suggestion"] = self.suggestion
         return d
 
 
@@ -59,6 +66,74 @@ class GateResult:
     rounds: int               # 实际跑了几轮诊断
     resolved: bool            # 末轮是否已无硬伤
     remaining: list[Issue] = field(default_factory=list)  # 跑满仍残留(交回留痕)
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """按双换行或单空行分段。"""
+    if not text:
+        return []
+    paras = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if block:
+            paras.append(block)
+    if not paras:
+        paras = [text.strip()]
+    return paras
+
+
+def _enrich_issues(issues: list[Issue], full_text: str) -> list[dict]:
+    """为每条 Issue 补充 original_text(从原文提取)和 suggestion(从 desc 派生),返回增强字典列表。
+
+    original_text: 如果有 paragraph_index 则提取对应段落文本;否则用 evidence 在原文中定位。
+    suggestion: 从 desc 派生建议措辞(「问题」反转为建议)。
+    """
+    paragraphs = _split_paragraphs(full_text) if full_text else []
+    detail_list: list[dict] = []
+    for iss in issues:
+        original_text = ""
+        if iss.paragraph_index is not None and 0 <= iss.paragraph_index < len(paragraphs):
+            original_text = paragraphs[iss.paragraph_index][:_SEARCH_MAX_CHARS]
+        elif iss.evidence and full_text:
+            idx = full_text.find(iss.evidence)
+            if idx != -1:
+                start = max(0, idx - 20)
+                end = min(len(full_text), idx + len(iss.evidence) + 20)
+                original_text = full_text[start:end].strip()[:200]
+        # suggestion 从 desc 派生:将问题描述反转为建议
+        suggestion = _derive_suggestion(iss.desc)
+        detail_list.append({
+            "category": iss.category,
+            "severity": iss.severity,
+            "paragraph_index": iss.paragraph_index,
+            "original_text": original_text or iss.evidence,
+            "suggestion": suggestion,
+        })
+    return detail_list
+
+
+_SEARCH_MAX_CHARS = 200
+
+
+def _derive_suggestion(desc: str) -> str:
+    """从问题描述派生修改建议。"""
+    # 常见模式:去掉「太」「不」「缺」「没有」等否定/负面词,反转为建设性建议
+    desc = desc.strip().rstrip("。.!！")
+    if not desc:
+        return ""
+    # 针对常见问题样式构造建议
+    replacements = [
+        (r"^\s*违反了(.+?)(,|，|的规则)?$", r"建议遵守\1"),
+        (r"^\s*缺少(.+?)$", r"建议补充\1"),
+        (r"^\s*没有(.+?)$", r"建议加入\1"),
+        (r"^\s*(.+?)不(清楚|明确|一致|连贯|完整|够)(.+?)$", r"\1不够\2\3,建议调整"),
+        (r"^\s*(.+?)太(过)?(.+?)$", r"建议适当减弱\3"),
+    ]
+    for pat, repl in replacements:
+        if re.search(pat, desc):
+            return re.sub(pat, repl, desc)
+    # 默认:以「建议」开头包装
+    return f"建议:请修正「{desc}」"
 
 
 def _merge_issues(primary: list[Issue], secondary: list[Issue]) -> list[Issue]:
@@ -119,7 +194,9 @@ def run_gate(
             return GateResult(text, r, True, [])
 
         last = issues
-        progress(events.gate_issues(label, owner_role, r, [i.as_dict() for i in issues]))
+        detail = _enrich_issues(issues, text)
+        progress(events.gate_issues(label, owner_role, r, [i.as_dict() for i in issues],
+                                    issues_detail=detail))
 
         if r == rounds:
             break  # 最后一轮只诊断、不再回炉

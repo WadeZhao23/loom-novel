@@ -790,6 +790,54 @@ body.focus-mode .focus-exit { display: block; }
 .run-stream:empty { display: none; }
 .run-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
 
+/* ---------- 审稿报告(Gate)面板 ---------- */
+.gate-report { margin-top: var(--space-4); border-top: 1px solid var(--line); padding-top: var(--space-3); }
+.gate-report h4 { font-family: var(--font-brand); font-size: var(--fs-h2); font-weight: 400; margin: 0 0 var(--space-3); color: var(--text); }
+.gate-detail-list { display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* 每条 Issue:折叠容器 */
+.gate-item { border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden;
+  transition: border-color var(--dur-3); }
+.gate-item summary { display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); cursor: pointer; user-select: none;
+  background: var(--surface); font-size: var(--fs-sm); }
+.gate-item summary::-webkit-details-marker { display: none; }
+.gate-item summary::before { content: "▶"; font-size: 10px; color: var(--text-mute);
+  transition: transform var(--dur-3); margin-right: var(--space-1); }
+.gate-item[open] summary::before { transform: rotate(90deg); }
+
+.gate-label { color: var(--text-mute); font-size: var(--fs-xs); min-width: 24px; }
+.gate-tag { display: inline-block; padding: 2px 7px; border-radius: var(--radius-sm);
+  font-size: var(--fs-xs); font-weight: 500; background: var(--accent-tint); color: var(--accent); }
+
+/* 严重度颜色 */
+.gate-item.severity-fatal { border-left: 3px solid var(--danger); }
+.gate-item.severity-serious { border-left: 3px solid var(--seal); }
+.gate-item.severity-medium { border-left: 3px solid var(--warning); }
+.gate-item.severity-low { border-left: 3px solid var(--info); }
+.gate-item.severity-trivial { border-left: 1px solid var(--line); }
+
+/* 严重度标签 */
+.gate-severity { display: inline-block; padding: 1px 5px; border-radius: var(--radius-xs);
+  font-size: 10px; font-weight: 500; margin-left: auto; }
+.gate-item.severity-fatal .gate-severity { background: var(--danger-tint); color: var(--danger); }
+.gate-item.severity-serious .gate-severity { background: var(--seal-tint); color: var(--seal-ink); }
+.gate-item.severity-medium .gate-severity { background: var(--warning-tint); color: var(--warning); }
+.gate-item.severity-low .gate-severity { background: var(--info-tint); color: var(--info); }
+.gate-item.severity-trivial .gate-severity { display: none; }
+
+.gate-item-body { padding: var(--space-2) var(--space-3) var(--space-3);
+  background: var(--bg-sunken); font-size: var(--fs-sm); line-height: 1.7;
+  display: flex; flex-direction: column; gap: var(--space-2); }
+.gate-field-label { color: var(--text-mute); font-size: var(--fs-xs); min-width: 44px;
+  display: inline-block; font-weight: 500; }
+.gate-text { color: var(--text-soft); word-break: break-all; }
+.gate-original { background: var(--surface); padding: var(--space-2); border-radius: var(--radius-sm);
+  border-left: 2px solid var(--danger-tint); }
+.gate-suggestion { background: var(--surface); padding: var(--space-2); border-radius: var(--radius-sm);
+  border-left: 2px solid var(--success-tint); }
+.gate-para { color: var(--text-mute); font-size: var(--fs-xs); }
+
 /* learn 变化:金=更像你 / 删除=拆掉的线头 */
 .learn-changes { margin-top: var(--space-3); max-height: 300px; overflow-y: auto;
   font-size: var(--fs-sm); font-family: var(--font-read); line-height: 1.7; }

@@ -15,6 +15,7 @@ let _navYield = false;   // 居中态让位(会话级,换书清零;不落 localS
 let _weaving = false;    // 织章中(领航员隐身)
 let _navPopOpen = false; // 球浮层开合(重画后按此恢复)
 let _navAutoAsked = new Set(); // 居中态自动出题去重:每段至多自动跑一次 LLM,防降级卡无限重拉
+let _gateDetail = [];    // 本次写章累积的 gate 审稿明细(issues_detail)
 
 // ---------- 书房伙伴对话(P3,与卡片机并存)----------
 let PARTNER = null;            // 伙伴对话事件缓存({events:[...]}),对应当前书;null=尚未加载
@@ -2323,12 +2324,14 @@ async function writeChapter(n, force) {
   }
   _wroteChapter = null;
   _lastDebugReport = null;
+  _gateDetail = [];
   _runMinimized = false; _streamChars = 0; _stripDone = null; _stripErr = null;
   hideStrip(); $("run-strip").classList.remove("err");
   $("run-title").textContent = `正在写第 ${n} 章…`;
   $("agent-pills").innerHTML = "";
   $("run-log").innerHTML = "";
   $("run-stream").textContent = "";
+  $("gate-report").classList.add("hidden");
   $("run-close").classList.add("hidden");
   $("run-force").classList.add("hidden");
   $("run-overlay").classList.remove("hidden");
@@ -2416,6 +2419,9 @@ function handleEvent(ev) {
     logRun(`发现 ${ev.issues.length} 处硬伤:`);
     ev.issues.forEach(it => logRun(
       `  · ${it["类别"]}:${it["问题"]}` + (it["证据"] ? `(证据:「${it["证据"]}」)` : "")));
+    if (ev.issues_detail) {
+      ev.issues_detail.forEach(d => _gateDetail.push(d));
+    }
   } else if (ev.type === "gate_revise") {
     logRun(`回炉重写中 …`, null, "redo");
     $("run-stream").textContent = "";  // 回炉稿重新流式
@@ -2442,6 +2448,9 @@ function handleEvent(ev) {
     _wroteChapter = ev.chapter;
     logRun(`第${ev.chapter}章终稿 ${ev.chars} 字`, "ok", "check");
     $("run-title").textContent = `第 ${ev.chapter} 章写完`;
+    if (_gateDetail.length) {
+      renderGateReport(ev.chapter);
+    }
     if (_lastDebugReport && _lastDebugReport.issues.length) {
       const r = _lastDebugReport; _lastDebugReport = null;
       setTimeout(() => renderDebugReport(r.chapter, r.issues), 400);   // 写完稍候弹报告,不抢完成态
@@ -2449,6 +2458,7 @@ function handleEvent(ev) {
   } else if (ev.type === "error") {
     logRun(ev.message + codeHint(ev.code), "err", "cross");
     _lastDebugReport = null;
+    _gateDetail = [];
   }
   updateStrip(ev);
 }
@@ -2868,6 +2878,73 @@ async function debugChapter() {
     renderDebugReport(CUR.chapter, d.issues || []);
   } catch (e) { toast(e.message, true); }
 }
+// ---------- 审稿报告面板(写章后在 run-overlay 内展示) ----------
+function severityColor(s) {
+  if (s >= 5) return "severity-fatal";
+  if (s >= 4) return "severity-serious";
+  if (s >= 3) return "severity-medium";
+  if (s >= 2) return "severity-low";
+  return "severity-trivial";
+}
+function severityLabel(s) {
+  if (s >= 5) return "致命";
+  if (s >= 4) return "严重";
+  if (s >= 3) return "中等";
+  if (s >= 2) return "轻微";
+  return "提示";
+}
+
+function renderGateReport(chapter) {
+  const panel = $("gate-report");
+  const list = $("gate-detail-list");
+  list.innerHTML = "";
+  if (!_gateDetail.length) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  _gateDetail.forEach((d, i) => {
+    const item = document.createElement("details");
+    item.className = "gate-item " + severityColor(d.severity || 0);
+    const summary = document.createElement("summary");
+    const tag = document.createElement("span");
+    tag.className = "gate-tag";
+    tag.textContent = d.category || "硬伤";
+    const sev = document.createElement("span");
+    sev.className = "gate-severity";
+    sev.textContent = severityLabel(d.severity || 0);
+    const label = document.createElement("span");
+    label.className = "gate-label";
+    label.textContent = `#${i+1}`;
+    summary.appendChild(label);
+    summary.appendChild(tag);
+    summary.appendChild(sev);
+    item.appendChild(summary);
+    const body = document.createElement("div");
+    body.className = "gate-item-body";
+    if (d.original_text) {
+      const orig = document.createElement("div");
+      orig.className = "gate-original";
+      orig.innerHTML = `<span class="gate-field-label">原文:</span><span class="gate-text">${escHtml(d.original_text)}</span>`;
+      body.appendChild(orig);
+    }
+    if (d.suggestion) {
+      const sugg = document.createElement("div");
+      sugg.className = "gate-suggestion";
+      sugg.innerHTML = `<span class="gate-field-label">建议:</span><span class="gate-text">${escHtml(d.suggestion)}</span>`;
+      body.appendChild(sugg);
+    }
+    if (d.paragraph_index != null) {
+      const para = document.createElement("div");
+      para.className = "gate-para";
+      para.textContent = `段落索引:第 ${d.paragraph_index + 1} 段`;
+      body.appendChild(para);
+    }
+    item.appendChild(body);
+    list.appendChild(item);
+  });
+}
+
 function renderDebugReport(chapter, issues) {
   $("debug-title").textContent = `除虫报告 · 第${chapter}章` + (issues.length ? `(${issues.length} 条)` : "");
   const box = $("debug-body"); box.innerHTML = "";
