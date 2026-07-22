@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,6 +30,7 @@ class Config:
     foreshadow_distance: int = 8       # 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写第N章时进留痕提醒(纯提示、不回炉、不阻断);0=关
     continuity_scan: bool = True       # 每章终稿后自动除虫(跨章连续性,非阻断附赠);False=只手动
     custom_rubric: str = ""             # 可选:用户自定义 rubric 文件路径(相对项目根);配了则替代默认 rubric
+    custom_gates: dict[str, str] = field(default_factory=dict)  # [gate.custom] 段:自定义 Gate 名称→ rubric 文件路径
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -64,6 +65,7 @@ def load_config(project_root: Path) -> Config:
     backend = data.get("backend", {})
     novel = data.get("novel", {})
     gate = data.get("gate", {})
+    custom_gates = dict(gate.get("custom", {}))
     return Config(
         provider=backend.get("provider", "deepseek"),
         model=backend.get("model", "deepseek-v4-pro"),
@@ -76,6 +78,7 @@ def load_config(project_root: Path) -> Config:
         foreshadow_distance=int(gate.get("伏笔提醒章距", gate.get("foreshadow_distance", 8))),
         continuity_scan=bool(gate.get("除虫", gate.get("continuity_scan", True))),
         custom_rubric=gate.get("custom_rubric", ""),
+        custom_gates=custom_gates,
     )
 
 

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from . import events
@@ -175,7 +176,7 @@ def load_revise(project_root: Path, label: str, *, custom_rubric: str = "") -> s
     return _read_rubric(project_root, f"{label}revise.md")
 
 
-# ── 向后兼容:模块级常量 ─────────────────────────────────────────────
+
 # 运行时(agents.py)已改为从 skills/ 文件加载 rubric;
 # 以下常量留作既有测试和 evals/ 代码的向后兼容,不再被 agents.py 引用。
 
@@ -211,3 +212,66 @@ REVISE_去AI味 = (
     "情绪点名改画面动作。两条护栏:**保意**(不改剧情/人物/事实,只改腔调)、**保留写作指纹**"
     "(体现作者个人特征的不规整/口头禅别擦平)。篇幅保持原稿量级,绝不扩写。只输出整章正文本身,不要解释。"
 )
+
+
+# ── 自定义 Gate 插件系统(M1) ──────────────────────────────────────────
+# 用户可以在 loom.toml 的 [gate.custom] 段注册自定义 Gate,名称→rubric 文件路径
+
+CUSTOM_GATES: dict[str, Callable[..., str]] = {}
+"""自定义 Gate 注册表。name → Callable(project_root, rubric_path) -> str(完整提示词)。
+
+默认实现从文件直接读取 rubric 内容作为 critc 系统提示词。
+可替换以实现更复杂的提示词组合。
+"""
+
+
+def _load_custom_rubric(project_root: Path, rubric_path: str) -> str:
+    """加载自定义 Gate 的 rubric 文件。支持相对路径(相对书根)和绝对路径。"""
+    p = Path(rubric_path)
+    if not p.is_absolute():
+        p = project_root / rubric_path
+    if p.exists():
+        return p.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def run_custom_gates(
+    backend: Backend,
+    *,
+    draft: str,
+    custom_gates: dict[str, str],  # name → rubric_path
+    project_root: Path,
+    progress: Progress = _noop,
+    critic_backend: Backend | None = None,
+) -> tuple[str, list[Issue]]:
+    """遍历自定义 Gate,依次执行审查。返回 (终稿, 残留硬伤列表)。
+
+    每个自定义 Gate 用 rubric 文件内容作为 critc 提示词,走 run_gate
+    的诊断流程(rounds=1,只挑硬伤不自动回炉),结果融入 Issue 列表。
+    rubric 文件不存在时跳过(日志+不阻断)。
+    """
+    text = draft
+    all_remaining: list[Issue] = []
+    for name, rubric_path in custom_gates.items():
+        rubric = _load_custom_rubric(project_root, rubric_path)
+        if not rubric:
+            progress(events.warn(f"自定义 Gate「{name}」rubric 文件不存在:{rubric_path},跳过"))
+            continue
+        gres = run_gate(
+            backend,
+            label=name,
+            owner_role="自定义关卡",
+            critic_system=rubric,
+            revise_system="",  # 自定义 Gate rounds=1,不进回炉
+            draft=text,
+            knowledge=rubric,
+            produces="终稿",
+            rounds=1,  # 诊断模式:只挑硬伤、不留痕
+            max_chars=800,
+            progress=progress,
+            critic_backend=critic_backend,
+        )
+        text = gres.text
+        if gres.remaining:
+            all_remaining.extend(gres.remaining)
+    return text, all_remaining

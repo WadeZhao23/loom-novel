@@ -714,6 +714,22 @@ def run_pipeline(
         if slow:
             time.sleep(slow)
 
+    # 自定义 Gate(M1):标准 Gate(编辑质检+润色师去AI味)跑完后执行用户自定义的审查关卡
+    if getattr(config, "custom_gates", None):
+        custom_text, custom_remaining = gates.run_custom_gates(
+            backend,
+            draft=workspace[-1][1],
+            custom_gates=config.custom_gates,
+            project_root=project_root,
+            progress=progress,
+            critic_backend=critic_backend,
+        )
+        if custom_remaining:
+            total_remaining = len(custom_remaining)
+            # 将所有自定义 Gate 的残留合并写入审稿留痕
+            _save_gate_remaining(project_root, chapter_n, "自定义Gate", custom_remaining, progress,
+                                 header=f"\n## 自定义 Gate 残留(共{total_remaining}条,未阻断,供你定夺)")
+
     final_body = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
     # 终稿非空硬闸:别把空/残废正文写进 正文+.原稿(空快照会让下次 learn 学到空、二次污染指纹)
     reasons = validate_output(final_body, chapter_profile(config.chapter_chars))
