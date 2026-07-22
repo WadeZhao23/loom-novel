@@ -68,6 +68,7 @@ def parse_verdict(raw: str) -> list:
     """解析复审员输出 → 硬伤清单(list[gates.Issue])。无硬伤(回「通过」等)返回空列表。
 
     宽容解析:每条形如 `- 类别 | 问题 | 证据:"…"`;只认以 - 开头的行。
+    可选扩展字段(管道后): `S:3`(严重度1-5), `P:2`(段落序号)。
     """
     from .gates import Issue   # 延迟 import:gates 模块级 import 本模块,避免环
     issues: list = []
@@ -82,9 +83,28 @@ def parse_verdict(raw: str) -> list:
         kind = parts[0] if parts else "硬伤"
         desc = parts[1] if len(parts) > 1 else (parts[0] if parts else body)
         ev = ""
+        severity = 0
+        paragraph_index: int | None = None
         if len(parts) > 2:
             ev = parts[2].split("证据:", 1)[-1].split("证据：", 1)[-1].strip().strip('"“”')
-        issues.append(Issue(kind=kind, desc=desc, evidence=ev))
+        # 解析可选扩展字段: S:<int>(严重度), P:<int>(段落序号)
+        for p in parts[3:]:
+            p = p.strip()
+            if p.startswith(("S:", "S：")):
+                try:
+                    sev = int(p[2:].strip())
+                    if 1 <= sev <= 5:
+                        severity = sev
+                except (ValueError, IndexError):
+                    pass
+            elif p.startswith(("P:", "P：")):
+                try:
+                    paragraph_index = int(p[2:].strip())
+                except (ValueError, IndexError):
+                    pass
+        issues.append(Issue(kind=kind, desc=desc, evidence=ev,
+                            category=kind, severity=severity,
+                            paragraph_index=paragraph_index))
     return issues
 
 

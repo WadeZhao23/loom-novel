@@ -27,13 +27,29 @@ def _noop(event: dict) -> None:
 
 @dataclass
 class Issue:
-    """一条硬伤:类别 + 一句话问题 + 原文证据短引。"""
+    """一条硬伤:类别 + 一句话问题 + 原文证据短引 + 结构化元数据。
+
+    category: 问题分类(与 kind 同义,保留以支持分层归类,默认取 kind 值)
+    severity: 严重度 1-5(1=轻微,5=致命),0=未标注
+    paragraph_index: 问题所在段落序号(None=未标注)
+    """
     kind: str
     desc: str
     evidence: str = ""
+    category: str = ""
+    severity: int = 0
+    paragraph_index: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.category:
+            self.category = self.kind
 
     def as_dict(self) -> dict:
-        return {"类别": self.kind, "问题": self.desc, "证据": self.evidence}
+        d: dict = {"类别": self.kind, "问题": self.desc, "证据": self.evidence,
+                    "category": self.category, "severity": self.severity}
+        if self.paragraph_index is not None:
+            d["paragraph_index"] = self.paragraph_index
+        return d
 
 
 @dataclass
