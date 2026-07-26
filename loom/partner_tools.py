@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import journey, paths, slots
+from . import a2a, journey, paths, slots
 from .fsutil import safe_join
 
 _READ_MAX_CHARS = 3000   # 单条工具结果预算(spec §4 常量表:单条工具结果 ≤3k 字)
@@ -254,6 +254,40 @@ def _handle_search_brain(root: Path, query: str) -> str:
     return "\n---\n".join(results)
 
 
+# ── A2A 问外部(L2 试点):领航员代作者向已注册的外部 agent 发 Task ──────────
+
+_A2A_MAX_CHARS = 3000   # 单条答复预算(与 _READ_MAX_CHARS 同口径,超了截断提示)
+
+
+def _handle_wanwai(root: Path, 对象: str = "", 任务: str = "", **_ignored) -> str:
+    """向外部 agent 发 A2A Task 并取回答复。「对象」留空=列出已注册清单(供模型先挑人)。
+
+    mutates=False:这是「查资料」读类动作,外部 agent 只做问答、不落盘进书;
+    答复封顶 _A2A_MAX_CHARS,与读文件同预算纪律。"""
+    agents = a2a.list_agents(root)
+    name = str(对象 or "").strip()
+    if not name:
+        if not agents:
+            return ("(还没注册外部 agent。注册法:书根 agents/外部/ 下新建 <名字>.md,"
+                    "frontmatter 写「端点: http(s)://…」「说明: 它是干什么的」,"
+                    "如 agents/外部/查资料.md;注册后我就能替你向它发任务。)")
+        lines = ["已注册的外部 agent(带「对象」「任务」再调本工具发起询问):"]
+        for a in agents:
+            lines.append(f"- {a.name}:{a.desc or '(无说明)'}({a.endpoint})")
+        return "\n".join(lines)
+    task = str(任务 or "").strip()
+    if not task:
+        raise ValueError("问外部缺少「任务」参数(要外部 agent 查/做什么,一句话说清)。")
+    agent = next((a for a in agents if a.name == name), None)
+    if agent is None:
+        avail = "、".join(a.name for a in agents) or "(无)"
+        raise ValueError(f"外部 agent 不存在:「{name}」。已注册:{avail}。先留空「对象」调本工具看清单,从中挑一个,不要自己造名字。")
+    text = a2a.send_task(agent, task)
+    if len(text) > _A2A_MAX_CHARS:
+        text = text[:_A2A_MAX_CHARS] + f"\n\n…(外部答复已截断,超 {_A2A_MAX_CHARS} 字预算。)"
+    return f"外部 agent「{name}」答复:\n{text}"
+
+
 REGISTRY: dict[str, ToolSpec] = {
     "读文件": ToolSpec(
         name="读文件", params=("路径",),
@@ -280,6 +314,12 @@ REGISTRY: dict[str, ToolSpec] = {
         name="搜设定", params=("query",),
         desc="全文搜索外置大脑设定文件中的关键词(大小写不敏感),包括世界观、人物卡、卡章纲、违禁词等;返回匹配段落及其上下文(前后各2行),单条≤200字,最多10条。",
         handler=_handle_search_brain, mutates=False,
+    ),
+    "问外部": ToolSpec(
+        name="问外部", params=("对象", "任务"),
+        desc="向已注册的外部 agent 发 A2A 任务并取回答复(如查资料 agent 查历史事件/参考作品)。"
+              "「对象」=agents/外部/ 下注册的名字,留空先列出已注册清单;「任务」=要问的事,一句话说清。",
+        handler=_handle_wanwai, mutates=False,
     ),
 }
 
