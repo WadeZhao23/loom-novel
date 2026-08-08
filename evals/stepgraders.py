@@ -14,7 +14,13 @@ from __future__ import annotations
 
 import re
 
-from loom.evalapi import STEP_SHORT_BUDGETS, detect_aitell, split_edit_note
+from loom.evalapi import (
+    STEP_SHORT_BUDGETS,
+    detect_aitell,
+    parse_scene_budgets,
+    scene_range,
+    split_edit_note,
+)
 
 from .graders import GraderResult
 
@@ -68,8 +74,50 @@ def grade_setter(anchor: str | None, hardfact_terms: list[str]) -> list[GraderRe
     return [term_result, len_result]
 
 
-# 大纲师 / 编辑 的体检项在 Task 7 加(它们依赖 evalapi 的 parse_scene_budgets /
-# scene_range / split_edit_note 接缝,单独一轮红-绿)。
+# ─────────────────────────────── 大纲师 ───────────────────────────────
+
+def grade_outliner(outline: str | None, chapter_target: int,
+                   must_include: list[str]) -> list[GraderResult]:
+    """大纲师产出「本章场景骨头(分镜细纲)」。
+
+    体检三项(全部复用产品自己的判据,不另立一套——重写必漂):
+    - 必含要素:case 的 must_include 有没有在细纲这层就丢掉(丢在这里 = 写手根本没机会写)。
+    - 场次数:落在 scene_range(chapter_target) 声明的区间内(evalapi 接缝,与喂 prompt
+      的 _scene_budget 同源)。
+    - 篇幅预算标注:每场标了「约X字」且各场合计与章目标偏差 ≤30%(与产品
+      _check_scene_budget 的 0.3 阈值同口径)。
+    """
+    if outline is None:
+        return [skipped("大纲师", "必含要素"), skipped("大纲师", "场次数"),
+                skipped("大纲师", "篇幅预算")]
+
+    must = must_include or []
+    missing = [k for k in must if k not in outline]
+    total = len(must)
+    inc_score = 1.0 if total == 0 else max(0.0, 1.0 - len(missing) / total)
+    inc = GraderResult("大纲师·必含要素", round(inc_score, 3), not missing, weight=0.30,
+                       detail=f"必含 {total} 项,细纲缺 {len(missing)} 项",
+                       evidence=[f"细纲里没有:「{m}」" for m in missing])
+
+    budgets = parse_scene_budgets(outline)
+    lo, hi = scene_range(chapter_target)
+    n_scenes = len(budgets)
+    in_range = lo <= n_scenes <= hi
+    cnt = GraderResult("大纲师·场次数", 1.0 if in_range else 0.0, in_range, weight=0.20,
+                       detail=f"{n_scenes} 场(目标 {chapter_target} 字 → 应 {lo}-{hi} 场)")
+
+    total_budget = sum(budgets)
+    if not budgets:
+        bud = GraderResult("大纲师·篇幅预算", 0.0, False, weight=0.15,
+                           detail="各场都没标「约X字」,写手篇幅无锚")
+    else:
+        drift = abs(total_budget - chapter_target)
+        ok = chapter_target <= 0 or drift <= chapter_target * 0.3
+        bud = GraderResult("大纲师·篇幅预算",
+                           round(max(0.0, 1.0 - drift / max(1, chapter_target)), 3), ok,
+                           weight=0.15,
+                           detail=f"各场合计约 {total_budget} 字(章目标 {chapter_target},容差 30%)")
+    return [inc, cnt, bud]
 
 
 # ──────────────────────────────── 写手 ────────────────────────────────
@@ -109,6 +157,47 @@ def grade_writer(draft: str | None, target_chars: int,
                       detail=f"命中 {len(hits)} 处(初稿基线,供润色师那棒算降幅)",
                       evidence=[h.evidence for h in hits])
     return [length, inc, ai]
+
+
+# ──────────────────────────────── 编辑 ────────────────────────────────
+
+def grade_editor(edited: str | None, draft: str | None,
+                 must_include: list[str]) -> list[GraderResult]:
+    """编辑产出「本章改稿」+ 成对围栏的《本章改动留痕》。
+
+    体检三项(全是 改稿 vs 初稿 的差分):
+    - 留痕围栏:<LOOM:EDIT-NOTE> 与 </LOOM:EDIT-NOTE> 必须成对(未闭合会让留痕混进正文)。
+    - 必含要素保持:**初稿有、改稿没了**才算编辑改丢的。初稿本来就缺的不赖它——
+      归因必须指对棒,否则闭环会把作者引到错的地方。
+    - 篇幅变化:编辑被明令「篇幅保持原稿量级、绝不扩写」,超出 ±30% 就是没守。
+      算篇幅前先剥留痕围栏,否则留痕越长越显得「扩写」。
+    """
+    if edited is None or draft is None:
+        return [skipped("编辑", "留痕围栏"), skipped("编辑", "必含要素保持"),
+                skipped("编辑", "篇幅变化")]
+
+    body, note = split_edit_note(edited)
+    unclosed = "围栏未闭合" in note
+    fence_ok = bool(note.strip()) and not unclosed
+    fence = GraderResult("编辑·留痕围栏", 1.0 if fence_ok else 0.0, fence_ok, weight=0.15,
+                         detail=("留痕围栏成对" if fence_ok
+                                 else ("围栏未闭合" if unclosed else "没有《本章改动留痕》")))
+
+    must = must_include or []
+    dropped = [k for k in must if k in draft and k not in body]
+    keep = GraderResult("编辑·必含要素保持",
+                        round(1.0 if not must else max(0.0, 1.0 - len(dropped) / len(must)), 3),
+                        not dropped, weight=0.35,
+                        detail=f"初稿有而改稿没了的必含项:{len(dropped)} 个",
+                        evidence=[f"编辑把「{k}」改丢了" for k in dropped])
+
+    n_draft, n_edit = _chars(draft), _chars(body)
+    ratio = n_edit / max(1, n_draft)
+    size_ok = 0.7 <= ratio <= 1.3
+    size = GraderResult("编辑·篇幅变化", round(min(1.0, 1.0 - abs(1.0 - ratio)), 3), size_ok,
+                        weight=0.10,
+                        detail=f"初稿 {n_draft} → 改稿 {n_edit} 字(×{ratio:.2f},应在 0.7~1.3)")
+    return [fence, keep, size]
 
 
 # ─────────────────────────────── 润色师 ───────────────────────────────
