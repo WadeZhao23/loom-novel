@@ -394,8 +394,16 @@ def compare_batches(batch_a: Path, batch_b: Path) -> dict:
                 improved += 1
             else:
                 regressed += 1
-        items_out.append({"step": role, "item": name, "before": da, "after": db,
-                          "delta": delta, "verdict": verdict})
+        items_out.append({
+            "step": role, "item": name, "before": da, "after": db,
+            "delta": delta, "verdict": verdict,
+            # 有效/总次数直接摊平进 item——下游读者(含 CLI 打印)不该还要挖 before/after
+            # 才看得出这条判据是几次跑撑出来的。任一边没数据(a∪b 独有项)则为 None。
+            "n_valid_before": da.get("n_valid") if da else None,
+            "n_total_before": da.get("n_total") if da else None,
+            "n_valid_after": db.get("n_valid") if db else None,
+            "n_total_after": db.get("n_total") if db else None,
+        })
     return {"case_id": sa.get("case_id"), "items": items_out,
             "n_improved": improved, "n_regressed": regressed}
 
@@ -429,7 +437,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"── {res['case_id']}:{a.name} → {b.name} ──")
         for it in res["items"]:
             d = "—" if it["delta"] is None else f"{it['delta']:+.4f}"
-            print(f"  {it['verdict']:<16} {it['step']}·{it['item']:<24} Δ中位数 {d}")
+            # 样本数同屏可见:1-of-N 的零宽区间和 N-of-N 的实区间不能打印得一模一样,
+            # 否则「区间重叠即分不出」这条纪律会被「区间本身就是假的」绕过去。
+            nb = "?" if it["n_valid_before"] is None else f"{it['n_valid_before']}/{it['n_total_before']}"
+            na = "?" if it["n_valid_after"] is None else f"{it['n_valid_after']}/{it['n_total_after']}"
+            print(f"  {it['verdict']:<16} {it['step']}·{it['item']:<24} "
+                  f"Δ中位数 {d}  n={nb} → {na}")
         print(f"\n改进 {res['n_improved']} 项 · 回归 {res['n_regressed']} 项 · "
               f"其余分不出(区间重叠或无数据)")
         return 1 if res["n_regressed"] else 0

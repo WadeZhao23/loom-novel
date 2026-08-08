@@ -423,6 +423,27 @@ def test_cli_compare_requires_two_batches(tmp_path):
     assert main(["--compare", str(tmp_path / "nope")]) == 2
 
 
+def test_compare_surfaces_sample_counts_for_thin_batches(tmp_path, capsys):
+    """n_valid==1 时 distribution() 给出零宽区间(lo==hi==median),两个不同的零宽
+    区间几乎必然不重叠——于是判据据实吐出「改进」,但那只是 1 次跑 vs 1 次跑的结果。
+    读者必须能从输出里看出这是薄比对,不能让 1-of-N 和 N-of-N 打印得一模一样。
+    """
+    from evals.generate import compare_batches, main
+    a = _fake_batch(tmp_path, "a", median=0.2, lo=0.2, hi=0.2, n_valid=1)
+    b = _fake_batch(tmp_path, "b", median=0.8, lo=0.8, hi=0.8, n_valid=1)
+
+    res = compare_batches(a, b)
+    item = res["items"][0]
+    assert item["verdict"] == "改进"  # 零宽区间不重叠,判据本身没错——问题是样本数不可见
+    assert item["n_valid_before"] == 1 and item["n_total_before"] == 3
+    assert item["n_valid_after"] == 1 and item["n_total_after"] == 3
+
+    code = main(["--compare", str(a), str(b)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "1/3" in out, f"CLI 打印里看不到样本数,thin 比对和 solid 比对长得一样:{out!r}"
+
+
 def test_cli_repeat_flag_returns_2_when_all_infra(tmp_path, monkeypatch):
     """全 infra → 退出码 2(沿用三态),不得当成质量结论。"""
     monkeypatch.setenv("LOOM_DEMO", "1")
