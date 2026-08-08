@@ -148,6 +148,43 @@ def test_manifest_hashes_stable_and_sensitive(tmp_path):
     assert m3["dataset_hash"] != m1["dataset_hash"]
 
 
+# 8 调脚本(无 overlay 细纲 → 大纲师真跑):设定/大纲/写手/编辑/质检"通过"/润色/去AI味"通过"/标题。
+_OUTLINE = ("场景一 · 当夜二更 · 废矿深处 · 沈砚独自一人 · 醒来验伤、确认重生 · 约80字\n"
+            "场景二 · 同夜稍后 · 矿道岔口 · 沈砚与巡矿人 · 矿灯下照面、藏起异状 · 约70字\n"
+            "场景三 · 拂晓前 · 矿口 · 沈砚 · 听见追兵、倒计时钩 · 约50字\n"
+            "爆发点落在场景三。章首接上一章矿口火把。章末钩类型:〔危机迫近〕。")
+_GEN_RUN_8 = [_SETTER, _OUTLINE, _DRAFT, _EDITED, "通过", _POLISHED, "通过", "矿灯"]
+
+
+def test_generate_one_collects_five_step_outputs(tmp_path):
+    """五棒产物必须落进 run_dir/steps/;被 WYSIWYG 旁路的大纲师记 skipped(不是 0 分)。"""
+    from evals.generate import generate_one
+    case_dir = _write_gen_case(tmp_path)          # with_outline=True → 大纲师被旁路
+    run_dir = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    steps_dir = run_dir / "steps"
+    assert steps_dir.is_dir()
+    assert (steps_dir / "设定师.md").read_text(encoding="utf-8") == _SETTER
+    assert (steps_dir / "写手.md").read_text(encoding="utf-8") == _DRAFT
+    assert (steps_dir / "润色师.md").is_file()
+    # 大纲师被 overlay 细纲旁路 → 没有产物文件,且 steps.json 明确记 skipped
+    assert not (steps_dir / "大纲师.md").exists()
+    meta = json.loads((run_dir / "steps.json").read_text(encoding="utf-8"))
+    assert meta["大纲师"] == "skipped", "旁路≠失败,必须记 skipped 不记 0 分"
+    assert meta["设定师"] == "collected"
+
+
+def test_collect_steps_without_outline_overlay_collects_outliner(tmp_path):
+    """无 overlay 细纲时大纲师真跑,产物必须被收到。"""
+    from evals.generate import generate_one
+    case_dir = _write_gen_case(tmp_path, with_outline=False)
+    run_dir = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_8)),
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    assert (run_dir / "steps" / "大纲师.md").read_text(encoding="utf-8") == _OUTLINE
+    meta = json.loads((run_dir / "steps.json").read_text(encoding="utf-8"))
+    assert meta["大纲师"] == "collected"
+
+
 def test_cli_unknown_case_is_infra_2(tmp_path):
     (tmp_path / "gc").mkdir()
     assert main(["--case", "不存在", "--cases-dir", str(tmp_path / "gc"),

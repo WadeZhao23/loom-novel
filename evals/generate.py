@@ -21,8 +21,11 @@ import time
 from pathlib import Path
 
 from loom.evalapi import (
+    PIPELINE,
     get_backend,
     load_config,
+    load_ledger,
+    outline_path,
     save_config,
     scaffold_init,
     run_pipeline,
@@ -63,6 +66,46 @@ def prepare_project(case_dir: Path, case: dict, workdir: Path) -> Path:
     cfg.continuity_scan = False   # 附赠扫描是额外模型调用;评测口径固定为关(与 golden 同口径)
     save_config(project, cfg)
     return project
+
+
+def collect_steps(project: Path, chapter_n: int, run_dir: Path,
+                  *, bypassed: frozenset[str] = frozenset()) -> dict[str, str | None]:
+    """把 ledger 里五棒的完整产出收进 run_dir/steps/,并落一份 steps.json 记状态。
+
+    run_pipeline 对 PIPELINE 里每个 role 都调了 ledger.record_step(role, output, …),
+    output 就是该棒产物原文——机制本来就在,此前只是跑完没人收。
+
+    某棒缺席/该被当缺席看待有两种正当原因:
+    ①WYSIWYG 旁路——细纲文件本来就存在,大纲师不调模型,直接读文件当产出;
+      但 run_pipeline 对旁路棒**同样**无条件 ledger.record_step(agents.py:714,
+      不看是走了模型分支还是 WYSIWYG 分支),实测验证过:ledger 里照样有大纲师的
+      条目、output 就是那份沿用的细纲。所以"ledger 缺席"本身并不能识别旁路——
+      真正的信号是"这一跑开始前细纲文件是否已经存在",调用方(generate_one)在
+      跑 pipeline 之前探测好,通过 bypassed 参数告诉这里:这些角色即使 ledger
+      有条目也不算"这一跑收集到的产出",照样记 skipped。
+    ②断点续跑跳过——resume=True 时半途中断、未处理到的角色,ledger 里是真缺席,
+      走下面的兜底分支。
+    两种都记 "skipped",**绝不记 0 分**——旁路/跳过不是失败。
+    """
+    steps_dir = run_dir / "steps"
+    steps_dir.mkdir(parents=True, exist_ok=True)
+    led = load_ledger(project, chapter_n)
+    recorded = led.get("steps", {}) or {}
+    out: dict[str, str | None] = {}
+    status: dict[str, str] = {}
+    for role in PIPELINE:
+        entry = recorded.get(role)
+        text = (entry or {}).get("output") if isinstance(entry, dict) else None
+        if text and role not in bypassed:
+            (steps_dir / f"{role}.md").write_text(text, encoding="utf-8")
+            out[role] = text
+            status[role] = "collected"
+        else:
+            out[role] = None
+            status[role] = "skipped"
+    (run_dir / "steps.json").write_text(
+        json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out
 
 
 def _grade_candidate(run_dir: Path, case: dict, chapter_text: str):
@@ -166,10 +209,20 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     run_dir = runs_dir / run_id
     run_dir.mkdir(parents=True)
 
+    # 大纲师 WYSIWYG 旁路探测:必须在 run_pipeline 之前看细纲文件是否已存在——
+    # run_pipeline 对旁路棒同样无条件 ledger.record_step(agents.py:714),旁路后
+    # 细纲文件依旧非空,事后（跑完再看）分不出"沿用的旧细纲"和"这一跑现生成的细纲"。
+    # 探测口径与 agents.py:664 的旁路判据逐字同款:文件存在且非空即旁路。
+    outline_file = outline_path(project, case["chapter_n"])
+    bypassed = frozenset({"大纲师"}) if (
+        outline_file.is_file() and outline_file.read_text(encoding="utf-8").strip()
+    ) else frozenset()
+
     t0 = time.perf_counter()
     _path, final = run_pipeline(project, case["chapter_n"], metered, cfg, resume=False)
     total_s = round(time.perf_counter() - t0, 3)
 
+    steps = collect_steps(project, case["chapter_n"], run_dir, bypassed=bypassed)
     result = _grade_candidate(run_dir, case, final)
     (run_dir / "report.json").write_text(
         json.dumps(result.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
