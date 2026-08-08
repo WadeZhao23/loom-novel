@@ -32,6 +32,15 @@ from .config import Config, load_config, save_config
 from .paths import outline_path
 from .scaffold import init as scaffold_init
 
+# ── 棒级归因接缝(2026-08)──纯再导出,零逻辑:evals 的棒级体检项要复用产品
+#    已有的判据(工序表/场次预算/留痕切分/ledger 读取),别在 evals 里重写一套。
+from .agents import PIPELINE, _SHORT as STEP_SHORT_BUDGETS
+from .agents import _parse_scene_budgets as parse_scene_budgets
+from .agents import _scene_range as scene_range
+from .ledger import load_ledger
+from .parse import split_edit_note
+from .paths import ledger_path
+
 __all__ = [
     "CRITIC_去AI味",
     "CRITIC_质检",
@@ -47,4 +56,11 @@ __all__ = [
     "run_pipeline",
     "save_config",
     "scaffold_init",
+    "PIPELINE",
+    "STEP_SHORT_BUDGETS",
+    "ledger_path",
+    "load_ledger",
+    "parse_scene_budgets",
+    "scene_range",
+    "split_edit_note",
 ]

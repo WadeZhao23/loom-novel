@@ -526,14 +526,21 @@ def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Age
     return a, _read_file_items(project_root, rels, _noop)
 
 
-def _scene_budget(chapter_target: int) -> str:
-    """章目标字数 → 细纲场次预算。超长的真根因:大纲师不知道章目标,按惯例拆 3-6 场,
-    写手照多场细纲每场写透 → 2000 字目标干出 6000+。场次跟着篇幅走,结构上先锁死。"""
+def _scene_range(chapter_target: int) -> tuple[int, int]:
+    """章目标字数 →(最少场次, 最多场次)。场次预算的**单一真相**:
+    _scene_budget 的字符串形态由它派生,evals 的棒级体检也读它——两边永不漂。"""
     if chapter_target <= 1500:
-        return "拆 2-3 场"
+        return (2, 3)
     if chapter_target <= 3000:
-        return "拆 3-4 场"
-    return "拆 4-6 场"
+        return (3, 4)
+    return (4, 6)
+
+
+def _scene_budget(chapter_target: int) -> str:
+    """章目标字数 → 细纲场次预算(喂 prompt 的字符串形态)。超长的真根因:大纲师不知道
+    章目标,按惯例拆 3-6 场,写手照多场细纲每场写透 → 2000 字目标干出 6000+。"""
+    lo, hi = _scene_range(chapter_target)
+    return f"拆 {lo}-{hi} 场"
 
 
 def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars: int = 0) -> str:

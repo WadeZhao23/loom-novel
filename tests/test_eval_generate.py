@@ -22,6 +22,30 @@ def test_evalapi_generation_seam_exports():
         assert name in evalapi.__all__, f"{name} 未进 evalapi.__all__"
 
 
+_STEP_SEAM = ("PIPELINE", "load_ledger", "ledger_path", "scene_range",
+              "parse_scene_budgets", "split_edit_note", "STEP_SHORT_BUDGETS")
+
+
+def test_evalapi_step_attribution_seam_exports():
+    """棒级归因接缝:evals 复用产品判据必须走门面,不得在 evals 里重写一套(会漂)。"""
+    for name in _STEP_SEAM:
+        assert hasattr(evalapi, name), f"evalapi 缺棒级归因接缝导出:{name}"
+        assert name in evalapi.__all__, f"{name} 未进 evalapi.__all__"
+
+
+def test_scene_range_matches_scene_budget_string():
+    """数值形态与字符串形态必须同源——否则 evals 与 prompt 会各说各话。"""
+    from loom.agents import _scene_budget
+    for target, expect in ((800, (2, 3)), (2000, (3, 4)), (5000, (4, 6))):
+        lo, hi = evalapi.scene_range(target)
+        assert (lo, hi) == expect
+        assert _scene_budget(target) == f"拆 {lo}-{hi} 场"
+
+
+def test_pipeline_seam_is_the_five_steps():
+    assert evalapi.PIPELINE == ["设定师", "大纲师", "写手", "编辑", "润色师"]
+
+
 def _write_gen_case(tmp_path, *, with_outline=True):
     d = tmp_path / "gen_case_src"
     (d / "overlay" / "正文" / ".细纲").mkdir(parents=True)
