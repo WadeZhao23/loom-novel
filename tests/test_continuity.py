@@ -1,4 +1,6 @@
 """连续性除虫:确定性双检测(零 LLM)+ LLM 扫描(Task 4 补)。守只报告不改稿。"""
+import re
+
 from loom import statebook
 from loom.continuity import BugItem, detect_consumed_reuse, detect_rule_drift, merge_items,     detect_time_mismatch, detect_char_continuity
 
@@ -605,7 +607,14 @@ def test_agents_scan_continuity_does_not_swallow_silently(tmp_path):
     warns = [e for e in seen if e.get("type") == "warn"]
     assert len(warns) == 1, f"应且只应有外层这一条 warn:{seen}"
     msg = str(warns[0])
-    assert "NotADirectoryError" in msg, f"外层必须报出真实异常类型,证明确实走了 agents.py 的 except:{seen}"
+    # 不断言具体异常类名:同一次 mkdir("父路径其实是个文件") 在 POSIX 上抛
+    # NotADirectoryError,在 Windows 上抛 FileExistsError([WinError 183])——
+    # 类名是平台细节,不是本测试要证明的东西(CI 已在 windows-latest 上验证过差异)。
+    # 改为断言两件与平台无关的事:①消息里确实格式化进了一个"XxxError:"形态的真实
+    # 异常类型(不是空字符串、不是被吞掉);②消息带着这次失败的哨兵路径片段
+    # (not_a_dir 的目录名),证明这条异常确实源于我们构造的这次 mkdir,而不是巧合。
+    assert re.search(r"[A-Za-z]+Error:", msg), f"外层必须报出真实异常类型:{seen}"
+    assert not_a_dir.name in msg, f"外层异常消息必须带上失败路径(哨兵目录名),证明确实来自这次 mkdir:{seen}"
     assert "不影响本章出稿" in msg, f"这句措辞只在 _scan_continuity 的外层 warn 里出现:{seen}"
     assert "LLM 侧" not in msg, f"不该是 continuity.py 内层那条 warn 被截胡:{seen}"
 
