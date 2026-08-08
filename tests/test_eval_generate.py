@@ -347,6 +347,82 @@ def test_run_batch_all_runs_crashed_is_infra(tmp_path):
     assert summ["n_valid"] == 0 and summ["steps"] == {}
 
 
+def _fake_batch(tmp_path, name, *, median, lo, hi, n_valid=3):
+    b = tmp_path / name
+    b.mkdir(parents=True)
+    (b / "summary.json").write_text(json.dumps({
+        "case_id": "gen_test", "batch_id": name, "n_total": 3, "n_valid": n_valid,
+        "weakest": None,
+        "steps": {"写手": {"写手·必含要素": {"median": median, "lo": lo, "hi": hi,
+                                          "n_valid": n_valid, "n_total": 3}}},
+    }, ensure_ascii=False), encoding="utf-8")
+    return b
+
+
+def test_compare_declares_improvement_only_when_ranges_separate(tmp_path):
+    from evals.generate import compare_batches
+    a = _fake_batch(tmp_path, "a", median=0.2, lo=0.1, hi=0.3)
+    b = _fake_batch(tmp_path, "b", median=0.8, lo=0.7, hi=0.9)
+    res = compare_batches(a, b)
+    item = res["items"][0]
+    assert item["verdict"] == "改进" and item["delta"] == pytest.approx(0.6)
+    assert res["n_improved"] == 1 and res["n_regressed"] == 0
+
+
+def test_compare_refuses_to_call_it_improvement_when_ranges_overlap(tmp_path):
+    """中位数涨了但区间重叠——必须判「分不出」,这是本工具最重要的一条纪律。"""
+    from evals.generate import compare_batches
+    a = _fake_batch(tmp_path, "a", median=0.50, lo=0.30, hi=0.70)
+    b = _fake_batch(tmp_path, "b", median=0.62, lo=0.40, hi=0.85)
+    item = compare_batches(a, b)["items"][0]
+    assert item["verdict"] == "分不出(区间重叠)"
+    assert compare_batches(a, b)["n_improved"] == 0
+
+
+def test_compare_flags_regression_when_ranges_separate_downward(tmp_path):
+    from evals.generate import compare_batches
+    a = _fake_batch(tmp_path, "a", median=0.9, lo=0.85, hi=0.95)
+    b = _fake_batch(tmp_path, "b", median=0.3, lo=0.2, hi=0.4)
+    res = compare_batches(a, b)
+    assert res["items"][0]["verdict"] == "回归" and res["n_regressed"] == 1
+
+
+def test_compare_says_no_data_when_a_side_is_all_infra(tmp_path):
+    from evals.generate import compare_batches
+    a = _fake_batch(tmp_path, "a", median=0.5, lo=0.4, hi=0.6)
+    b = _fake_batch(tmp_path, "b", median=None, lo=None, hi=None, n_valid=0)
+    assert compare_batches(a, b)["items"][0]["verdict"] == "无数据"
+
+
+def test_compare_does_not_silently_drop_items_exclusive_to_batch_b(tmp_path):
+    """b 独有的 (role, item)——两批 case 不同、或某棒在 a 批被旁路——不得从报告里消失。
+
+    只遍历 a 的键会把 b 独有项静默丢掉:改完 prompt 后新增的体检项、或 a 批
+    因旁路完全没跑到的棒,report 里会看不见,这与"不让人漏看变化"的宗旨相悖。
+    """
+    from evals.generate import compare_batches
+    a = _fake_batch(tmp_path, "a", median=0.5, lo=0.4, hi=0.6)
+    b = _fake_batch(tmp_path, "b", median=0.5, lo=0.4, hi=0.6)
+    sb = json.loads((b / "summary.json").read_text(encoding="utf-8"))
+    sb["steps"]["大纲师"] = {"大纲师·场景数": {"median": 0.9, "lo": 0.8, "hi": 1.0,
+                                          "n_valid": 3, "n_total": 3}}
+    (b / "summary.json").write_text(json.dumps(sb, ensure_ascii=False), encoding="utf-8")
+
+    res = compare_batches(a, b)
+    keys = {(it["step"], it["item"]) for it in res["items"]}
+    assert ("大纲师", "大纲师·场景数") in keys, "b 独有项被静默丢掉了"
+    only_b = [it for it in res["items"] if it["step"] == "大纲师"][0]
+    assert only_b["verdict"] == "无数据" and only_b["before"] is None
+    assert only_b["after"]["median"] == pytest.approx(0.9)
+    # a 独有项(若反过来)同理必须出现——用同一断言口径覆盖对称情形
+    assert len(res["items"]) == 2, "两批合计两个 (role,item) 键,一个都不能丢"
+
+
+def test_cli_compare_requires_two_batches(tmp_path):
+    from evals.generate import main
+    assert main(["--compare", str(tmp_path / "nope")]) == 2
+
+
 def test_cli_repeat_flag_returns_2_when_all_infra(tmp_path, monkeypatch):
     """全 infra → 退出码 2(沿用三态),不得当成质量结论。"""
     monkeypatch.setenv("LOOM_DEMO", "1")

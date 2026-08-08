@@ -31,7 +31,7 @@ from loom.evalapi import (
     run_pipeline,
 )
 
-from .aggregate import aggregate_runs
+from .aggregate import aggregate_runs, overlaps
 from .harness import run_case
 from .metering import MeteringBackend
 from .stepgraders import (
@@ -348,6 +348,58 @@ def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
     return batch
 
 
+def compare_batches(batch_a: Path, batch_b: Path) -> dict:
+    """两批对比:a=改动前,b=改动后。
+
+    **最重要的一条纪律:区间重叠就判「分不出」,不宣称改进。**
+    生成链路 temperature=0.9 写死、无 seed,中位数涨了一点很可能只是这次运气好。
+
+    遍历键集合取 a∪b 而非只取 a——只取 a 会把「b 独有的 (role, item)」静默丢掉
+    (两批 case 不同、或某棒在其中一批被旁路时确会发生),那样改完 prompt 新增的
+    体检项、或某一批完全没跑到的棒,会在报告里悄悄消失,与「不让人漏看变化」
+    的宗旨相悖。b 独有项 before=None → 判「无数据」,不是当它不存在。
+    """
+    sa = json.loads((batch_a / "summary.json").read_text(encoding="utf-8"))
+    sb = json.loads((batch_b / "summary.json").read_text(encoding="utf-8"))
+    a_steps, b_steps = sa.get("steps", {}), sb.get("steps", {})
+
+    keys: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for role, items in a_steps.items():
+        for name in items:
+            key = (role, name)
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+    for role, items in b_steps.items():
+        for name in items:
+            key = (role, name)
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+
+    items_out, improved, regressed = [], 0, 0
+    for role, name in keys:
+        da = a_steps.get(role, {}).get(name)
+        db = b_steps.get(role, {}).get(name)
+        if not da or not db or da.get("median") is None or db.get("median") is None:
+            verdict, delta = "无数据", None
+        elif overlaps(da, db):
+            delta = round(db["median"] - da["median"], 4)
+            verdict = "分不出(区间重叠)"
+        else:
+            delta = round(db["median"] - da["median"], 4)
+            verdict = "改进" if delta > 0 else "回归"
+            if verdict == "改进":
+                improved += 1
+            else:
+                regressed += 1
+        items_out.append({"step": role, "item": name, "before": da, "after": db,
+                          "delta": delta, "verdict": verdict})
+    return {"case_id": sa.get("case_id"), "items": items_out,
+            "n_improved": improved, "n_regressed": regressed}
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -361,7 +413,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
     ap.add_argument("--repeat", type=int, default=1,
                     help="同一 case 连跑 N 次取分布(对抗 temp=0.9 无 seed 的噪声;N≥2 才有分布)")
+    ap.add_argument("--compare", nargs="+", metavar="BATCH",
+                    help="对比两个批次目录(改动前 改动后):区间重叠即判「分不出」,不宣称改进")
     args = ap.parse_args(argv)
+
+    if args.compare:
+        if len(args.compare) != 2:
+            print("✗ --compare 需要恰好两个批次目录:<改动前> <改动后>")
+            return 2
+        a, b = Path(args.compare[0]), Path(args.compare[1])
+        if not (a / "summary.json").is_file() or not (b / "summary.json").is_file():
+            print(f"✗ 批次目录缺 summary.json:{a} / {b}")
+            return 2
+        res = compare_batches(a, b)
+        print(f"── {res['case_id']}:{a.name} → {b.name} ──")
+        for it in res["items"]:
+            d = "—" if it["delta"] is None else f"{it['delta']:+.4f}"
+            print(f"  {it['verdict']:<16} {it['step']}·{it['item']:<24} Δ中位数 {d}")
+        print(f"\n改进 {res['n_improved']} 项 · 回归 {res['n_regressed']} 项 · "
+              f"其余分不出(区间重叠或无数据)")
+        return 1 if res["n_regressed"] else 0
 
     if not args.cases_dir.is_dir():
         print(f"✗ 没有 gen case 目录:{args.cases_dir}")
