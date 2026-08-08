@@ -74,8 +74,71 @@ def test_deslop_llm_unparsable_verdict_is_infra_not_pass():
     assert g.passed is False
     assert g.gating is False
     assert g.detail.startswith("[infra]")
+    assert g.score == 0.0
 
 
 def test_deslop_llm_explicit_pass_is_a_real_pass():
     g = grade_deslop_llm("正文", "指纹", _FixedBackend("通过"))
     assert g.passed is True and g.gating is True
+
+
+# ── 回归:「通过」不能用子串匹配判定(未通过/不通过 都*包含*「通过」二字)──────────
+# review 发现的洞:旧判据 `"通过" not in verdict` 是子串检查,「本章未通过质检」这类明确的
+# 否定判词会被误判成合法零硬伤直接放行——同一条 fail-open 故障线,且更隐蔽(负面判词被当通过)。
+
+
+def test_quality_llm_negated_pass_verdict_is_infra_not_pass():
+    # 复现 review 给的例子:模型明确说"没通过",但格式跑偏(没有 `- ` 条目行),
+    # parse_critic_verdict 抓不到任何硬伤,n_issues==0。子串判据会被"未通过"里的"通过"骗过。
+    verdict = "本章未通过质检，人物表现有问题，建议重写。"
+    g = grade_quality_llm("正文", "设定", _FixedBackend(verdict))
+    assert g.passed is False, "模型明确说没通过,不能判定为通过"
+    assert g.gating is False
+    assert g.detail.startswith("[infra]")
+    assert g.score == 0.0
+
+
+def test_quality_llm_bare_negation_is_infra_not_pass():
+    g = grade_quality_llm("正文", "设定", _FixedBackend("不通过"))
+    assert g.passed is False
+    assert g.gating is False
+    assert g.detail.startswith("[infra]")
+    assert g.score == 0.0
+
+
+def test_quality_llm_trailing_punctuation_pass_is_a_real_pass():
+    # 「通过」带尾部标点仍是合法通过(必须和 parse_verdict 的 rstrip 口径一致)
+    g = grade_quality_llm("正文", "设定", _FixedBackend("通过。"))
+    assert g.passed is True
+    assert g.gating is True
+    assert g.score == 1.0
+
+
+def test_quality_llm_bulleted_pass_is_a_real_pass():
+    # 「- 通过」带项目符号仍是合法通过
+    g = grade_quality_llm("正文", "设定", _FixedBackend("- 通过"))
+    assert g.passed is True
+    assert g.gating is True
+    assert g.score == 1.0
+
+
+def test_quality_llm_issue_containing_pass_word_is_normal_scored_path():
+    # 硬伤条目自己的文本里出现「通过」两字(如"设定说他要先通过考验")不该被误判成通过或 infra——
+    # 走的是正常的按条打分路径(n_issues==1)。
+    verdict = '- 人物OOC | 设定说他要先通过考验才能觉醒 | 证据:"他直接觉醒了"'
+    g = grade_quality_llm("正文", "设定", _FixedBackend(verdict))
+    assert not g.detail.startswith("[infra]")
+    assert g.passed is False
+    assert g.score == 0.5
+    assert len(g.evidence) == 1
+
+
+def test_deslop_llm_negated_pass_verdict_is_infra_not_pass():
+    # 同一 helper(_verdict_is_unparsable)同时喂给 quality 和 deslop 两个 grader,
+    # 回归不能只钉一处——两个消费者都要证明"未通过"不会被误判成通过。
+    verdict = "本章未通过质检，人物表现有问题，建议重写。"
+    g = grade_deslop_llm("正文", "指纹", _FixedBackend(verdict))
+    assert g.passed is False
+    assert g.gating is False
+    assert g.detail.startswith("[infra]")
+    assert g.score == 0.0
