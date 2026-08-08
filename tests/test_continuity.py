@@ -536,20 +536,76 @@ def test_scan_chapter_clean_chapter_does_not_false_positive(tmp_path):
     assert warns == [], f"本章确实无矛盾,不该被误报成哑火:{warns}"
 
 
+def _drifted_marker_warns(tmp_path, marker_line: str) -> list[dict]:
+    """跑一次 scan_chapter,LLM 回复用给定的漂移版「===除虫报告===」分隔行,内容仍老实
+    干净(「通过」+「无」)。返回 warn 事件——供各变体测试断言「没有假警报」。"""
+    from loom.continuity import scan_chapter
+
+    class _DriftedMarkerBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return f"{marker_line}\n通过\n===状态入账===\n- 无"
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _DriftedMarkerBackend(), progress=seen.append)
+    return [e for e in seen if e.get("type") == "warn"]
+
+
+def test_scan_chapter_report_marker_extra_whitespace_not_false_positive(tmp_path):
+    """分隔行等号与文字之间多打了空格——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "===  除虫报告  ===")
+    assert warns == [], f"纯空白抖动不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_different_equals_count_not_false_positive(tmp_path):
+    """等号数量从 3 个变成 2 个——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "==除虫报告==")
+    assert warns == [], f"等号数量抖动不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_markdown_emphasis_not_false_positive(tmp_path):
+    """模型把文字部分包了一层 markdown 强调——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "===**除虫报告**===")
+    assert warns == [], f"markdown 强调包裹不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_fullwidth_equals_not_false_positive(tmp_path):
+    """等号写成全角——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "＝＝＝除虫报告＝＝＝")
+    assert warns == [], f"全角等号不该被误报成格式漂移:{warns}"
+
+
 def test_agents_scan_continuity_does_not_swallow_silently(tmp_path):
-    """agents 侧的外层裸 except 会连 scan_chapter 整个炸掉都吞掉——也要留痕。"""
+    """agents 侧的外层裸 except 会连 scan_chapter 整个炸掉都吞掉——也要留痕。
+
+    崩溃点必须选在 scan_chapter 自己那个 LLM try/except 之外,否则内层先吞,外层永远
+    够不着(用 backend.complete() 直接抛异常测不出外层——它会被 continuity.py 的内层
+    except 拦下,两条 warn 文案都恰好带「除虫」子串,断言等于白测)。这里让 project_root
+    指向一个普通文件而非目录:LLM 段正常走完后,_note_report 的 path.parent.mkdir()
+    因为父路径不是目录而抛 NotADirectoryError——这发生在 scan_chapter 自身 try 块之外,
+    只有 _scan_continuity 的外层 except 才可能抓到它。backend 用能正常解析的干净响应,
+    确保内层「LLM 侧没跑成」那条 warn 不会被顺带触发,断言也专挑外层独有的措辞。
+    """
     from loom.agents import _scan_continuity
     from loom.config import Config
 
-    class _BoomBackend:
+    class _CleanBackend:
         def complete(self, system, user, *, max_chars=None, on_chunk=None):
-            raise RuntimeError("后端不可用")
+            return "===除虫报告===\n通过\n===状态入账===\n- 无"
+
+    not_a_dir = tmp_path / "not_a_dir"
+    not_a_dir.write_text("我是文件,不是目录", encoding="utf-8")
 
     seen = []
     cfg = Config()
     cfg.continuity_scan = True
-    _scan_continuity(tmp_path / "nonexistent", 2, "正文。" * 20, _BoomBackend(),
-                     cfg, seen.append)
-    msgs = " ".join(str(e) for e in seen)
-    assert "除虫" in msgs, f"外层也不得静默吞掉:{seen}"
+    _scan_continuity(not_a_dir, 2, "正文。" * 20, _CleanBackend(), cfg, seen.append)
+
+    warns = [e for e in seen if e.get("type") == "warn"]
+    assert len(warns) == 1, f"应且只应有外层这一条 warn:{seen}"
+    msg = str(warns[0])
+    assert "NotADirectoryError" in msg, f"外层必须报出真实异常类型,证明确实走了 agents.py 的 except:{seen}"
+    assert "不影响本章出稿" in msg, f"这句措辞只在 _scan_continuity 的外层 warn 里出现:{seen}"
+    assert "LLM 侧" not in msg, f"不该是 continuity.py 内层那条 warn 被截胡:{seen}"
 

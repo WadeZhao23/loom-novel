@@ -342,6 +342,21 @@ _SCAN_SYSTEM = """你是**连续性审读员**(除虫),只诊断、不改写。�
 
 _REPORT_LINE = re.compile(r"^[-·•]\s*(.+)$")
 
+# 「===除虫报告===」分隔行的宽容判据(只判「标记在不在」,不是解析):模型对这行固定
+# 字面量的输出常有格式抖动——多余空白、markdown 强调包一层、全角=、=数量增减。
+# 精确字面匹配会把这些无害抖动误判成「格式漂移」,在干净章节上假警报——假警报比
+# 沉默更毁信任(见 scan_chapter 里这个判据的使用处)。宁可放过真漂移(少报),
+# 也不在纯格式抖动上误报;规则本身仍是确定性正则,不是解析器。
+_REPORT_MARKER_RE = re.compile(
+    r"^\s*[*_~`]*\s*[=＝]+\s*[*_~`]*\s*除虫报告\s*[*_~`]*\s*[=＝]+\s*[*_~`]*\s*$",
+    re.MULTILINE,
+)
+
+
+def _has_report_marker(raw: str) -> bool:
+    """除虫报告分隔行是否存在(容忍格式漂移,见 _REPORT_MARKER_RE 注释)。"""
+    return bool(_REPORT_MARKER_RE.search(raw))
+
 
 def parse_scan(raw: str) -> tuple[list[BugItem], list[str]]:
     """双段宽容解析。报告段「通过」→ [];入账段只认 statebook 四类行,「- 无」→ []。"""
@@ -472,7 +487,9 @@ def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend
         # llm_items/state_lines 无法区分,但分段标记在不在能区分:①即使内容空,
         # 「===除虫报告===」这行本身仍会被原样回传;②真漂移时连这行都没有。
         # 用标记存在与否兜底,不确定的情况宁可措辞保守("没能解析出"),不武断说"格式漂移"。
-        if not llm_items and not state_lines and "===除虫报告===" not in raw:
+        # 标记判据用 _has_report_marker(宽容匹配),不是精确子串——避免模型对固定字面量
+        # 的无害格式抖动(空白/强调/全角=/=数量)在干净章节上被误判成"格式漂移"。
+        if not llm_items and not state_lines and not _has_report_marker(raw):
             progress(events.warn("除虫的 LLM 侧返回了内容,但没能按预期格式解析出结果"
                                  "(响应里找不到除虫报告/状态入账的分段标记);"
                                  "本章只有确定性检测的结果,这一章没有 LLM 侧的交叉验证。"))
