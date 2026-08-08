@@ -259,3 +259,60 @@ def test_cli_demo_mode_end_to_end(tmp_path, monkeypatch):
     assert (runs[0] / "manifest.json").is_file() and (runs[0] / "report.json").is_file()
     m = json.loads((runs[0] / "manifest.json").read_text(encoding="utf-8"))
     assert m["backend_class"] == "DemoBackend"        # 罐头后端如实入档
+
+
+def test_run_batch_produces_summary_with_distributions(tmp_path):
+    from evals.generate import run_batch
+    case_dir = _write_gen_case(tmp_path)
+    batch = run_batch(case_dir, repeat=3, runs_dir=tmp_path / "runs",
+                      backend_factory=lambda: ScriptedBackend(list(_GEN_RUN_7)),
+                      workdir_root=tmp_path / "work")
+    assert (batch / "summary.json").is_file() and (batch / "summary.md").is_file()
+    assert len(list((batch / "runs").iterdir())) == 3
+    summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+    assert summ["n_total"] == 3 and summ["n_valid"] == 3
+    assert summ["case_id"] == "gen_test"
+    w = summ["steps"]["写手"]["写手·必含要素"]
+    assert w["median"] is not None and w["n_valid"] == 3
+
+
+def test_run_batch_survives_a_crashed_run_and_reports_honestly(tmp_path):
+    """第 2 次崩了不能丢掉第 1、3 次;而且必须照实写 3 次里 2 次有效。"""
+    from evals.generate import run_batch
+    case_dir = _write_gen_case(tmp_path)
+    seq = iter([ScriptedBackend(list(_GEN_RUN_7)),
+                ScriptedBackend([]),                    # 空脚本 → 空响应 → 写盘闸抛错
+                ScriptedBackend(list(_GEN_RUN_7))])
+    batch = run_batch(case_dir, repeat=3, runs_dir=tmp_path / "runs",
+                      backend_factory=lambda: next(seq),
+                      workdir_root=tmp_path / "work")
+    summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+    assert summ["n_total"] == 3 and summ["n_valid"] == 2
+    md = (batch / "summary.md").read_text(encoding="utf-8")
+    assert "3 次里 2 次有效" in md, "必须照实披露掉数,不得拿 2 次冒充 3 次"
+
+
+def test_run_batch_all_runs_crashed_is_infra(tmp_path):
+    from evals.generate import run_batch
+    case_dir = _write_gen_case(tmp_path)
+    batch = run_batch(case_dir, repeat=2, runs_dir=tmp_path / "runs",
+                      backend_factory=lambda: ScriptedBackend([]),
+                      workdir_root=tmp_path / "work")
+    summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+    assert summ["n_valid"] == 0 and summ["steps"] == {}
+
+
+def test_cli_repeat_flag_returns_2_when_all_infra(tmp_path, monkeypatch):
+    """全 infra → 退出码 2(沿用三态),不得当成质量结论。"""
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    from evals.generate import main
+    src = _write_gen_case(tmp_path)
+    gc = tmp_path / "gc"; gc.mkdir()
+    shutil.copytree(src, gc / "gen_test")
+    # chapter_chars 设成天文数字,DemoBackend 罐头文本必然过不了终稿最短闸 → 每次都崩
+    case_path = gc / "gen_test" / "case.json"
+    case = json.loads(case_path.read_text(encoding="utf-8"))
+    case["chapter_chars"] = 900000
+    case_path.write_text(json.dumps(case, ensure_ascii=False), encoding="utf-8")
+    code = main(["--cases-dir", str(gc), "--runs-dir", str(tmp_path / "runs"), "--repeat", "2"])
+    assert code == 2

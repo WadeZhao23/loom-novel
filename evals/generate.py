@@ -31,6 +31,7 @@ from loom.evalapi import (
     run_pipeline,
 )
 
+from .aggregate import aggregate_runs
 from .harness import run_case
 from .metering import MeteringBackend
 from .stepgraders import (
@@ -274,6 +275,72 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     return run_dir
 
 
+def _summary_md(case_id: str, agg: dict, batch_id: str) -> str:
+    """人看的批次小结。禁止只报中位数:掉数与区间必须同屏可见。"""
+    lines = [f"# 棒级归因批次小结 · {case_id}", "",
+             f"- 批次:`{batch_id}`",
+             f"- 运行:**{agg['n_total']} 次里 {agg['n_valid']} 次有效**"
+             + ("" if agg["n_valid"] == agg["n_total"] else "(其余为 infra,未计入分布)"),
+             f"- 最弱棒:**{agg['weakest'] or '(无——所有 gating 项都过了,或无严格多数)'}**", ""]
+    if agg["n_valid"] == 0:
+        lines += ["> 全部运行都 infra,没有任何可读的分数。**这不是质量结论。**", ""]
+        return "\n".join(lines)
+    lines += ["| 棒 | 体检项 | 中位数 | 区间 | 有效/总 |", "|---|---|---|---|---|"]
+    for role, items in agg["steps"].items():
+        for name, d in items.items():
+            if d["n_valid"] == 0:
+                lines.append(f"| {role} | {name} | — | — | 0/{d['n_total']}(全 skipped 或全 infra) |")
+            else:
+                lines.append(f"| {role} | {name} | {d['median']} | "
+                             f"{d['lo']}~{d['hi']} | {d['n_valid']}/{d['n_total']} |")
+    lines += ["", "> 判据纪律:两批比对时**区间重叠即不得宣称有改进**。",
+              "> 生成链路无 seed、temperature=0.9 写死,单次分数差一律不作结论。"]
+    return "\n".join(lines)
+
+
+def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
+              backend_factory=None, workdir_root: Path | None = None,
+              backend_mode: str = "demo", provider: str | None = None,
+              model: str | None = None) -> Path:
+    """同一个 case 连跑 repeat 次,聚合成分布落 batch 目录。
+
+    单次崩了记 infra 继续跑——不能因为第 3 次挂了就丢掉前 2 次。
+    全崩则 summary 里 n_valid=0,由 CLI 翻成退出码 2(infra,不是质量结论)。
+    """
+    case = load_gen_case(case_dir)
+    runs_dir = runs_dir or RUNS_DIR
+    batch_id = f"{time.strftime('%Y%m%d-%H%M%S')}_batch_{case['id']}_x{repeat}"
+    batch = runs_dir / batch_id
+    (batch / "runs").mkdir(parents=True)
+
+    reports: list[dict | None] = []
+    for i in range(repeat):
+        wd = (workdir_root / f"w{i}") if workdir_root else None
+        if wd:
+            wd.mkdir(parents=True, exist_ok=True)
+        try:
+            run_dir = generate_one(
+                case_dir,
+                backend=backend_factory() if backend_factory else None,
+                backend_mode=backend_mode, provider=provider, model=model,
+                runs_dir=batch / "runs", workdir=wd)
+            reports.append(json.loads(
+                (run_dir / "step_report.json").read_text(encoding="utf-8")))
+        except Exception as e:  # noqa: BLE001 — 单次崩=infra,记下继续,绝不中断整批
+            (batch / "runs" / f"infra_{i}.txt").write_text(
+                f"第 {i + 1} 次运行 infra:{type(e).__name__} — {e}\n", encoding="utf-8")
+            reports.append(None)
+
+    agg = aggregate_runs(reports)
+    agg["case_id"] = case["id"]
+    agg["batch_id"] = batch_id
+    (batch / "summary.json").write_text(
+        json.dumps(agg, ensure_ascii=False, indent=2), encoding="utf-8")
+    (batch / "summary.md").write_text(
+        _summary_md(case["id"], agg, batch_id), encoding="utf-8")
+    return batch
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -285,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="configured 模式覆写 model")
     ap.add_argument("--cases-dir", type=Path, default=GEN_CASES_DIR)
     ap.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="同一 case 连跑 N 次取分布(对抗 temp=0.9 无 seed 的噪声;N≥2 才有分布)")
     args = ap.parse_args(argv)
 
     if not args.cases_dir.is_dir():
@@ -302,14 +371,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✗ {args.cases_dir} 下没有任何 gen case(需要 <case>/case.json)")
             return 2
 
+    any_valid = False
     for d in case_dirs:
-        run_dir = generate_one(d, backend_mode=args.backend, provider=args.provider,
-                               model=args.model, runs_dir=args.runs_dir)
-        report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
-        sr = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
-        flag = "✅" if report["passed"] else "❌"
-        weak = f"  最弱棒={sr['weakest']}" if sr.get("weakest") else ""
-        print(f"{flag} {report['case_id']}  score={report['score']}{weak}  → {run_dir}")
+        if args.repeat > 1:
+            batch = run_batch(d, repeat=args.repeat, runs_dir=args.runs_dir,
+                              backend_mode=args.backend, provider=args.provider,
+                              model=args.model)
+            summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+            any_valid = any_valid or summ["n_valid"] > 0
+            weak = summ["weakest"] or "(无)"
+            print(f"{'✅' if summ['n_valid'] else '✗'} {summ['case_id']}  "
+                  f"{summ['n_total']} 次里 {summ['n_valid']} 次有效  最弱棒={weak}  → {batch}")
+        else:
+            run_dir = generate_one(d, backend_mode=args.backend, provider=args.provider,
+                                   model=args.model, runs_dir=args.runs_dir)
+            report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+            sr = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
+            any_valid = True
+            flag = "✅" if report["passed"] else "❌"
+            weak = f"  最弱棒={sr['weakest']}" if sr.get("weakest") else ""
+            print(f"{flag} {report['case_id']}  score={report['score']}{weak}  → {run_dir}")
+    if not any_valid:
+        print("✗ 所有运行都 infra,没有任何可读的分数——这不是质量结论。")
+        return 2
     return 0
 
 
