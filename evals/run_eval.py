@@ -58,6 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--baseline-file", type=Path, default=HERE / "baseline.json")
     args = ap.parse_args(argv)
 
+    if args.judge and args.gate:
+        # LLM grader 成功路径 gating=True 且不在 baseline.json 里:同传会把权重和
+        # 从 0.70 顶到 1.00,所有 case 分数整体位移 → 与 no-judge 基线比对必然伪回归;
+        # 且 LLM 在 temperature=0.9 无 seed 下不可复现,门禁会变成掷骰子。
+        print("✗ --judge 与 --gate 不能同传:LLM grader 会改变权重和(0.70→1.00),"
+              "与基线口径不一致必然产生伪回归。要门禁就跑确定性的 --gate;"
+              "要 LLM 复审就单独跑 --judge。")
+        return 2   # infra:用法错误,不是质量回归
+
     backend = None
     if args.judge:
         if args.judge_backend == "demo":
