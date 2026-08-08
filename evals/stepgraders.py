@@ -179,25 +179,34 @@ def grade_writer(draft: str | None, target_chars: int,
 
 def grade_editor(edited: str | None, draft: str | None,
                  must_include: list[str]) -> list[GraderResult]:
-    """编辑产出「本章改稿」+ 成对围栏的《本章改动留痕》。
+    """编辑产出「本章改稿」;controller 在落 ledger 前会把《本章改动留痕》切出另存到
+    .审稿留痕/(loom/agents.py:682-685 `_split_edit_note`),只把干净正文交给下游润色师
+    并写进 ledger。所以这里收到的 `edited` 就是 evals.generate.collect_steps 从 ledger
+    读出来的那份干净正文——从来不带留痕围栏。
 
     体检三项(全是 改稿 vs 初稿 的差分):
-    - 留痕围栏:<LOOM:EDIT-NOTE> 与 </LOOM:EDIT-NOTE> 必须成对(未闭合会让留痕混进正文)。
+    - 留痕围栏:**不可测**,标记 [not-measurable]。真实跑必定测不出——不是编辑没写
+      留痕,是这份信号在到达 ledger 之前就已经被 controller 剥走了(见上)。
+      千万别把它"修回"成真检查:那样每次真实跑都会假失败(围栏在 ledger 里恒为空),
+      污染「最弱棒」归因,违反本模块「不造数」的红线。想恢复真覆盖需要新开一个
+      loom/evalapi.py 门面去读 .审稿留痕/ 目录,不在这个函数的范围内。
     - 必含要素保持:**初稿有、改稿没了**才算编辑改丢的。初稿本来就缺的不赖它——
       归因必须指对棒,否则闭环会把作者引到错的地方。
     - 篇幅变化:编辑被明令「篇幅保持原稿量级、绝不扩写」,超出 ±30% 就是没守。
-      算篇幅前先剥留痕围栏,否则留痕越长越显得「扩写」。
+      算篇幅前先过一遍 split_edit_note 剥留痕围栏——对真实 ledger 内容是 no-op
+      (反正从来没有围栏),但万一未来上游行为变化,这层剥离仍是正确的防线。
     """
     if edited is None or draft is None:
         return [skipped("编辑", "留痕围栏"), skipped("编辑", "必含要素保持"),
                 skipped("编辑", "篇幅变化")]
 
-    body, note = split_edit_note(edited)
-    unclosed = "围栏未闭合" in note
-    fence_ok = bool(note.strip()) and not unclosed
-    fence = GraderResult("编辑·留痕围栏", 1.0 if fence_ok else 0.0, fence_ok, weight=0.15,
-                         detail=("留痕围栏成对" if fence_ok
-                                 else ("围栏未闭合" if unclosed else "没有《本章改动留痕》")))
+    body, _note = split_edit_note(edited)
+    fence = GraderResult(
+        "编辑·留痕围栏", 0.0, True, weight=0.0, gating=False,
+        detail="[not-measurable] 留痕围栏在进 ledger 前已被 controller 剥离"
+               "(loom/agents.py:682-685 _split_edit_note 把《本章改动留痕》切出另存到"
+               ".审稿留痕/,只把干净正文交给下游润色师并落盘 ledger),这项体检从 ledger"
+               "读到的编辑产出永远不含围栏,测不出来不代表编辑没写留痕")
 
     must = must_include or []
     dropped = [k for k in must if k in draft and k not in body]

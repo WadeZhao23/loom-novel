@@ -143,20 +143,35 @@ _DRAFT_FIX = "沈砚睁开眼，矿灯昏黄。他记得三年后的那一刀。
 _EDITED_OK = (_DRAFT_FIX + "\n<LOOM:EDIT-NOTE>\n- 钩子更硬。\n</LOOM:EDIT-NOTE>")
 
 
-def test_editor_fence_pair_ok():
-    assert _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, []), "编辑·留痕围栏").passed is True
+# 「编辑·留痕围栏」不可测:controller 在落 ledger 前就把围栏剥走了
+# (loom/agents.py:682-685 _split_edit_note),evals.generate.collect_steps 从 ledger
+# 读出来的编辑产出从来不含围栏。下面三个用例原先断言"围栏成对/未闭合/缺失"会被判定为
+# 通过/失败,那是对着一个 controller 已经证明不可能发生的信号写的假设——已按
+# task-8 review 的结论改为断言 unmeasurable 形状。
+def test_editor_fence_check_is_unmeasurable_even_with_fence_present():
+    g = _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, []), "编辑·留痕围栏")
+    assert g.passed is True
+    assert g.gating is False
+    assert g.weight == 0.0
+    assert g.detail.startswith("[not-measurable]")
 
 
-def test_editor_flags_unclosed_fence():
+def test_editor_fence_check_is_unmeasurable_with_unclosed_fence():
     bad = _DRAFT_FIX + "\n<LOOM:EDIT-NOTE>\n- 忘了收尾。"
     g = _by_name(grade_editor(bad, _DRAFT_FIX, []), "编辑·留痕围栏")
-    assert g.passed is False
-    assert "未闭合" in g.detail
+    assert g.passed is True
+    assert g.gating is False
+    assert g.detail.startswith("[not-measurable]")
 
 
-def test_editor_flags_no_note_at_all():
+def test_editor_fence_check_is_unmeasurable_with_no_note_at_all():
+    """真实 ledger 内容的形状:编辑产出没有围栏(controller 已剥离)。这是最常见的
+    真实输入,绝不能被报成失败——这正是本次修的缺陷本身。"""
     g = _by_name(grade_editor(_DRAFT_FIX, _DRAFT_FIX, []), "编辑·留痕围栏")
-    assert g.passed is False
+    assert g.passed is True
+    assert g.gating is False
+    assert g.weight == 0.0
+    assert g.detail.startswith("[not-measurable]")
 
 
 def test_editor_flags_must_include_dropped_by_editor():
