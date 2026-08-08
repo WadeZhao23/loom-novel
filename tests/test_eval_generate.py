@@ -290,6 +290,51 @@ def test_run_batch_survives_a_crashed_run_and_reports_honestly(tmp_path):
     assert summ["n_total"] == 3 and summ["n_valid"] == 2
     md = (batch / "summary.md").read_text(encoding="utf-8")
     assert "3 次里 2 次有效" in md, "必须照实披露掉数,不得拿 2 次冒充 3 次"
+    # 光看 summary 数字不够——batch/runs/ 目录本身也得如实反映:
+    # 两次成功跑的产物目录(带 step_report.json)都得在,第 2 次(i=1)崩的那次
+    # 要留 infra_1.txt 标记。(不额外断言 batch/runs 下条目总数——generate_one
+    # 在跑 pipeline 前就先 mkdir 了 run_dir,下游崩溃会留一个空壳目录,那是
+    # generate_one 自身早已有的行为,不属于本次三个 finding 的范围。)
+    entries = list((batch / "runs").iterdir())
+    completed = [p for p in entries if p.is_dir() and (p / "step_report.json").is_file()]
+    assert len(completed) == 2, "两次成功跑的 run 目录(带完整产物)都必须留着"
+    assert (batch / "runs" / "infra_1.txt").is_file(), "崩的那次(i=1)要留 infra 标记"
+
+
+def test_run_batch_batch_id_collision_gets_distinct_paths(tmp_path, monkeypatch):
+    """同一秒内两次 run_batch 撞 batch_id 不得硬崩——比照 generate_one 的 run_id 撞车重试。
+
+    time.strftime 钉死同一秒,逼真撞车(而非"日常大概率不会同一秒"这种脆弱假设)。
+    """
+    import evals.generate as gen_mod
+    monkeypatch.setattr(gen_mod.time, "strftime", lambda *a: "20260101-000000")
+    case_dir = _write_gen_case(tmp_path)
+    b1 = gen_mod.run_batch(case_dir, repeat=1, runs_dir=tmp_path / "runs",
+                           backend_factory=lambda: ScriptedBackend(list(_GEN_RUN_7)),
+                           workdir_root=tmp_path / "work1")
+    b2 = gen_mod.run_batch(case_dir, repeat=1, runs_dir=tmp_path / "runs",
+                           backend_factory=lambda: ScriptedBackend(list(_GEN_RUN_7)),
+                           workdir_root=tmp_path / "work2")
+    assert b1 != b2, "撞车的两个批次必须落到不同目录,而不是互相覆盖"
+    assert b1.exists() and b2.exists()
+    assert (b1 / "summary.json").is_file() and (b2 / "summary.json").is_file()
+
+
+def test_run_batch_workdir_mkdir_failure_is_infra_not_fatal(tmp_path):
+    """第 2 次(i=1)的 workdir 建目录失败,必须记 infra 继续跑完,不能让整批带着已收的成果崩出去。"""
+    from evals.generate import run_batch
+    case_dir = _write_gen_case(tmp_path)
+    workdir_root = tmp_path / "work"
+    workdir_root.mkdir()
+    # 预先在 w1 位置放一个文件(不是目录)——generate_one 内部 i=1 时 wd.mkdir() 必炸。
+    (workdir_root / "w1").write_text("占位文件,顶替本该是目录的位置", encoding="utf-8")
+    batch = run_batch(case_dir, repeat=3, runs_dir=tmp_path / "runs",
+                      backend_factory=lambda: ScriptedBackend(list(_GEN_RUN_7)),
+                      workdir_root=workdir_root)
+    assert (batch / "summary.json").is_file(), "workdir 建目录失败也必须走到 summary 落盘"
+    summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
+    assert summ["n_total"] == 3 and summ["n_valid"] == 2, "1 次因 workdir 而 infra,其余 2 次照收"
+    assert (batch / "runs" / "infra_1.txt").is_file(), "workdir mkdir 失败要老实记成该次的 infra"
 
 
 def test_run_batch_all_runs_crashed_is_infra(tmp_path):

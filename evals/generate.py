@@ -309,16 +309,23 @@ def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
     """
     case = load_gen_case(case_dir)
     runs_dir = runs_dir or RUNS_DIR
-    batch_id = f"{time.strftime('%Y%m%d-%H%M%S')}_batch_{case['id']}_x{repeat}"
+    # batch_id 撞车重试:与 generate_one 的 run_id(见上方 246-251 行)同款处理——
+    # time.strftime 只到秒,近乎零延迟的 DemoBackend 完全可能让同 case 同 repeat
+    # 的两次调用落进同一秒,不重试就是无预警的 FileExistsError,跳出退出码契约。
+    base = f"{time.strftime('%Y%m%d-%H%M%S')}_batch_{case['id']}_x{repeat}"
+    batch_id, n = base, 1
+    while (runs_dir / batch_id).exists():
+        n += 1
+        batch_id = f"{base}-{n}"
     batch = runs_dir / batch_id
     (batch / "runs").mkdir(parents=True)
 
     reports: list[dict | None] = []
     for i in range(repeat):
         wd = (workdir_root / f"w{i}") if workdir_root else None
-        if wd:
-            wd.mkdir(parents=True, exist_ok=True)
         try:
+            if wd:
+                wd.mkdir(parents=True, exist_ok=True)
             run_dir = generate_one(
                 case_dir,
                 backend=backend_factory() if backend_factory else None,
