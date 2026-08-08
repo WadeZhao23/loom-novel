@@ -5,7 +5,7 @@
     python -m evals.run_eval --baseline        # 把本次结果存成基线 baseline.json
     python -m evals.run_eval --gate            # 和基线比对,有回归则退出码 1(给 CI 用)
 
-退出码:0=通过/已固化 / 1=质量回归 / 2=infra(无 case 或无基线文件)。
+退出码:0=通过/已固化 / 1=质量回归 / 2=infra(无 case / 无基线文件 / --judge 与 --gate 同传)。
 """
 
 from __future__ import annotations
