@@ -188,3 +188,76 @@ def test_editor_note_body_excluded_from_length():
 
 def test_editor_skipped_when_upstream_missing():
     assert all(g.gating is False for g in grade_editor(None, _DRAFT_FIX, []))
+
+
+# ── Finding 1: 篇幅变化/篇幅保持 score 不能越界(单边 clamp 会漏出负分)──────────
+def test_editor_size_score_bounded_on_extreme_expansion():
+    """回归:round(min(1.0, 1.0-abs(1.0-ratio)),3) 只夹了上界,4x 扩写会把 score 打到 -2.0。"""
+    edited = ("字" * 2000) + "\n<LOOM:EDIT-NOTE>\n- 扩写了。\n</LOOM:EDIT-NOTE>"
+    g = _by_name(grade_editor(edited, "字" * 500, []), "编辑·篇幅变化")
+    assert 0.0 <= g.score <= 1.0
+    assert g.passed is False
+
+
+def test_editor_size_score_bounded_on_extreme_shrinkage():
+    edited = ("字" * 50) + "\n<LOOM:EDIT-NOTE>\n- 删得只剩骨架。\n</LOOM:EDIT-NOTE>"
+    g = _by_name(grade_editor(edited, "字" * 500, []), "编辑·篇幅变化")
+    assert 0.0 <= g.score <= 1.0
+    assert g.passed is False
+
+
+def test_polisher_size_score_bounded_on_extreme_expansion():
+    edited = "字" * 500
+    polished = "字" * 2000                  # 4x 扩写,同样的单边 clamp 漏洞
+    g = _by_name(grade_polisher(polished, edited, []), "润色师·篇幅保持")
+    assert 0.0 <= g.score <= 1.0
+    assert g.passed is False
+
+
+def test_polisher_size_score_bounded_on_extreme_shrinkage():
+    edited = "字" * 500
+    polished = "字" * 50                     # 10x 缩水
+    g = _by_name(grade_polisher(polished, edited, []), "润色师·篇幅保持")
+    assert 0.0 <= g.score <= 1.0
+    assert g.passed is False
+
+
+# ── Finding 2: chapter_target<=0 时「大纲师·篇幅预算」passed 与 score 必须一致 ──
+def test_outliner_budget_unmeasurable_when_target_nonpositive():
+    """chapter_target<=0 时该检查不适用:不能一边 passed=True 一边 score=0.0。"""
+    outline = "场景一 · 甲 · 约80字\n场景二 · 乙 · 约70字"
+    g = _by_name(grade_outliner(outline, 0, []), "大纲师·篇幅预算")
+    assert g.passed is True
+    assert g.gating is False
+    assert g.weight == 0.0
+    assert "not-measurable" in g.detail
+
+
+def test_outliner_budget_unmeasurable_when_target_negative():
+    outline = "场景一 · 甲 · 约80字\n场景二 · 乙 · 约70字"
+    g = _by_name(grade_outliner(outline, -100, []), "大纲师·篇幅预算")
+    assert g.passed is True
+    assert g.gating is False
+
+
+# ── Finding 3: parse_scene_budgets 数的是「约X字」标注数,不是场景数 ──────────
+def test_outliner_scene_count_unmeasurable_without_budget_annotations():
+    """没有「约X字」标注时,场次数不可测——不能报「0 场」(那是假数据,且与
+    「篇幅预算」的「没标」重复计了同一个缺陷)。「篇幅预算」仍要单独抓住这个缺陷。"""
+    bare = "场景一 醒来。\n场景二 遇人。\n场景三 追兵。"
+    res = grade_outliner(bare, 200, [])
+    cnt = _by_name(res, "大纲师·场次数")
+    assert cnt.passed is True, "不可测不等于失败"
+    assert cnt.gating is False
+    assert "0 场" not in cnt.detail
+    bud = _by_name(res, "大纲师·篇幅预算")
+    assert bud.passed is False
+    assert "没标" in bud.detail
+
+
+def test_outliner_scene_count_unchanged_when_budgets_present():
+    """有「约X字」标注时行为不变(仍走场次区间判定)。"""
+    g = _by_name(grade_outliner(_GOOD_OUTLINE, 200, []), "大纲师·场次数")
+    assert g.passed is True
+    assert g.gating is True
+    assert "3 场" in g.detail

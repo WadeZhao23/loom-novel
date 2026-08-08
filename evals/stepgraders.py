@@ -83,9 +83,12 @@ def grade_outliner(outline: str | None, chapter_target: int,
     体检三项(全部复用产品自己的判据,不另立一套——重写必漂):
     - 必含要素:case 的 must_include 有没有在细纲这层就丢掉(丢在这里 = 写手根本没机会写)。
     - 场次数:落在 scene_range(chapter_target) 声明的区间内(evalapi 接缝,与喂 prompt
-      的 _scene_budget 同源)。
+      的 _scene_budget 同源)。parse_scene_budgets 数的是「约X字」标注数,不是场景数——
+      细纲完全没标注时这个信号测不出场景数(不能报「0 场」,那是假数据),记不可测;
+      「没标」这个缺陷交给下面的篇幅预算项单独抓,不在这里重复计。
     - 篇幅预算标注:每场标了「约X字」且各场合计与章目标偏差 ≤30%(与产品
-      _check_scene_budget 的 0.3 阈值同口径)。
+      _check_scene_budget 的 0.3 阈值同口径)。chapter_target<=0 时偏差率没有意义,
+      这项检查本身不适用,记不可测(不伪造分数,也不让 passed/score 互相矛盾)。
     """
     if outline is None:
         return [skipped("大纲师", "必含要素"), skipped("大纲师", "场次数"),
@@ -100,21 +103,34 @@ def grade_outliner(outline: str | None, chapter_target: int,
                        evidence=[f"细纲里没有:「{m}」" for m in missing])
 
     budgets = parse_scene_budgets(outline)
-    lo, hi = scene_range(chapter_target)
-    n_scenes = len(budgets)
-    in_range = lo <= n_scenes <= hi
-    cnt = GraderResult("大纲师·场次数", 1.0 if in_range else 0.0, in_range, weight=0.20,
-                       detail=f"{n_scenes} 场(目标 {chapter_target} 字 → 应 {lo}-{hi} 场)")
+    if not budgets:
+        # 没有「约X字」标注 → 数不出场景数(parse_scene_budgets 抓的是标注,不是场景标题)。
+        # 报「0 场」会把「没标」这个缺陷在这里和下面的篇幅预算项重复计一遍,还给出假数据。
+        cnt = GraderResult("大纲师·场次数", 0.0, True, weight=0.0, gating=False,
+                           detail="[not-measurable] 细纲没有「约X字」标注,场次数无法从这个信号"
+                                  "测出(该缺陷已由「大纲师·篇幅预算」的「没标」记录,这里不重复计)")
+    else:
+        lo, hi = scene_range(chapter_target)
+        n_scenes = len(budgets)
+        in_range = lo <= n_scenes <= hi
+        cnt = GraderResult("大纲师·场次数", 1.0 if in_range else 0.0, in_range, weight=0.20,
+                           detail=f"{n_scenes} 场(目标 {chapter_target} 字 → 应 {lo}-{hi} 场)")
 
     total_budget = sum(budgets)
     if not budgets:
         bud = GraderResult("大纲师·篇幅预算", 0.0, False, weight=0.15,
                            detail="各场都没标「约X字」,写手篇幅无锚")
+    elif chapter_target <= 0:
+        # 章目标非正数 → 偏差率(drift / chapter_target)没有意义,这项检查不适用。
+        # 不能一边 passed=True 一边 score=0.0——不适用就不计分、不进门禁,别伪造数字。
+        bud = GraderResult("大纲师·篇幅预算", 0.0, True, weight=0.0, gating=False,
+                           detail=f"[not-measurable] 章目标 {chapter_target} 非正数,篇幅预算检查"
+                                  f"不适用(各场合计约 {total_budget} 字)")
     else:
         drift = abs(total_budget - chapter_target)
-        ok = chapter_target <= 0 or drift <= chapter_target * 0.3
+        ok = drift <= chapter_target * 0.3
         bud = GraderResult("大纲师·篇幅预算",
-                           round(max(0.0, 1.0 - drift / max(1, chapter_target)), 3), ok,
+                           round(max(0.0, 1.0 - drift / chapter_target), 3), ok,
                            weight=0.15,
                            detail=f"各场合计约 {total_budget} 字(章目标 {chapter_target},容差 30%)")
     return [inc, cnt, bud]
@@ -194,7 +210,8 @@ def grade_editor(edited: str | None, draft: str | None,
     n_draft, n_edit = _chars(draft), _chars(body)
     ratio = n_edit / max(1, n_draft)
     size_ok = 0.7 <= ratio <= 1.3
-    size = GraderResult("编辑·篇幅变化", round(min(1.0, 1.0 - abs(1.0 - ratio)), 3), size_ok,
+    size = GraderResult("编辑·篇幅变化",
+                        round(max(0.0, min(1.0, 1.0 - abs(1.0 - ratio))), 3), size_ok,
                         weight=0.10,
                         detail=f"初稿 {n_draft} → 改稿 {n_edit} 字(×{ratio:.2f},应在 0.7~1.3)")
     return [fence, keep, size]
@@ -232,7 +249,8 @@ def grade_polisher(polished: str | None, edited: str | None,
     n_edit, n_pol = _chars(edited_body), _chars(polished)
     ratio = n_pol / max(1, n_edit)
     size_ok = 0.8 <= ratio <= 1.2
-    size = GraderResult("润色师·篇幅保持", round(min(1.0, 1.0 - abs(1.0 - ratio)), 3), size_ok,
+    size = GraderResult("润色师·篇幅保持",
+                        round(max(0.0, min(1.0, 1.0 - abs(1.0 - ratio))), 3), size_ok,
                         weight=0.10,
                         detail=f"改稿 {n_edit} → 终稿 {n_pol} 字(×{ratio:.2f},应在 0.8~1.2)")
     return [ai, size]
