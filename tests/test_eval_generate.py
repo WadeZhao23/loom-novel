@@ -222,6 +222,18 @@ def test_step_report_marks_bypassed_outliner_skipped_not_failed(tmp_path):
     assert rep["weakest"] != "大纲师"
 
 
+def test_gen_02_exists_and_has_no_outline_overlay():
+    """gen_02 存在的唯一理由就是让大纲师真跑——它一旦带了 overlay 细纲就白设了。"""
+    from evals.generate import GEN_CASES_DIR, load_gen_case
+    d = GEN_CASES_DIR / "gen_02_mine_escape"
+    assert (d / "case.json").is_file(), "缺 gen_02:大纲师这一棒没有任何 case 覆盖"
+    case = load_gen_case(d)
+    assert case["id"] == "gen_02_mine_escape"
+    assert not (d / "overlay" / "正文" / ".细纲").exists(), \
+        "gen_02 不得带 overlay 细纲,否则大纲师又被 WYSIWYG 旁路"
+    assert case["expect"]["must_include"], "得有必含要素,否则大纲师的必含体检没内容可查"
+
+
 def test_cli_unknown_case_is_infra_2(tmp_path):
     (tmp_path / "gc").mkdir()
     assert main(["--case", "不存在", "--cases-dir", str(tmp_path / "gc"),

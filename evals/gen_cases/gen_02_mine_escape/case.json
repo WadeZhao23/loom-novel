@@ -1,0 +1,14 @@
+{
+  "id": "gen_02_mine_escape",
+  "title": "废矿逃生·首章(生成型·大纲师真跑)",
+  "chapter_n": 1,
+  "chapter_chars": 1000,
+  "expect": {
+    "must_include": ["沈砚", "矿"],
+    "hardfact_terms": ["逆息"],
+    "must_not_include": ["二中", "一阶0级"],
+    "max_aitell_hits": 0,
+    "len_tolerance": 0.6
+  },
+  "note": "与 gen_01 的唯一结构差异:【不带 overlay 细纲】,所以大纲师不走 WYSIWYG 旁路、真调模型(8 调而非 7 调,已用 LOOM_DEMO=1 离线冒烟实测验证)。gen_01 覆盖不到大纲师这一棒,这个 case 就是为它存在的。chapter_chars 原计划取 2000(落进 scene_range 的 (3,4) 档,便于检验大纲师有没有按字数预算拆场),但实测发现 DemoBackend 的罐头终稿固定 144 视觉字(loom/backends.py `_DEMO['final']`),而 guard.chapter_profile 的最短闸是 max(40, chapter_chars*0.12)——2000 时闸值 240 > 144,run_pipeline 会在离线冒烟里直接抛 LoomBackendError,整条 run 连 steps.json 都落不下来,冒烟必挂。(3,4) 档下限是 1501,闸值 180 同样打不穿 144,这一档在离线冒烟下无解。因此改取 1000(仍是 (2,3) 档,闸值 120,冒烟安全过);(3,4) 档的按预算拆场只能留给 --backend configured 的真机验收去测。hardfact_terms 单列「逆息」:设定师的锚点里必须带上这个硬设定专名,丢了下游就只能靠 hardfacts 直送兜底。"
+}
