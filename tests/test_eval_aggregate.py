@@ -145,13 +145,16 @@ def test_aggregate_runs_multiple_infra_runs_scattered():
 
 
 def test_aggregate_runs_skipped_item_excluded_from_distribution():
-    """gating=False 的项(skipped(...) / [not-measurable])不进分布——
+    """detail 带 [skipped]/[not-measurable] 前缀的项(真正没测到)不进分布——
     不能被当 0 分冲进中位数,也不能被当"有效测过"计进 n_valid。
+
+    排除靠的是 detail 前缀,不是 gating——见下面
+    test_aggregate_runs_observe_only_item_with_real_score_is_included。
     """
     report_a = {
         "steps": {"写手": [
             {"name": "写手·对话密度", "score": 0.0, "passed": True,
-             "weight": 0.0, "gating": False, "detail": "skipped(无对话可测)", "evidence": []},
+             "weight": 0.0, "gating": False, "detail": "[skipped] 无对话可测", "evidence": []},
         ]},
         "weakest": None,
     }
@@ -167,3 +170,30 @@ def test_aggregate_runs_skipped_item_excluded_from_distribution():
     assert d["n_total"] == 2
     assert d["n_valid"] == 1  # 只有 report_b 那次算数
     assert d["median"] == 0.8  # 不能被 skipped 的 0 分拉低
+
+
+def test_aggregate_runs_observe_only_item_with_real_score_is_included():
+    """observe-only 项(gating=False, weight=0.0,但**每次都真测了**,如写手·AI翻转句)
+    必须进分布——不能因为 gating=False 就当"没测到"丢掉,那样报告会把真实测过的
+    信号说成"从未测过"(Important-1:此前 aggregate.py 用 gating 当排除判据,把这类
+    观测项和真正的 skipped/[not-measurable] 项混为一谈,一起被排除)。
+    """
+    report_a = {
+        "steps": {"写手": [
+            {"name": "写手·AI翻转句", "score": 0.5, "passed": True,
+             "weight": 0.0, "gating": False, "detail": "命中 1 处(初稿基线)", "evidence": []},
+        ]},
+        "weakest": None,
+    }
+    report_b = {
+        "steps": {"写手": [
+            {"name": "写手·AI翻转句", "score": 1.0, "passed": True,
+             "weight": 0.0, "gating": False, "detail": "命中 0 处(初稿基线)", "evidence": []},
+        ]},
+        "weakest": None,
+    }
+    agg = aggregate_runs([report_a, report_b])
+    d = agg["steps"]["写手"]["写手·AI翻转句"]
+    assert d["n_total"] == 2
+    assert d["n_valid"] == 2, "两次都真测过,不能因 gating=False 被当没测到"
+    assert d["median"] == 0.75

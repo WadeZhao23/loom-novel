@@ -5,6 +5,7 @@ from evals.stepgraders import (
     grade_polisher,
     grade_setter,
     grade_writer,
+    not_measurable,
     skipped,
 )
 
@@ -22,6 +23,15 @@ def test_skipped_shape_does_not_pollute_gating():
     assert g.passed is True, "这棒没跑不该判失败"
     assert g.gating is False
     assert g.detail.startswith("[skipped]")
+
+
+# ── not_measurable 形状(与 skipped 并列的第二种"没测到") ──────────────────────
+def test_not_measurable_shape_does_not_pollute_gating():
+    g = not_measurable("大纲师·场次数", "细纲没有标注")
+    assert g.passed is True, "测不出不该判失败"
+    assert g.gating is False
+    assert g.weight == 0.0
+    assert g.detail == "[not-measurable] 细纲没有标注"
 
 
 # ── 设定师 ─────────────────────────────────────────────────────────────────

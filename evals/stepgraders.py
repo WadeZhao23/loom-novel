@@ -36,10 +36,32 @@ def skipped(step: str, item: str) -> GraderResult:
     """这一棒没有产物时的统一形状。
 
     passed=True 是刻意的:「这棒没跑」不该污染通过判定;gating=False 让它不进门禁;
-    聚合侧按 detail 的 [skipped] 前缀把它排除出分布(不拉低中位数)。
+    detail 带 [skipped] 前缀。
+
+    聚合侧(evals/aggregate.py)按 detail 的 **[skipped] 或 [not-measurable]**(后者见
+    下面 not_measurable())前缀识别"genuinely 没测到"、排除出分布——不是靠
+    gating=False 本身。gating=False 还覆盖 observe-only 项(如 写手·AI翻转句:
+    weight=0.0、gating=False,但每次都真测了),那类项必须留在分布里,否则真实
+    信号会被误报成"从未测过"(Important-1)。
     """
     return GraderResult(f"{step}·{item}", 0.0, True, weight=0.0, gating=False,
                         detail=f"[skipped] {step} 这一棒没有产物(旁路或续跑跳过)")
+
+
+def not_measurable(name: str, reason: str) -> GraderResult:
+    """某体检项本次结构性测不出(不是「没跑」,是这个信号在当前输入下不适用)。
+
+    与 skipped() 并列的第二种「没测到」——三处调用方(大纲师·场次数无标注时、
+    大纲师·篇幅预算 chapter_target<=0 时、编辑·留痕围栏恒不可测)原先各自手写同一份
+    weight=0.0/gating=False/passed=True/[not-measurable] 前缀,收进这个小helper 防
+    第三处再手抄一遍漂掉某个字段。
+
+    passed=True 是刻意的:「测不出」不该判定失败;weight=0.0/gating=False 让它不进
+    门禁;detail 统一带 [not-measurable] 前缀,供 evals/aggregate.py 据此排除出分布
+    (同 skipped() 的排除机制,见其 docstring)。
+    """
+    return GraderResult(name, 0.0, True, weight=0.0, gating=False,
+                        detail=f"[not-measurable] {reason}")
 
 
 # ─────────────────────────────── 设定师 ───────────────────────────────
@@ -106,9 +128,10 @@ def grade_outliner(outline: str | None, chapter_target: int,
     if not budgets:
         # 没有「约X字」标注 → 数不出场景数(parse_scene_budgets 抓的是标注,不是场景标题)。
         # 报「0 场」会把「没标」这个缺陷在这里和下面的篇幅预算项重复计一遍,还给出假数据。
-        cnt = GraderResult("大纲师·场次数", 0.0, True, weight=0.0, gating=False,
-                           detail="[not-measurable] 细纲没有「约X字」标注,场次数无法从这个信号"
-                                  "测出(该缺陷已由「大纲师·篇幅预算」的「没标」记录,这里不重复计)")
+        cnt = not_measurable(
+            "大纲师·场次数",
+            "细纲没有「约X字」标注,场次数无法从这个信号测出(该缺陷已由"
+            "「大纲师·篇幅预算」的「没标」记录,这里不重复计)")
     else:
         lo, hi = scene_range(chapter_target)
         n_scenes = len(budgets)
@@ -123,9 +146,9 @@ def grade_outliner(outline: str | None, chapter_target: int,
     elif chapter_target <= 0:
         # 章目标非正数 → 偏差率(drift / chapter_target)没有意义,这项检查不适用。
         # 不能一边 passed=True 一边 score=0.0——不适用就不计分、不进门禁,别伪造数字。
-        bud = GraderResult("大纲师·篇幅预算", 0.0, True, weight=0.0, gating=False,
-                           detail=f"[not-measurable] 章目标 {chapter_target} 非正数,篇幅预算检查"
-                                  f"不适用(各场合计约 {total_budget} 字)")
+        bud = not_measurable(
+            "大纲师·篇幅预算",
+            f"章目标 {chapter_target} 非正数,篇幅预算检查不适用(各场合计约 {total_budget} 字)")
     else:
         drift = abs(total_budget - chapter_target)
         ok = drift <= chapter_target * 0.3
@@ -201,12 +224,12 @@ def grade_editor(edited: str | None, draft: str | None,
                 skipped("编辑", "篇幅变化")]
 
     body, _note = split_edit_note(edited)
-    fence = GraderResult(
-        "编辑·留痕围栏", 0.0, True, weight=0.0, gating=False,
-        detail="[not-measurable] 留痕围栏在进 ledger 前已被 controller 剥离"
-               "(loom/agents.py:682-685 _split_edit_note 把《本章改动留痕》切出另存到"
-               ".审稿留痕/,只把干净正文交给下游润色师并落盘 ledger),这项体检从 ledger"
-               "读到的编辑产出永远不含围栏,测不出来不代表编辑没写留痕")
+    fence = not_measurable(
+        "编辑·留痕围栏",
+        "留痕围栏在进 ledger 前已被 controller 剥离(loom/agents.py:682-685 "
+        "_split_edit_note 把《本章改动留痕》切出另存到 .审稿留痕/,只把干净正文交给"
+        "下游润色师并落盘 ledger),这项体检从 ledger 读到的编辑产出永远不含围栏,"
+        "测不出来不代表编辑没写留痕")
 
     must = must_include or []
     dropped = [k for k in must if k in draft and k not in body]

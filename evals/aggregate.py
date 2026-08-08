@@ -89,9 +89,15 @@ def aggregate_runs(step_reports: list[dict | None]) -> dict:
             if g is None:
                 score = None  # 本次 run 整体 infra,或这个 item 这次没出现
             else:
-                # gating=False(skipped(...) / [not-measurable])不进分布:
-                # 旁路/测不了不是「得零分」,记 0 会把中位数拉垮。
-                score = g.get("score") if g.get("gating", True) else None
+                # 排除判据是 detail 的 [skipped]/[not-measurable] 前缀,不是 gating——
+                # gating=False 还覆盖 observe-only 项(如 写手·AI翻转句:weight=0.0,
+                # gating=False,但每次都真测了)。这类项若按 gating 排除,会把「真测过
+                # 只是不参与门禁」和「genuinely 没测到」混为一谈,前者的分数从此再也
+                # 进不了分布/summary/--compare,报告还会把它印成「全 skipped 或全
+                # infra」——数字是假的(不造数红线)。
+                detail = g.get("detail") or ""
+                unmeasured = detail.startswith("[skipped]") or detail.startswith("[not-measurable]")
+                score = None if unmeasured else g.get("score")
             item_scores[role][name].append(score)
 
     steps_out = {

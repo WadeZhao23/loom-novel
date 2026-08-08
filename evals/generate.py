@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 from pathlib import Path
 
 from loom.evalapi import (
@@ -277,6 +278,26 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     return run_dir
 
 
+def _cjk_ljust(s: str, width: int) -> str:
+    """按「东亚宽字符占 2 列」估算的定宽左对齐。
+
+    Python 的 f"{s:<N}" 按码点数补空格——CJK 字符在等宽终端里占 2 列,同一个 N 对
+    中文文本和纯 ASCII 文本补出来的视觉宽度并不一样,混排时列对不齐。这里只做最
+    小可用的宽度估算(西文/半角=1,中日韩全角=2),不追求 Unicode 断行等复杂规则。
+    """
+    w = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in s)
+    return s + " " * max(0, width - w)
+
+
+def _display_item(role: str, name: str) -> str:
+    """grader 名字自带角色前缀(如「设定师·硬设定专名」)。展示层若已单独有一列/一次
+    印过角色(棒级归因小结的「棒」列、--compare 打印的角色前缀),就不该在体检项文本里
+    再重复一遍——否则读出来是「设定师·设定师·硬设定专名」(Important-3)。
+    """
+    prefix = f"{role}·"
+    return name[len(prefix):] if name.startswith(prefix) else name
+
+
 def _summary_md(case_id: str, agg: dict, batch_id: str) -> str:
     """人看的批次小结。禁止只报中位数:掉数与区间必须同屏可见。"""
     lines = [f"# 棒级归因批次小结 · {case_id}", "",
@@ -290,10 +311,24 @@ def _summary_md(case_id: str, agg: dict, batch_id: str) -> str:
     lines += ["| 棒 | 体检项 | 中位数 | 区间 | 有效/总 |", "|---|---|---|---|---|"]
     for role, items in agg["steps"].items():
         for name, d in items.items():
+            label = _display_item(role, name)
             if d["n_valid"] == 0:
-                lines.append(f"| {role} | {name} | — | — | 0/{d['n_total']}(全 skipped 或全 infra) |")
+                # d["n_valid"]==0 但走到这里说明 agg["n_valid"]>0(全 infra 已在上面早退)——
+                # 精确可拆:agg["n_total"]-agg["n_valid"] 次是整体 infra(这一项那次跑
+                # 根本没跑到评分),其余 agg["n_valid"] 次是有效跑但这一项本身
+                # skipped/not-measurable。两种成因不同,不该继续含糊写「全 skipped 或全
+                # infra」——那句话既没说是哪种,也暗示了"整体 infra"在这里可能发生
+                # 100%(其实上面已经排除)。
+                n_infra = agg["n_total"] - agg["n_valid"]
+                n_unmeasured = agg["n_valid"]
+                if n_infra == 0:
+                    why = f"{n_unmeasured} 次有效运行里这项都 skipped/not-measurable"
+                else:
+                    why = (f"{n_infra} 次整体 infra + "
+                           f"{n_unmeasured} 次有效运行里这项都 skipped/not-measurable")
+                lines.append(f"| {role} | {label} | — | — | 0/{d['n_total']}({why}) |")
             else:
-                lines.append(f"| {role} | {name} | {d['median']} | "
+                lines.append(f"| {role} | {label} | {d['median']} | "
                              f"{d['lo']}~{d['hi']} | {d['n_valid']}/{d['n_total']} |")
     lines += ["", "> 判据纪律:两批比对时**区间重叠即不得宣称有改进**。",
               "> 生成链路无 seed、temperature=0.9 写死,单次分数差一律不作结论。"]
@@ -435,6 +470,21 @@ def main(argv: list[str] | None = None) -> int:
         if not (a / "summary.json").is_file() or not (b / "summary.json").is_file():
             print(f"✗ 批次目录缺 summary.json:{a} / {b}")
             return 2
+        sa = json.loads((a / "summary.json").read_text(encoding="utf-8"))
+        sb = json.loads((b / "summary.json").read_text(encoding="utf-8"))
+        # 任一批 0 次有效运行 → 拒绝出结论,退出 2。不拦的话 compare_batches 会把每项
+        # 都判成「无数据」,n_regressed==0 让 CLI 返回 0——脚本读到 0 就当"比对干净、
+        # 没有回归",这是不造数红线要挡的假阴性(Important-2)。
+        if sa.get("n_valid", 0) == 0 or sb.get("n_valid", 0) == 0:
+            print(f"✗ 有批次 0 次有效运行,拒绝出结论:"
+                  f"{a.name}(n_valid={sa.get('n_valid')}) / {b.name}(n_valid={sb.get('n_valid')})")
+            return 2
+        # 两批 case_id 不一致 → 拒绝比对。不拦的话会拿 a 的 case_id 当标题,继续对
+        # 不同 case 的分布逐项算改进/回归——数字看着有意义,其实是拿苹果比橘子。
+        if sa.get("case_id") != sb.get("case_id"):
+            print(f"✗ 两批的 case_id 不一致,拒绝比对:"
+                  f"{a.name}={sa.get('case_id')!r} / {b.name}={sb.get('case_id')!r}")
+            return 2
         res = compare_batches(a, b)
         print(f"── {res['case_id']}:{a.name} → {b.name} ──")
         for it in res["items"]:
@@ -443,7 +493,9 @@ def main(argv: list[str] | None = None) -> int:
             # 否则「区间重叠即分不出」这条纪律会被「区间本身就是假的」绕过去。
             nb = "?" if it["n_valid_before"] is None else f"{it['n_valid_before']}/{it['n_total_before']}"
             na = "?" if it["n_valid_after"] is None else f"{it['n_valid_after']}/{it['n_total_after']}"
-            print(f"  {it['verdict']:<16} {it['step']}·{it['item']:<24} "
+            # it['item'] 已经是完整 grader 名、自带角色前缀(如「写手·必含要素」)——
+            # 不再额外拼 it['step'],否则每行都印成「写手·写手·必含要素」(Important-3)。
+            print(f"  {it['verdict']:<16} {_cjk_ljust(it['item'], 24)} "
                   f"Δ中位数 {d}  n={nb} → {na}")
         print(f"\n改进 {res['n_improved']} 项 · 回归 {res['n_regressed']} 项 · "
               f"其余分不出(区间重叠或无数据)")

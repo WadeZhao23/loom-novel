@@ -442,9 +442,87 @@ def test_compare_does_not_silently_drop_items_exclusive_to_batch_b(tmp_path):
     assert len(res["items"]) == 2, "两批合计两个 (role,item) 键,一个都不能丢"
 
 
+def test_summary_md_zero_row_distinguishes_infra_from_skip(tmp_path):
+    """0/n_total 的行此前一律写「全 skipped 或全 infra」,不说是哪种——聚合层能精确算出
+    有几次是整体 infra、有几次是有效跑但这一项 skipped/not-measurable(Important-1),
+    不该继续含糊带过。
+    """
+    from evals.generate import _summary_md
+    agg = {
+        "n_total": 3, "n_valid": 2, "weakest": None,
+        "steps": {"写手": {"写手·AI翻转句": {"median": None, "lo": None, "hi": None,
+                                          "n_valid": 0, "n_total": 3}}},
+    }
+    md = _summary_md("gen_test", agg, "batch1")
+    assert "全 skipped 或全 infra" not in md
+    assert "1 次" in md and "整体 infra" in md
+    assert "2 次" in md and "skipped" in md and "not-measurable" in md
+
+
+def test_summary_md_zero_row_all_valid_but_always_unmeasured(tmp_path):
+    """没有任何一次是 infra,但这一项每次有效跑都测不出(如 编辑·留痕围栏 恒
+    not-measurable)——不该硬凑一句「0 次整体 infra」这种废话。
+    """
+    from evals.generate import _summary_md
+    agg = {
+        "n_total": 3, "n_valid": 3, "weakest": None,
+        "steps": {"编辑": {"编辑·留痕围栏": {"median": None, "lo": None, "hi": None,
+                                        "n_valid": 0, "n_total": 3}}},
+    }
+    md = _summary_md("gen_test", agg, "batch1")
+    assert "整体 infra" not in md
+    assert "3 次" in md and "skipped" in md and "not-measurable" in md
+
+
 def test_cli_compare_requires_two_batches(tmp_path):
     from evals.generate import main
     assert main(["--compare", str(tmp_path / "nope")]) == 2
+
+
+def test_cli_compare_refuses_when_a_side_has_zero_valid_runs(tmp_path, capsys):
+    """规格要求:任一批 n_valid==0 → 拒绝出结论,退出 2。此前代码直接调
+    compare_batches 拿到「无数据」verdict 并返回 0——脚本读到 0 会以为"比对干净、
+    没有回归",这正是不造数红线要拦住的假阴性(Important-2)。
+    """
+    from evals.generate import main
+    a = _fake_batch(tmp_path, "a", median=None, lo=None, hi=None, n_valid=0)
+    b = _fake_batch(tmp_path, "b", median=0.5, lo=0.4, hi=0.6)
+    code = main(["--compare", str(a), str(b)])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "n_valid" in out or "有效" in out
+
+
+def test_cli_compare_refuses_when_case_ids_differ(tmp_path, capsys):
+    """两批的 case_id 不一致时(比如误拿 gen_01 的批次去比 gen_02),不该继续套用
+    a 批的 case_id 当标题、照样吐改进/回归结论——那是拿不同 case 的分布硬比
+    (Important-2)。
+    """
+    from evals.generate import main
+    a = _fake_batch(tmp_path, "a", median=0.5, lo=0.4, hi=0.6)
+    b = _fake_batch(tmp_path, "b", median=0.5, lo=0.4, hi=0.6)
+    sb = json.loads((b / "summary.json").read_text(encoding="utf-8"))
+    sb["case_id"] = "gen_other_case"
+    (b / "summary.json").write_text(json.dumps(sb, ensure_ascii=False), encoding="utf-8")
+    code = main(["--compare", str(a), str(b)])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "gen_test" in out and "gen_other_case" in out
+
+
+def test_cli_compare_prints_role_once_not_doubled(tmp_path, capsys):
+    """generate.py:446 此前拼 f"{it['step']}·{it['item']}",但 item 已经是完整 grader
+    名(自带角色前缀,如「写手·必含要素」)——每行都印成「写手·写手·必含要素」。
+    这是整条分支的主要人读产物(Important-3),角色只能出现一次。
+    """
+    from evals.generate import main
+    a = _fake_batch(tmp_path, "a", median=0.2, lo=0.1, hi=0.3)
+    b = _fake_batch(tmp_path, "b", median=0.8, lo=0.7, hi=0.9)
+    code = main(["--compare", str(a), str(b)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "写手·写手·必含要素" not in out
+    assert "写手·必含要素" in out
 
 
 def test_compare_surfaces_sample_counts_for_thin_batches(tmp_path, capsys):
