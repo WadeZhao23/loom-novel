@@ -33,6 +33,13 @@ from loom.evalapi import (
 
 from .harness import run_case
 from .metering import MeteringBackend
+from .stepgraders import (
+    grade_editor,
+    grade_outliner,
+    grade_polisher,
+    grade_setter,
+    grade_writer,
+)
 
 HERE = Path(__file__).resolve().parent
 GEN_CASES_DIR = HERE / "gen_cases"
@@ -106,6 +113,39 @@ def collect_steps(project: Path, chapter_n: int, run_dir: Path,
     (run_dir / "steps.json").write_text(
         json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
     return out
+
+
+def grade_steps(steps: dict[str, str | None], case: dict) -> dict:
+    """给五棒的中间产物各跑一组确定性体检,并点名最弱的一棒。
+
+    weakest = 所有 gating 且未通过的体检项里 weight 最大的那条所属的棒——
+    这就是「该改哪一棒的 prompt」的直接答案。全过则 None。
+    skipped 项 gating=False,永远不会让一棒被点名(旁路不是失败)。
+    """
+    exp = case.get("expect", {}) or {}
+    must = exp.get("must_include") or []
+    # 设定师看的是「硬设定专名有没有进锚点」。禁止项(写错的等级/地名)不适合当必含,
+    # 故用独立可选字段;缺省回退 must_include。
+    hardfact_terms = exp.get("hardfact_terms") or must
+    anchors = case.get("fingerprint_anchors", []) or []
+    target = case.get("chapter_chars", 800)
+
+    per_step = {
+        "设定师": grade_setter(steps.get("设定师"), hardfact_terms),
+        "大纲师": grade_outliner(steps.get("大纲师"), target, must),
+        "写手": grade_writer(steps.get("写手"), target, must, anchors),
+        "编辑": grade_editor(steps.get("编辑"), steps.get("写手"), must),
+        "润色师": grade_polisher(steps.get("润色师"), steps.get("编辑"), anchors),
+    }
+
+    worst_weight, weakest = -1.0, None
+    for role, results in per_step.items():
+        for g in results:
+            if g.gating and not g.passed and g.weight > worst_weight:
+                worst_weight, weakest = g.weight, role
+
+    return {"steps": {r: [g.as_dict() for g in gs] for r, gs in per_step.items()},
+            "weakest": weakest}
 
 
 def _grade_candidate(run_dir: Path, case: dict, chapter_text: str):
@@ -223,6 +263,9 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     total_s = round(time.perf_counter() - t0, 3)
 
     steps = collect_steps(project, case["chapter_n"], run_dir, bypassed=bypassed)
+    step_report = grade_steps(steps, case)
+    (run_dir / "step_report.json").write_text(
+        json.dumps(step_report, ensure_ascii=False, indent=2), encoding="utf-8")
     result = _grade_candidate(run_dir, case, final)
     (run_dir / "report.json").write_text(
         json.dumps(result.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -263,8 +306,10 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = generate_one(d, backend_mode=args.backend, provider=args.provider,
                                model=args.model, runs_dir=args.runs_dir)
         report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
+        sr = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
         flag = "✅" if report["passed"] else "❌"
-        print(f"{flag} {report['case_id']}  score={report['score']}  → {run_dir}")
+        weak = f"  最弱棒={sr['weakest']}" if sr.get("weakest") else ""
+        print(f"{flag} {report['case_id']}  score={report['score']}{weak}  → {run_dir}")
     return 0
 
 

@@ -185,6 +185,43 @@ def test_collect_steps_without_outline_overlay_collects_outliner(tmp_path):
     assert meta["大纲师"] == "collected"
 
 
+def test_step_report_written_and_names_weakest_step(tmp_path):
+    """闭环的交付物:step_report.json 要能直接回答「该改哪一棒」。"""
+    from evals.generate import generate_one
+    case_dir = _write_gen_case(tmp_path, with_outline=False)
+    # 写手交的初稿里没有 must_include 的「矿灯」→ 写手·必含要素 应当失败并被点名。
+    # 设定师锚点这里刻意带上「矿灯」(不用共享的 _SETTER——它本来就没提矿灯,若沿用会让
+    # 设定师·硬设定专名 与 写手·必含要素 同时在 weight=0.30 撞车,点名就不再单指写手了)。
+    # 篇幅刻意 ≥40 字(chapter_profile(200)=max(40, 200*0.12)=40)——这份文本被脚本复用为
+    # 终稿(润色师那一步同样返回它),太短会先撞上终稿非空硬闸,根本走不到 step_report。
+    setter_with_lamp = "本章设定锚点:主角沈砚在废弃矿场,身旁一盏矿灯;境界凡境;金手指为重生记忆。"
+    draft_no_lamp = ("寅时三刻，铜锣未响。\n\n沈砚睁开眼，四肢发麻，伤口隐隐作痛，"
+                     "他撑着墙壁缓缓站起。\n\n他记得三年后的那一刀，也记得那人转身时留下的背影。")
+    edited = draft_no_lamp + "\n" + EDIT_NOTE_OPEN + "\n- 钩子更硬。\n" + EDIT_NOTE_CLOSE
+    be = ScriptedBackend([setter_with_lamp, _OUTLINE, draft_no_lamp, edited,
+                          "通过", draft_no_lamp, "通过", "标题"])
+    run_dir = generate_one(case_dir, backend=be,
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    rep = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
+    assert set(rep["steps"]) == {"设定师", "大纲师", "写手", "编辑", "润色师"}
+    names = [g["name"] for g in rep["steps"]["写手"]]
+    assert "写手·必含要素" in names
+    failed = [g for g in rep["steps"]["写手"] if g["name"] == "写手·必含要素"][0]
+    assert failed["passed"] is False
+    assert rep["weakest"] in ("写手", "大纲师"), f"该点名丢要素的那一棒,实际 {rep['weakest']}"
+
+
+def test_step_report_marks_bypassed_outliner_skipped_not_failed(tmp_path):
+    """大纲师被 WYSIWYG 旁路时不得被点名成最弱棒——旁路不是失败。"""
+    from evals.generate import generate_one
+    case_dir = _write_gen_case(tmp_path)                 # with_outline=True → 旁路
+    run_dir = generate_one(case_dir, backend=ScriptedBackend(list(_GEN_RUN_7)),
+                           runs_dir=tmp_path / "runs", workdir=tmp_path / "work")
+    rep = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
+    assert all(g["gating"] is False for g in rep["steps"]["大纲师"])
+    assert rep["weakest"] != "大纲师"
+
+
 def test_cli_unknown_case_is_infra_2(tmp_path):
     (tmp_path / "gc").mkdir()
     assert main(["--case", "不存在", "--cases-dir", str(tmp_path / "gc"),
