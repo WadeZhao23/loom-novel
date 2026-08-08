@@ -79,6 +79,30 @@ def test_prepare_project_applies_overlay_and_config(tmp_path):
     assert cfg.continuity_scan is False                              # 评测口径固定关(省一次调用)
 
 
+def test_gen_case_can_opt_into_continuity_scan(tmp_path):
+    """除虫此前被硬编码关死,评测里从没跑过。改成 case 可声明,缺省仍关。"""
+    from evals.generate import load_gen_case, prepare_project
+    d = tmp_path / "gc_scan"
+    (d).mkdir(parents=True)
+    (d / "case.json").write_text(json.dumps({
+        "id": "scan_on", "chapter_n": 1, "chapter_chars": 200,
+        "continuity_scan": True,
+    }, ensure_ascii=False), encoding="utf-8")
+    case = load_gen_case(d)
+    work = tmp_path / "w"; work.mkdir()
+    cfg = load_config(prepare_project(d, case, work))
+    assert cfg.continuity_scan is True
+
+
+def test_gen_case_continuity_scan_defaults_off(tmp_path):
+    from evals.generate import load_gen_case, prepare_project
+    case_dir = _write_gen_case(tmp_path)
+    case = load_gen_case(case_dir)
+    work = tmp_path / "w2"; work.mkdir()
+    cfg = load_config(prepare_project(case_dir, case, work))
+    assert cfg.continuity_scan is False, "缺省必须仍关——省一次调用,与既有 golden 同口径"
+
+
 # 7 调脚本(细纲 overlay 旁路大纲师):设定/写手/编辑/质检"通过"/润色/去AI味"通过"/标题。
 # 产出文本 ≥40 字过终稿最短闸(200×12%=24,地板40);避开翻转句与禁词,含"矿灯"喂 must_include。
 _SETTER = "本章设定锚点:主角沈砚在废弃矿场;境界凡境;金手指为重生记忆。"

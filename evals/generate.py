@@ -71,7 +71,9 @@ def prepare_project(case_dir: Path, case: dict, workdir: Path) -> Path:
     cfg = load_config(project)
     cfg.chapter_chars = case["chapter_chars"]
     cfg.gate_rounds = case.get("gate_rounds", cfg.gate_rounds)
-    cfg.continuity_scan = False   # 附赠扫描是额外模型调用;评测口径固定为关(与 golden 同口径)
+    # 附赠扫描是额外模型调用,评测缺省关(与既有 golden 同口径);case 可显式打开,
+    # 好让除虫这条链也有 eval 覆盖——此前它被硬编码关死,评测里从来没跑过。
+    cfg.continuity_scan = bool(case.get("continuity_scan", False))
     save_config(project, cfg)
     return project
 
