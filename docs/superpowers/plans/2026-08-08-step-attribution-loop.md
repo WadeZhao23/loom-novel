@@ -463,6 +463,22 @@ MSG
 - Consumes: `evalapi.PIPELINE`、`evalapi.load_ledger`（Task 4）
 - Produces: `collect_steps(project: Path, chapter_n: int, run_dir: Path) -> dict[str, str | None]` —— 返回 `{role: output_text}`；被旁路/跳过的棒值为 `None`。同时把每棒落成 `run_dir/steps/<role>.md`（`None` 的棒不落文件）。
 
+> ### ⚠️ 计划勘误（Task 5 实施时实测发现并已修正）
+>
+> 本 Task 原文的 `collect_steps` 参考代码假设「role 在 ledger 里缺席 ⇒ 那一棒被旁路」。**这是错的。**
+> `loom/agents.py:663-681` 的 WYSIWYG 旁路分支把 `output = outline_path.read_text(...)` 之后**照样落到**
+> 共同尾部的 `ledger.record_step(...)`（`agents.py:714`）——ledger 里**永远**有大纲师的条目，
+> 旁路与否只差在内容是 fixture 原文还是模型产出。
+>
+> **已落地的正确做法**（见 `evals/generate.py`，commit `9583d29`）：在 `run_pipeline` **之前**用
+> `evalapi.outline_path` 判定旁路（判据与 `agents.py:664` 逐字一致：`is_file() and read_text().strip()`），
+> 结果作为 `bypassed=` 关键字参数传进 `collect_steps`。**必须在 `run_pipeline` 之前判**——
+> 真跑时大纲师会把细纲写进同一个文件（`agents.py:679-680`），跑完再判会把真生成误判成旁路。
+>
+> **给后续 Task 的实施者**：`collect_steps` 的 `bypassed` 默认 `frozenset()`，漏传不报错、只静默标错
+> `collected`/`skipped`。**一律以 `evals/generate.py` 的现状为准，不要照抄本文档的参考代码块。**
+>
+
 **Why:** `run_pipeline` 对 `PIPELINE` 里每个 role 都调了 `ledger.record_step(..., output, ...)`，`output` 是该棒完整产物原文。`generate_one` 在 `line 145` 就持有临时项目根，跑完却只拷了终稿。
 
 - [ ] **Step 1: 写失败测试**
