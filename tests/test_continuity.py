@@ -387,3 +387,67 @@ def test_char_continuity_no_alias_match():
     items = detect_char_continuity(book, 2, '陈墨走入庭院。', {'苏清瑶', '陈墨'})
     assert items == []
 
+
+# ── Task 13: detect_char_continuity 四个 bug 回归 ────────
+# 状态一律放在非第 1 章:第 1 章的 fixture 会掩盖 prior 用了泄漏循环变量的 bug②。
+
+def test_char_continuity_prior_points_at_the_right_chapter():
+    """双证据的价值全在指对地方:prior 必须指状态实际所在那一章,不是最早那章。"""
+    book = {
+        1: [("状态", "沈砚:健全|第1章")],
+        5: [("状态", "沈砚:重伤|第5章")],
+    }
+    body = "沈砚推开门，屋里空无一人。" * 30
+    out = detect_char_continuity(book, 7, body, {"沈砚"})
+    assert out, "第5章重伤、第7章出场未交代 → 应当报"
+    assert "第5章" in out[0].prior, f"prior 指错章:{out[0].prior}"
+
+
+def test_char_continuity_respects_char_names_whitelist():
+    """char_names 是白名单:账本里的非人物行(阵法/城主府)不该触发人设报警。"""
+    book = {2: [("状态", "护山大阵:封印|第2章")]}
+    body = "护山大阵嗡鸣了一声。" * 30
+    assert detect_char_continuity(book, 4, body, {"沈砚"}) == []
+
+
+def test_char_continuity_empty_whitelist_falls_back_to_no_filter():
+    """白名单为空(老书没有人物目录)→ 不过滤,特殊状态角色仍能被抓到——
+    这是兜底行为,不是把 bug① 放回来(bug① 是"非空白名单也不过滤")。"""
+    book = {2: [("状态", "沈砚:重伤|第2章")]}
+    body = "沈砚一跃三丈，长剑出鞘。" * 20
+    assert detect_char_continuity(book, 4, body, set()) != []
+
+
+def test_char_continuity_does_not_fire_when_status_change_is_narrated():
+    """全名出现且正文交代了状态变化 → 不该报。旧判据 `state_line not in body[:500]`
+    实质恒真,让这条分支变成噪声源。"""
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "沈砚的伤已经好了大半，他推门进来。" + "此后诸事顺遂。" * 30
+    assert detect_char_continuity(book, 5, body, {"沈砚"}) == []
+
+
+def test_char_continuity_still_fires_when_status_ignored():
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "沈砚一跃三丈，长剑出鞘，快得没人看清。" * 20
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out and "第3章" in out[0].prior
+
+
+def test_char_continuity_single_surname_is_not_an_alias():
+    """单汉字姓在中文里必然撞词(苏醒/苏州/复苏),不能当别名。"""
+    book = {2: [("状态", "苏昭:闭关|第2章")]}
+    body = "他从昏迷中苏醒过来，望向苏州方向。" * 20   # 有「苏」但没有苏昭
+    assert detect_char_continuity(book, 4, body, {"苏昭"}) == []
+
+
+def test_char_continuity_alias_evidence_is_deterministic():
+    """纯函数必须可复现:同一份输入多次调用,证据逐字相同(旧代码 set 遍历会飘)。
+    body 里同时放「沈公子/沈兄/沈某」三个候选别名,逼旧代码的 set 遍历暴露顺序不稳
+    (旧代码里 bare 单姓「沈」也是候选,命中即碰上,更加剧了不稳定)。"""
+    book = {2: [("状态", "沈砚:闭关|第2章")]}
+    body = "沈公子与沈兄一同站着，沈某也在。" * 20
+    outs = [detect_char_continuity(book, 4, body, {"沈砚"}) for _ in range(20)]
+    evidences = {tuple(b.evidence for b in o) for o in outs}
+    assert len(evidences) == 1, f"证据不稳定:{evidences}"
+    assert outs[0] and outs[0][0].evidence == "沈公子"  # 别名生成顺序固定,首个命中恒为「沈公子」
+

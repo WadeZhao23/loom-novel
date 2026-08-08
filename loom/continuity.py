@@ -130,59 +130,93 @@ def detect_time_mismatch(book: dict[int, list[tuple[str, str]]], chapter_n: int,
 
 
 
-def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str, char_names: set[str]) -> list[BugItem]:
+_CHAR_SPECIAL_STATES = re.compile(
+    r"(?:^|[^无未不])(?:重伤|闭关|失踪|禁足|昏迷|囚禁|封印|被俘|失忆|流放|除名|镇守|被控)")
+
+_COMPOUND_SURNAMES = "慕容南宫欧阳西门上官端木独孤诸葛"
+
+# 状态解除/交代类词:正文里与人物提及同句出现,就算作者已经交代过这个状态话题——不论是
+# 痊愈了还是仍在养伤,只要话题被正面提到就不算"沉默无视"。**特意不含"现身""归来"**:
+# 这两个词只描述人物出场/归来这件事本身,而"人物出场却没交代状态"正是本检测要抓的问题;
+# 若把它们计入解除词,检测器反而会对最常见的出场写法失明(几乎每次露面都带"现身"一类的
+# 动词,这条检测就永远不会触发了)。
+_CHAR_STATE_RESOLVED = ("痊愈", "伤愈", "好了", "康复", "出关", "解禁", "解封", "醒来", "苏醒",
+                        "获释", "脱身", "恢复", "复原", "伤势", "伤口", "养伤")
+
+
+def _mentioned_and_addressed(body: str, mention: str) -> bool:
+    """mention(全名或别名)是否在正文中出现,且同一句里带了状态解除/交代类词。
+    只在 mention 所在的那一句里查,不对整篇正文做全局扫描——"好了"这种高频寒暄词一旦
+    全局命中,会让全书的连续性检测集体静音,而正文里此前已经确认 mention 出现在句中,
+    只是要判断这句话有没有顺带交代状态。"""
+    for sent in _SENT_SPLIT.split(body):
+        if mention in sent and any(w in sent for w in _CHAR_STATE_RESOLVED):
+            return True
+    return False
+
+
+def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str,
+                           char_names: set[str]) -> list[BugItem]:
     """人物出场关联检测:状态账本 [状态] 行人物在前情有特殊状态(重伤/闭关/失踪/禁足等)
-    且本章首次提到该人物时未交代状态变化 → 标记。char_names 来自人物目录文件名。"""
-    _SPECIAL_STATES = re.compile(r"(?:^|[^无未不])(?:重伤|闭关|失踪|禁足|昏迷|囚禁|封印|昏迷|被俘|失忆|流放|除名|镇守|被控)")
+    且本章提到该人物时未交代状态变化 → 标记。
+
+    char_names 来自人物目录文件名,是**白名单**:账本里的非人物行(护山大阵/城主府这类
+    [状态] 行左半段)不该触发人设报警。白名单为空时不做人物过滤(老书没有人物目录时的
+    兜底——此时无法区分人物与非人物,只能放行,精度靠正文/别名匹配本身兜底)。
+    """
     out: list[BugItem] = []
-    last_state: dict[str, str] = {}  # char_name -> state_line
-    for m in reversed(sorted(k for k in book if k < chapter_n)):
-        for kind, content in book[m]:
+    # name -> (账本行, 该状态实际所在章号)。倒序遍历,只保留最近一次出现的状态。
+    last_state: dict[str, tuple[str, int]] = {}
+    for ch in reversed(sorted(k for k in book if k < chapter_n)):
+        for kind, content in book[ch]:
             if kind != "状态":
                 continue
             change = content.split("|")[0].strip()
             name = re.split(r"[:：]", change, 1)[0].strip()
             if name and name not in last_state:
-                last_state[name] = change
-    for name, state_line in last_state.items():
-        if not _SPECIAL_STATES.search(state_line):
+                last_state[name] = (change, ch)
+
+    for name, (state_line, prior_ch) in sorted(last_state.items()):
+        if char_names and name not in char_names:
+            continue                                  # 白名单:非人物行不报
+        if not _CHAR_SPECIAL_STATES.search(state_line):
             continue
-        # 没全名但只有简称/外号在正文 → 有风险但证据不够硬,不在纯函数里报
-        # 直接检查:特殊状态角色出现在正文但没有提到状态恢复
-        if name not in body:
-            # 别名匹配:去姓(单姓/复姓)、·尾名、单字姓后缀匹配
-            aliases = []
-            if len(name) >= 2:
-                aliases.append(name[1:])
-                if name[0] in "慕容南宫欧阳西门上官端木独孤诸葛":
-                    aliases.append(name[2:])
-            if "·" in name:
-                aliases.append(name.split("·")[-1])
-            aliases.append(name[0])
-            aliases.append(name[0] + "姑娘")
-            aliases.append(name[0] + "公子")
-            aliases.append(name[0] + "前辈")
-            aliases.append(name[0] + "兄")
-            aliases.append(name[0] + "老")
-            aliases.append(name[0] + "某")
-            for alias in set(a for a in aliases if len(a) >= 1):
-                if alias not in body:
-                    continue
-                out.append(BugItem(
-                    3, "人设",
-                    f"「{name}」前情处于特殊状态:{state_line},本章仅以别名/简称出现",
-                    evidence=alias,
-                    prior=f"第{m}章账本:{state_line}",
-                    fix=f"补足全称并交代状态变化"))
-                break
-        elif state_line not in body[:500]:
-            # 全名出现但没提状态变化
+
+        if name in body:
+            if _mentioned_and_addressed(body, name):
+                continue                              # 正文已交代状态话题 → 不报
             out.append(BugItem(
                 3, "人设",
                 f"「{name}」前情处于{state_line},本章出现但未交代状态变化",
                 evidence=name[:60],
-                prior=f"第{m}章账本:{state_line}",
-                fix=f"在文中交代{name.split(chr(58))[0] if ':' in name else name}当前状态"))
+                prior=f"第{prior_ch}章账本:{state_line}",
+                fix=f"在文中交代{name}当前状态"))
+            continue
+
+        # 全名不在正文 → 看别名/简称。**不含单字**(单汉字必然撞词:苏醒/苏州/复苏)。
+        aliases: list[str] = []
+        if len(name) >= 2:
+            aliases.append(name[1:])                  # 去姓(给名)
+            if name[0] in _COMPOUND_SURNAMES:
+                aliases.append(name[2:])               # 复姓去姓
+        if "·" in name:
+            aliases.append(name.split("·")[-1])
+        surname = name[0]
+        aliases += [surname + suf for suf in ("姑娘", "公子", "前辈", "兄", "老", "某")]
+        # 去重且**保序**:list(dict.fromkeys(...)) 而非 set——set 遍历受 hash 随机化
+        # 影响,会让同一份稿子两次除虫报出不同证据,破坏"纯函数可复现"这条底线。
+        for alias in list(dict.fromkeys(a for a in aliases if len(a) >= 2)):
+            if alias not in body:
+                continue
+            if _mentioned_and_addressed(body, alias):
+                continue
+            out.append(BugItem(
+                3, "人设",
+                f"「{name}」前情处于特殊状态:{state_line},本章仅以别名/简称出现",
+                evidence=alias,
+                prior=f"第{prior_ch}章账本:{state_line}",
+                fix="补足全称并交代状态变化"))
+            break
     return out
 
 _PUNC_RE = re.compile(r'[\s·、，。！？：；\-—…()（【】『』「」《》/]')
