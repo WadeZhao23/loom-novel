@@ -799,8 +799,8 @@ def _scan_continuity(project_root: Path, chapter_n: int, body: str, backend: Bac
         rep = scan_chapter(project_root, chapter_n, body, backend,
                            hardfacts=hardfacts, progress=progress)
         progress(events.debug_report(chapter_n, rep["issues"], rep["note_path"]))
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — 附赠动作绝不阻断出稿,但不静默
+        progress(events.warn(f"除虫这次没跑成({type(e).__name__}:{e});不影响本章出稿。"))
 
 
 def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Progress) -> None:

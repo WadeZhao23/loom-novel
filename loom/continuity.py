@@ -461,8 +461,21 @@ def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend
         parts.append("## 你的任务\n按系统要求输出两段:除虫报告 + 状态入账。")
         raw = backend.complete(_SCAN_SYSTEM, "\n\n".join(parts), max_chars=900)
         llm_items, state_lines = parse_scan(raw)
-    except Exception:
-        pass   # LLM 侧任何失败都吞:确定性结果照出,附赠动作绝不拖累出稿
+    except Exception as e:  # noqa: BLE001 — 不拖累出稿,但**必须留下痕迹**
+        # 裸吞会让「prompt 漂移 / 配额耗尽 / parse 全不匹配」的表象与「本章无矛盾」
+        # 完全一样,除虫的双引擎可能长期只剩单引擎而无人知(确定性侧仍照常出结果)。
+        progress(events.warn(f"除虫的 LLM 侧这次没跑成({type(e).__name__}:{e});"
+                             "确定性检测结果仍然有效,但这一章没有 LLM 侧的交叉验证。"))
+    else:
+        # 两段都空,有两种可能:①本章真的无矛盾且无状态变化(LLM 老实回「通过」/「无」,
+        # 分段标记原样保留);②响应没法按格式解析(prompt 漂移/后端乱回)。两者单看
+        # llm_items/state_lines 无法区分,但分段标记在不在能区分:①即使内容空,
+        # 「===除虫报告===」这行本身仍会被原样回传;②真漂移时连这行都没有。
+        # 用标记存在与否兜底,不确定的情况宁可措辞保守("没能解析出"),不武断说"格式漂移"。
+        if not llm_items and not state_lines and "===除虫报告===" not in raw:
+            progress(events.warn("除虫的 LLM 侧返回了内容,但没能按预期格式解析出结果"
+                                 "(响应里找不到除虫报告/状态入账的分段标记);"
+                                 "本章只有确定性检测的结果,这一章没有 LLM 侧的交叉验证。"))
 
     issues = merge_items(det, llm_items)
     note_path = _note_report(project_root, chapter_n, issues)

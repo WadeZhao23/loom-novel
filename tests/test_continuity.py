@@ -481,3 +481,75 @@ def test_char_continuity_alias_evidence_is_deterministic():
     assert len(evidences) == 1, f"证据不稳定:{evidences}"
     assert outs[0] and outs[0][0].evidence == "沈公子"  # 别名生成顺序固定,首个命中恒为「沈公子」
 
+
+# ── Task 14: 裸 except 不再静默吞掉除虫的失败 ────────
+
+def test_scan_chapter_llm_failure_is_visible_not_silent(tmp_path):
+    """LLM 侧挂掉时表象不得与「本章无矛盾」相同——否则双引擎哑一半没人知道。"""
+    from loom.continuity import scan_chapter
+
+    class _BoomBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise RuntimeError("配额耗尽")
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    rep = scan_chapter(root, 2, "正文内容。" * 20, _BoomBackend(), progress=seen.append)
+    msgs = " ".join(str(e) for e in seen)
+    assert "配额耗尽" in msgs, f"失败原因必须可见:{seen}"
+    assert rep["issues"] is not None, "确定性侧仍要照常出结果,不阻断"
+
+
+def test_scan_chapter_reports_when_llm_returns_unparsable(tmp_path):
+    """后端返回了、但 parse_scan 一条都没抓到 —— 这是 prompt 漂移的典型表象,
+    不走 except、连异常都没有,同样必须报出来。"""
+    from loom.continuity import scan_chapter
+
+    class _GarbageBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return "本章读下来没发现什么问题。"      # 非空但格式不合,parse_scan 抓 0 条
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _GarbageBackend(), progress=seen.append)
+    msgs = " ".join(str(e) for e in seen)
+    assert "格式" in msgs or "没抓到" in msgs, f"哑火必须可见:{seen}"
+
+
+def test_scan_chapter_clean_chapter_does_not_false_positive(tmp_path):
+    """本章真的干净:LLM 按格式老老实实回「通过」+「无」——两段标记都在,只是内容为空。
+    这与上面的「格式漂移」表象都是 llm_items/state_lines 双空,但不该被当成哑火误报,
+    否则每一章「确实无矛盾」都会被拉响警报,警报也就失去意义了。"""
+    from loom.continuity import scan_chapter
+
+    class _CleanBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return "===除虫报告===\n通过\n===状态入账===\n- 无"
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _CleanBackend(), progress=seen.append)
+    warns = [e for e in seen if e.get("type") == "warn"]
+    assert warns == [], f"本章确实无矛盾,不该被误报成哑火:{warns}"
+
+
+def test_agents_scan_continuity_does_not_swallow_silently(tmp_path):
+    """agents 侧的外层裸 except 会连 scan_chapter 整个炸掉都吞掉——也要留痕。"""
+    from loom.agents import _scan_continuity
+    from loom.config import Config
+
+    class _BoomBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise RuntimeError("后端不可用")
+
+    seen = []
+    cfg = Config()
+    cfg.continuity_scan = True
+    _scan_continuity(tmp_path / "nonexistent", 2, "正文。" * 20, _BoomBackend(),
+                     cfg, seen.append)
+    msgs = " ".join(str(e) for e in seen)
+    assert "除虫" in msgs, f"外层也不得静默吞掉:{seen}"
+
