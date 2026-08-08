@@ -36,7 +36,7 @@ def distribution(values: list[float | None]) -> Distribution:
         return Distribution(None, None, None, 0, n_total)
     mid = len(xs) // 2
     med = xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
-    return Distribution(round(med, 4), xs[0], xs[-1], len(xs), n_total)
+    return Distribution(round(med, 4), round(xs[0], 4), round(xs[-1], 4), len(xs), n_total)
 
 
 def overlaps(a: dict, b: dict) -> bool:

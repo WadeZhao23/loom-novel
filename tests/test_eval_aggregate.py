@@ -37,6 +37,27 @@ def test_distribution_empty():
     assert d.n_valid == 0 and d.n_total == 0 and d.median is None
 
 
+def test_distribution_high_precision_invariant_odd_count():
+    """高精度输入:中位数必须在 lo 和 hi 范围内(四舍五入后仍需满足)。
+
+    两端都四舍五入到 4 位小数时,须保持 lo <= median <= hi,防回归。
+    """
+    d = distribution([0.123456789])
+    assert d.median <= d.hi, f"median {d.median} should be <= hi {d.hi}"
+    assert d.lo <= d.median, f"lo {d.lo} should be <= median {d.median}"
+    assert d.lo <= d.hi, f"lo {d.lo} should be <= hi {d.hi}"
+
+
+def test_distribution_high_precision_invariant_even_count():
+    """高精度输入:偶数个时中位数为中间两个的平均。均值也四舍五入到 4 位小数时,
+    须保持 lo <= median <= hi。
+    """
+    d = distribution([0.66666666, 0.66666677])
+    assert d.median <= d.hi, f"median {d.median} should be <= hi {d.hi}"
+    assert d.lo <= d.median, f"lo {d.lo} should be <= median {d.median}"
+    assert d.lo <= d.hi, f"lo {d.lo} should be <= hi {d.hi}"
+
+
 # ── overlaps ───────────────────────────────────────────────────────────────
 def _dist(lo, hi):
     return {"lo": lo, "hi": hi, "median": (lo + hi) / 2, "n_valid": 3, "n_total": 3}
