@@ -440,6 +440,36 @@ def test_char_continuity_single_surname_is_not_an_alias():
     assert detect_char_continuity(book, 4, body, {"苏昭"}) == []
 
 
+def test_char_continuity_resolution_word_in_different_sentence_still_fires():
+    """钉死 _mentioned_and_addressed 是**句级**scope,不是整篇正文扫描。
+
+    计划原稿写的是 `any(w in _RESOLVED for w in body)`——对整篇正文做全局扫描。
+    实现者收窄成同句检查,理由是:全局扫描一旦命中「好了」这类高频词,会让全书**所有**
+    角色的连续性检测集体静音,比"总是不报"的原 bug 精度更差。这条测试把状态解除词
+    (「痊愈」)放在人物提及的**前一句**,两句之间用句号隔开:
+    - 句级 scope:人物那句「沈砚推门而入。」本身没有解除词 → 仍应报。
+    - 整篇 scope(计划原稿的写法):「痊愈」出现在正文任意位置就会静音整章 → 不会报。
+    若未来有人把 _mentioned_and_addressed "简化"回整篇扫描,这条测试会变红。
+    """
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "他的伤早已痊愈。沈砚推门而入。" + "此后诸事顺遂。" * 30
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out, "解除词在人物那句之外 → 句级 scope 下仍应报;若不报说明退化成了整篇扫描"
+    assert "第3章" in out[0].prior
+
+
+def test_char_continuity_unrelated_dialogue_cannot_silence_report():
+    """句级 scope 的动机场景本身:「好了」这种高频寒暄词出现在与人物无关的对话里,
+    不该让整章的连续性检测失明。这正是实现者拒绝整篇扫描的理由——用真实场景钉死它。
+    """
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = ("王婶笑着说道：好了好了，饭都凉了，快来吃饭吧。" + "闲话家常。" * 20
+            + "沈砚一跃三丈，长剑出鞘，快得没人看清。" + "此后诸事顺遂。" * 20)
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out, "无关对话里的「好了」不该让含沈砚那句的报告被静音"
+    assert "第3章" in out[0].prior
+
+
 def test_char_continuity_alias_evidence_is_deterministic():
     """纯函数必须可复现:同一份输入多次调用,证据逐字相同(旧代码 set 遍历会飘)。
     body 里同时放「沈公子/沈兄/沈某」三个候选别名,逼旧代码的 set 遍历暴露顺序不稳
