@@ -386,28 +386,36 @@ _CONSTRAINT_KW = ("底线", "身段", "命格", "原则", "禁忌")
 
 def _char_constraints_for(project_root: Path) -> str:
     """人物卡里标签含 底线/身段/命格/原则/禁忌 的行,逐字直送写手——人设跌份的根治点。
-    纯字符串切片,双形态同口径;成长档案与 [AI补充] 照旧排除;无命中返回空串。"""
+    纯字符串切片,双形态同口径;成长档案与 [AI补充] 照旧排除;无命中返回空串。
+
+    两类占位一律不进(与 _name_roster_for 同口径「绝不把占位喂写手」):
+    ①【占位人物】文件名/小节名含「未命名」的 scaffold 卡——否则写手 prompt 里会凭空
+      多出一个叫「未命名」的人;②【没填完的行】标签命中但冒号后为空(`- 底线:`)——
+      纯噪声,且换个文件名绕不过 ① 的过滤,故要单独拦。
+    """
     def pick(name: str, text: str) -> list[str]:
         out = []
         for line in text.splitlines():
             s = line.strip()
             if not s.startswith("-"):
                 continue
-            label = re.split(r"[:：]", s.lstrip("- ").strip(), 1)[0]
-            if any(kw in label for kw in _CONSTRAINT_KW):
-                out.append(f"- {name}|{s.lstrip('- ').strip()}")
+            body = s.lstrip("- ").strip()
+            parts = re.split(r"[:：]", body, 1)
+            value = parts[1].strip() if len(parts) > 1 else ""
+            if any(kw in parts[0] for kw in _CONSTRAINT_KW) and value:
+                out.append(f"- {name}|{body}")
         return out
 
     lines: list[str] = []
     form = paths.brain_form(project_root, paths.CHARS_REL, paths.CHARS_DIR_REL)
     if form == "file":
         for head, body in _md_h2_sections((project_root / paths.CHARS_REL).read_text(encoding="utf-8")):
-            if "AI 补充" in head or "AI补充" in head:
+            if "AI 补充" in head or "AI补充" in head or "未命名" in head:
                 continue
             lines += pick(head, body)
     elif form == "dir":
         for f in paths.brain_dir_files(project_root, paths.CHARS_DIR_REL):
-            if f.name == paths.GROWTH_NAME:
+            if f.name == paths.GROWTH_NAME or "未命名" in f.stem:
                 continue
             lines += pick(f.stem, f.read_text(encoding="utf-8"))
     return "\n".join(lines)
