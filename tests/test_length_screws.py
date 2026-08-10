@@ -110,3 +110,29 @@ def test_length_hint_compress_trigger_at_1p2x():
     # +25%(1000/800,超 20%)→ 硬压,摆实测数
     h_over = _length_hint("编辑", 800, 800, actual_chars=1000)
     assert "原稿实测 1000 字" in h_over and "超 25%" in h_over and "绝不扩写" in h_over
+
+
+# ── 设定师篇幅指令:从裸「≤N 字。」升级成带理由的硬上限 ────────────────
+# 真机 ×5 基线:锚点 600/454/373/516/587 字,5/5 全超 350 预算(中位数 516,超 47%)。
+# 根因是这一棒当初漏掉了「三管齐下」——同表其余四棒都有带理由/带授权的措辞,
+# 只有设定师拿的是全表最弱的一句裸字数。
+
+def test_setup_hint_is_not_bare_number():
+    h = _length_hint("设定师", 350, 1000)
+    assert "350" in h                      # 数字还在
+    assert h.strip() != "≤350 字。"         # 但不再是光秃秃一句
+    assert "压缩" in h and "硬上限" in h    # 说清锚点是「选择」不是「摘抄」
+
+
+def test_setup_hint_states_downstream_cost():
+    """要讲清超字数的代价(挤掉写手的写作指纹),否则又是一句没牙的软话。"""
+    assert "写作指纹" in _length_hint("设定师", 350, 1000)
+
+
+def test_setup_prompt_has_no_competing_number():
+    """模板里曾硬写「300 字内」,与任务行的 ≤350 打架——两个矛盾数字是模型无视二者的诱因。
+    字数上限单一真源 = StepSpec.short_budget,模板不许再自带数字。"""
+    from pathlib import Path
+    md = (Path(__file__).resolve().parent.parent
+          / "loom/templates/agents/设定师.md").read_text(encoding="utf-8")
+    assert "300 字" not in md and "350 字" not in md

@@ -573,7 +573,15 @@ def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars:
                     "删冗余描写、重复信息与注水铺垫,压回目标量级,不动情节骨架;绝不扩写。")
         return (f"篇幅目标约 {chapter_target} 字:原稿明显超目标就顺手压回来——"
                 "删冗余描写、重复信息与注水铺垫,不动情节骨架;绝不扩写。")
-    return f"≤{step_budget} 字。"  # 设定师
+    if role == "设定师":
+        # 真机 ×5 基线:600/454/373/516/587 字,5/5 全超 350 预算(中位数 516,超 47%)。
+        # 原先这里只有一句裸「≤350 字。」——是全表最弱的措辞,而同一份 docstring 的
+        # 「三管齐下」教训(软话压不住篇幅)当初只落到了大纲师/写手/编辑/润色师身上,漏了设定师。
+        # 锚点是【压缩后的选择】,不是设定摘抄:超长会把写手 prompt 里的写作指纹稀释掉。
+        return (f"≤{step_budget} 字,这是硬上限。锚点是**压缩后的选择**(这一章用哪几条),"
+                "不是把设定抄一遍——只写这一章真正用得上的,用不上的一条都不要列;"
+                "宁可漏一条边角设定,也不许超字数。超了下游写手的写作指纹会被你挤掉。")
+    return f"≤{step_budget} 字。"
 
 
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
