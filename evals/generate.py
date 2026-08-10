@@ -32,7 +32,11 @@ from loom.evalapi import (
     run_pipeline,
 )
 
-from .aggregate import aggregate_runs, overlaps
+from .aggregate import aggregate_runs, mannwhitney_p, overlaps
+
+# 判「改进/回归」的显著性门槛。预注册在此:先定阈值再看结果,不看完 p 值倒推
+# (与 evals/calibration/targets.json 同一条纪律)。
+ALPHA = 0.05
 from .harness import run_case
 from .metering import MeteringBackend
 from .stepgraders import (
@@ -388,8 +392,15 @@ def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
 def compare_batches(batch_a: Path, batch_b: Path) -> dict:
     """两批对比:a=改动前,b=改动后。
 
-    **最重要的一条纪律:区间重叠就判「分不出」,不宣称改进。**
+    **最重要的一条纪律:证不出差异就判「分不出」,不宣称改进。**
     生成链路 temperature=0.9 写死、无 seed,中位数涨了一点很可能只是这次运气好。
+
+    判据 = Mann-Whitney U 双尾 p < ALPHA(见 aggregate.mannwhitney_p)。
+    **不再用 min~max 区间重叠**——那条判据不随 N 收窄,实测把一个真实的改进
+    (设定师·锚点篇幅,精确 p=0.0245)判成了「分不出」,是假阴性。详见
+    aggregate.py 里 mannwhitney_p 上方那段事故说明。
+    老批次的 summary.json 没有 scores 字段,退回旧的区间判据并在 method 里标明,
+    免得两种成色的结论混在一起看不出来。
 
     遍历键集合取 a∪b 而非只取 a——只取 a 会把「b 独有的 (role, item)」静默丢掉
     (两批 case 不同、或某棒在其中一批被旁路时确会发生),那样改完 prompt 新增的
@@ -419,21 +430,30 @@ def compare_batches(batch_a: Path, batch_b: Path) -> dict:
     for role, name in keys:
         da = a_steps.get(role, {}).get(name)
         db = b_steps.get(role, {}).get(name)
+        p_value, method = None, None
         if not da or not db or da.get("median") is None or db.get("median") is None:
             verdict, delta = "无数据", None
-        elif overlaps(da, db):
-            delta = round(db["median"] - da["median"], 4)
-            verdict = "分不出(区间重叠)"
         else:
             delta = round(db["median"] - da["median"], 4)
-            verdict = "改进" if delta > 0 else "回归"
+            sa_scores, sb_scores = da.get("scores"), db.get("scores")
+            if sa_scores and sb_scores:
+                p_value, method = mannwhitney_p(sa_scores, sb_scores)
+                if p_value < ALPHA and delta != 0:
+                    verdict = "改进" if delta > 0 else "回归"
+                else:
+                    verdict = f"分不出(p={p_value:.3f})"
+            else:
+                # 老批次没存原始分数,只能退回旧判据。标明成色,别和 p 值结论混着读。
+                method = "旧判据(区间重叠)"
+                verdict = "分不出(区间重叠·老批次)" if overlaps(da, db) else (
+                    "改进" if delta > 0 else "回归")
             if verdict == "改进":
                 improved += 1
-            else:
+            elif verdict == "回归":
                 regressed += 1
         items_out.append({
             "step": role, "item": name, "before": da, "after": db,
-            "delta": delta, "verdict": verdict,
+            "delta": delta, "verdict": verdict, "p_value": p_value, "method": method,
             # 有效/总次数直接摊平进 item——下游读者(含 CLI 打印)不该还要挖 before/after
             # 才看得出这条判据是几次跑撑出来的。任一边没数据(a∪b 独有项)则为 None。
             "n_valid_before": da.get("n_valid") if da else None,
@@ -495,10 +515,19 @@ def main(argv: list[str] | None = None) -> int:
             na = "?" if it["n_valid_after"] is None else f"{it['n_valid_after']}/{it['n_total_after']}"
             # it['item'] 已经是完整 grader 名、自带角色前缀(如「写手·必含要素」)——
             # 不再额外拼 it['step'],否则每行都印成「写手·写手·必含要素」(Important-3)。
-            print(f"  {it['verdict']:<16} {_cjk_ljust(it['item'], 24)} "
-                  f"Δ中位数 {d}  n={nb} → {na}")
+            # min~max 仍打出来供人眼看散布,但它【不是】判据——判据是 p 值。
+            rng = ""
+            if it["before"] and it["after"] and it["before"].get("lo") is not None:
+                rng = (f"  区间 {it['before']['lo']}~{it['before']['hi']}"
+                       f" → {it['after']['lo']}~{it['after']['hi']}")
+            print(f"  {it['verdict']:<18} {_cjk_ljust(it['item'], 24)} "
+                  f"Δ中位数 {d}  n={nb} → {na}{rng}")
+        methods = {it["method"] for it in res["items"] if it.get("method")}
         print(f"\n改进 {res['n_improved']} 项 · 回归 {res['n_regressed']} 项 · "
-              f"其余分不出(区间重叠或无数据)")
+              f"其余证不出差异(p≥{ALPHA} 或无数据)")
+        if methods:
+            print(f"判据:Mann-Whitney U 双尾 p<{ALPHA}(方法:{'/'.join(sorted(methods))});"
+                  f"区间只作展示、不参与判定")
         return 1 if res["n_regressed"] else 0
 
     if not args.cases_dir.is_dir():

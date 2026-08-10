@@ -371,14 +371,20 @@ def test_run_batch_all_runs_crashed_is_infra(tmp_path):
     assert summ["n_valid"] == 0 and summ["steps"] == {}
 
 
-def _fake_batch(tmp_path, name, *, median, lo, hi, n_valid=3):
+def _fake_batch(tmp_path, name, *, median, lo, hi, n_valid=3, scores=None):
+    """scores=None 模拟【老批次】(summary.json 没存原始分数)→ 走区间回退判据。
+    给了 scores 就走现行的 Mann-Whitney 判据。"""
     b = tmp_path / name
     b.mkdir(parents=True)
+    item = {"median": median, "lo": lo, "hi": hi, "n_valid": n_valid, "n_total": 3}
+    if scores is not None:
+        item["scores"] = scores
+        item["n_valid"] = len(scores)
+        item["n_total"] = len(scores)
     (b / "summary.json").write_text(json.dumps({
         "case_id": "gen_test", "batch_id": name, "n_total": 3, "n_valid": n_valid,
         "weakest": None,
-        "steps": {"写手": {"写手·必含要素": {"median": median, "lo": lo, "hi": hi,
-                                          "n_valid": n_valid, "n_total": 3}}},
+        "steps": {"写手": {"写手·必含要素": item}},
     }, ensure_ascii=False), encoding="utf-8")
     return b
 
@@ -393,13 +399,34 @@ def test_compare_declares_improvement_only_when_ranges_separate(tmp_path):
     assert res["n_improved"] == 1 and res["n_regressed"] == 0
 
 
-def test_compare_refuses_to_call_it_improvement_when_ranges_overlap(tmp_path):
-    """中位数涨了但区间重叠——必须判「分不出」,这是本工具最重要的一条纪律。"""
+def test_compare_refuses_to_call_it_improvement_when_not_significant(tmp_path):
+    """中位数涨了但证不出差异——必须判「分不出」,这是本工具最重要的一条纪律。
+
+    纪律没变,变的只是判据:2026-08-10 起由 min~max 区间重叠换成 Mann-Whitney p。
+    换的理由见 aggregate.mannwhitney_p——旧判据不随 N 收窄,把真实改进判成了假阴性。
+    """
+    from evals.generate import compare_batches
+    # 中位数 0.5 → 0.6,但样本高度重叠,秩检验证不出
+    a = _fake_batch(tmp_path, "a", median=0.5, lo=0.3, hi=0.7,
+                    scores=[0.3, 0.4, 0.5, 0.6, 0.7])
+    b = _fake_batch(tmp_path, "b", median=0.6, lo=0.35, hi=0.85,
+                    scores=[0.35, 0.5, 0.6, 0.7, 0.85])
+    item = compare_batches(a, b)["items"][0]
+    assert item["verdict"].startswith("分不出(p=")
+    assert item["delta"] > 0                      # 中位数确实涨了
+    assert compare_batches(a, b)["n_improved"] == 0   # 但不许宣称改进
+
+
+def test_compare_falls_back_to_range_for_legacy_batches_and_says_so(tmp_path):
+    """老批次的 summary.json 没有 scores,只能退回区间判据——但必须标明成色,
+    否则两种成色的结论混在一起,读者分不出哪条是 p 值撑的、哪条是旧区间撑的。"""
     from evals.generate import compare_batches
     a = _fake_batch(tmp_path, "a", median=0.50, lo=0.30, hi=0.70)
     b = _fake_batch(tmp_path, "b", median=0.62, lo=0.40, hi=0.85)
     item = compare_batches(a, b)["items"][0]
-    assert item["verdict"] == "分不出(区间重叠)"
+    assert item["verdict"] == "分不出(区间重叠·老批次)"
+    assert item["method"] == "旧判据(区间重叠)"
+    assert item["p_value"] is None                # 没算 p,就不许装作算了
     assert compare_batches(a, b)["n_improved"] == 0
 
 
