@@ -312,3 +312,38 @@ def test_system_keywords_hit_hardfacts(project):
     d.mkdir(parents=True, exist_ok=True)
     (d / "系统与因果.md").write_text("# 系统与因果\n\n因果锁定:满100%触发。", encoding="utf-8")
     assert "因果锁定" in _hardfacts_for(project, lambda e: None)
+
+
+# ── 占位人物卡不进硬约束(与专名册同口径:「绝不把占位喂写手」) ─────────
+# 真事故:gen_02 真机基线的 hardfacts 里混进了 `- 主角·未命名|不可退让的底线(人物魅力来源):`
+# ——scaffold 铺的占位人物卡。_name_roster_for 明确过滤 "未命名"(docstring 写着
+# 「占位「未命名」与成长档案不进名册——绝不把占位喂写手」),但 _char_constraints_for
+# 漏了同款过滤,于是占位从另一个口子逐字进了写手 prompt,还凭空多出一个叫「未命名」的人。
+
+def test_placeholder_character_not_in_constraints(project):
+    from loom.agents import _hardfacts_for
+    d = project / "外置大脑/人物"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "主角·未命名.md").write_text(
+        "# 主角 · 未命名\n> (占位示例,换成你自己的。)\n"
+        "- 不可退让的底线(人物魅力来源):\n", encoding="utf-8")
+    (d / "主角·沈砚.md").write_text(
+        "# 主角 · 沈砚\n- 不可退让的底线:绝不当众认体质\n", encoding="utf-8")
+    facts = _hardfacts_for(project, lambda e: None)
+    assert "绝不当众认体质" in facts          # 真人物照进
+    assert "未命名" not in facts              # 占位一个字都不许进(与专名册同口径)
+
+
+def test_empty_valued_constraint_line_dropped(project):
+    """标签命中但冒号后没内容的行 = 用户还没填,纯噪声,不该逐字进写手 prompt。
+
+    与上一条不是同一件事:这条管的是【已命名】人物卡里没填完的行,
+    换个文件名绕不过去。"""
+    from loom.agents import _hardfacts_for
+    d = project / "外置大脑/人物"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "配角·老陈.md").write_text(
+        "# 配角 · 老陈\n- 不可退让的底线:\n- 禁忌:不碰三号矿道\n", encoding="utf-8")
+    facts = _hardfacts_for(project, lambda e: None)
+    assert "不碰三号矿道" in facts            # 填了的照进
+    assert "不可退让的底线" not in facts      # 没填的整行丢掉

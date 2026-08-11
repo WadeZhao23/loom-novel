@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from loom.evalapi import (
     CRITIC_去AI味,
     CRITIC_质检,
+    PASS_PHRASES,
     detect_aitell,
     parse_critic_verdict,
     segment_sentences,
@@ -202,6 +203,32 @@ def grade_style_ab(text_neutral: str, text_learned: str, author_ref: str,
 
 # ───────────────────────────── LLM-judge grader ─────────────────────────────
 
+def _verdict_is_unparsable(verdict: str, n_issues: int) -> bool:
+    """判词解析不出任何条目、且没有任何一行明确说「通过」→ infra(格式不合),不是「零硬伤」。
+
+    prompt 约定:无硬伤只回一行「通过」;有则每条一行 `- 类别 | 问题 | 证据:"引文"`。
+    模型改回编号列表 / 散文段落时 parse_critic_verdict 抓 0 条——旧代码把它当满分,
+    这正是门禁最危险的失败模式(被测物坏了却变绿)。
+
+    判「有没有说通过」绝不能用子串匹配(`"通过" in verdict`):「未通过」「不通过」「没通过」
+    这些明确的**否定**判词全都以子串形式包含「通过」二字——子串判断会把模型说"没过"误判成
+    "合法零硬伤"而放行,是同一条 fail-open 故障线,还更隐蔽(负面判词被悄悄判成通过)。
+    必须复用产品侧 loom.parse.parse_verdict 判定「通过」的口径(经 evalapi.PASS_PHRASES 接缝):
+    逐行剥掉开头的 `-`/`·`/`•` 项目符号与首尾空白,再剥掉尾部标点,与 PASS_PHRASES 做**精确匹配**
+    ——不是子串包含。多行判词里任意一行精确命中即视为显式「通过」。
+    """
+    if n_issues != 0:
+        return False
+    for line in verdict.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        body = s.lstrip("-·• ").strip()
+        if body.rstrip("。.!！,，、;； \t") in PASS_PHRASES:
+            return False
+    return True
+
+
 def grade_quality_llm(text: str, setting: str, backend, weight: float = 0.20) -> GraderResult:
     """复用 loom.gates 的「质检」复审 critic(经 evalapi)当 LLM-judge:挑 OOC / 设定漂移 / 断钩子 / 无爽点 / 信息越界。"""
     user = (f"## 设定与标准\n{setting}\n\n## 待复审的本章稿\n{text}\n\n"
@@ -212,6 +239,9 @@ def grade_quality_llm(text: str, setting: str, backend, weight: float = 0.20) ->
         return GraderResult("质检·LLM", 0.0, False, weight, gating=False, detail=f"[infra] 后端调用失败 — {e}")
     issues = parse_critic_verdict(verdict)
     n = len(issues)
+    if _verdict_is_unparsable(verdict, n):
+        return GraderResult("质检·LLM", 0.0, False, weight, gating=False,
+                            detail=f"[infra] 判词解析不出条目也没说「通过」 — {verdict[:60]!r}")
     return GraderResult("质检·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,
                         detail=f"复审挑出 {n} 处硬伤",
                         evidence=[f"{i.kind}:{i.desc}" for i in issues])
@@ -227,6 +257,9 @@ def grade_deslop_llm(text: str, fingerprint: str, backend, weight: float = 0.10)
         return GraderResult("去AI味·LLM", 0.0, False, weight, gating=False, detail=f"[infra] 后端调用失败 — {e}")
     issues = parse_critic_verdict(verdict)
     n = len(issues)
+    if _verdict_is_unparsable(verdict, n):
+        return GraderResult("去AI味·LLM", 0.0, False, weight, gating=False,
+                            detail=f"[infra] 判词解析不出条目也没说「通过」 — {verdict[:60]!r}")
     return GraderResult("去AI味·LLM", round(1.0 / (1.0 + n), 3), n == 0, weight,
                         detail=f"复审命中 {n} 处 AI 腔",
                         evidence=[f"{i.kind}:{i.desc}" for i in issues])

@@ -130,59 +130,93 @@ def detect_time_mismatch(book: dict[int, list[tuple[str, str]]], chapter_n: int,
 
 
 
-def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str, char_names: set[str]) -> list[BugItem]:
+_CHAR_SPECIAL_STATES = re.compile(
+    r"(?:^|[^无未不])(?:重伤|闭关|失踪|禁足|昏迷|囚禁|封印|被俘|失忆|流放|除名|镇守|被控)")
+
+_COMPOUND_SURNAMES = "慕容南宫欧阳西门上官端木独孤诸葛"
+
+# 状态解除/交代类词:正文里与人物提及同句出现,就算作者已经交代过这个状态话题——不论是
+# 痊愈了还是仍在养伤,只要话题被正面提到就不算"沉默无视"。**特意不含"现身""归来"**:
+# 这两个词只描述人物出场/归来这件事本身,而"人物出场却没交代状态"正是本检测要抓的问题;
+# 若把它们计入解除词,检测器反而会对最常见的出场写法失明(几乎每次露面都带"现身"一类的
+# 动词,这条检测就永远不会触发了)。
+_CHAR_STATE_RESOLVED = ("痊愈", "伤愈", "好了", "康复", "出关", "解禁", "解封", "醒来", "苏醒",
+                        "获释", "脱身", "恢复", "复原", "伤势", "伤口", "养伤")
+
+
+def _mentioned_and_addressed(body: str, mention: str) -> bool:
+    """mention(全名或别名)是否在正文中出现,且同一句里带了状态解除/交代类词。
+    只在 mention 所在的那一句里查,不对整篇正文做全局扫描——"好了"这种高频寒暄词一旦
+    全局命中,会让全书的连续性检测集体静音,而正文里此前已经确认 mention 出现在句中,
+    只是要判断这句话有没有顺带交代状态。"""
+    for sent in _SENT_SPLIT.split(body):
+        if mention in sent and any(w in sent for w in _CHAR_STATE_RESOLVED):
+            return True
+    return False
+
+
+def detect_char_continuity(book: dict[int, list[tuple[str, str]]], chapter_n: int, body: str,
+                           char_names: set[str]) -> list[BugItem]:
     """人物出场关联检测:状态账本 [状态] 行人物在前情有特殊状态(重伤/闭关/失踪/禁足等)
-    且本章首次提到该人物时未交代状态变化 → 标记。char_names 来自人物目录文件名。"""
-    _SPECIAL_STATES = re.compile(r"(?:^|[^无未不])(?:重伤|闭关|失踪|禁足|昏迷|囚禁|封印|昏迷|被俘|失忆|流放|除名|镇守|被控)")
+    且本章提到该人物时未交代状态变化 → 标记。
+
+    char_names 来自人物目录文件名,是**白名单**:账本里的非人物行(护山大阵/城主府这类
+    [状态] 行左半段)不该触发人设报警。白名单为空时不做人物过滤(老书没有人物目录时的
+    兜底——此时无法区分人物与非人物,只能放行,精度靠正文/别名匹配本身兜底)。
+    """
     out: list[BugItem] = []
-    last_state: dict[str, str] = {}  # char_name -> state_line
-    for m in reversed(sorted(k for k in book if k < chapter_n)):
-        for kind, content in book[m]:
+    # name -> (账本行, 该状态实际所在章号)。倒序遍历,只保留最近一次出现的状态。
+    last_state: dict[str, tuple[str, int]] = {}
+    for ch in reversed(sorted(k for k in book if k < chapter_n)):
+        for kind, content in book[ch]:
             if kind != "状态":
                 continue
             change = content.split("|")[0].strip()
             name = re.split(r"[:：]", change, 1)[0].strip()
             if name and name not in last_state:
-                last_state[name] = change
-    for name, state_line in last_state.items():
-        if not _SPECIAL_STATES.search(state_line):
+                last_state[name] = (change, ch)
+
+    for name, (state_line, prior_ch) in sorted(last_state.items()):
+        if char_names and name not in char_names:
+            continue                                  # 白名单:非人物行不报
+        if not _CHAR_SPECIAL_STATES.search(state_line):
             continue
-        # 没全名但只有简称/外号在正文 → 有风险但证据不够硬,不在纯函数里报
-        # 直接检查:特殊状态角色出现在正文但没有提到状态恢复
-        if name not in body:
-            # 别名匹配:去姓(单姓/复姓)、·尾名、单字姓后缀匹配
-            aliases = []
-            if len(name) >= 2:
-                aliases.append(name[1:])
-                if name[0] in "慕容南宫欧阳西门上官端木独孤诸葛":
-                    aliases.append(name[2:])
-            if "·" in name:
-                aliases.append(name.split("·")[-1])
-            aliases.append(name[0])
-            aliases.append(name[0] + "姑娘")
-            aliases.append(name[0] + "公子")
-            aliases.append(name[0] + "前辈")
-            aliases.append(name[0] + "兄")
-            aliases.append(name[0] + "老")
-            aliases.append(name[0] + "某")
-            for alias in set(a for a in aliases if len(a) >= 1):
-                if alias not in body:
-                    continue
-                out.append(BugItem(
-                    3, "人设",
-                    f"「{name}」前情处于特殊状态:{state_line},本章仅以别名/简称出现",
-                    evidence=alias,
-                    prior=f"第{m}章账本:{state_line}",
-                    fix=f"补足全称并交代状态变化"))
-                break
-        elif state_line not in body[:500]:
-            # 全名出现但没提状态变化
+
+        if name in body:
+            if _mentioned_and_addressed(body, name):
+                continue                              # 正文已交代状态话题 → 不报
             out.append(BugItem(
                 3, "人设",
                 f"「{name}」前情处于{state_line},本章出现但未交代状态变化",
                 evidence=name[:60],
-                prior=f"第{m}章账本:{state_line}",
-                fix=f"在文中交代{name.split(chr(58))[0] if ':' in name else name}当前状态"))
+                prior=f"第{prior_ch}章账本:{state_line}",
+                fix=f"在文中交代{name}当前状态"))
+            continue
+
+        # 全名不在正文 → 看别名/简称。**不含单字**(单汉字必然撞词:苏醒/苏州/复苏)。
+        aliases: list[str] = []
+        if len(name) >= 2:
+            aliases.append(name[1:])                  # 去姓(给名)
+            if name[0] in _COMPOUND_SURNAMES:
+                aliases.append(name[2:])               # 复姓去姓
+        if "·" in name:
+            aliases.append(name.split("·")[-1])
+        surname = name[0]
+        aliases += [surname + suf for suf in ("姑娘", "公子", "前辈", "兄", "老", "某")]
+        # 去重且**保序**:list(dict.fromkeys(...)) 而非 set——set 遍历受 hash 随机化
+        # 影响,会让同一份稿子两次除虫报出不同证据,破坏"纯函数可复现"这条底线。
+        for alias in list(dict.fromkeys(a for a in aliases if len(a) >= 2)):
+            if alias not in body:
+                continue
+            if _mentioned_and_addressed(body, alias):
+                continue
+            out.append(BugItem(
+                3, "人设",
+                f"「{name}」前情处于特殊状态:{state_line},本章仅以别名/简称出现",
+                evidence=alias,
+                prior=f"第{prior_ch}章账本:{state_line}",
+                fix="补足全称并交代状态变化"))
+            break
     return out
 
 _PUNC_RE = re.compile(r'[\s·、，。！？：；\-—…()（【】『』「」《》/]')
@@ -308,6 +342,21 @@ _SCAN_SYSTEM = """你是**连续性审读员**(除虫),只诊断、不改写。�
 
 _REPORT_LINE = re.compile(r"^[-·•]\s*(.+)$")
 
+# 「===除虫报告===」分隔行的宽容判据(只判「标记在不在」,不是解析):模型对这行固定
+# 字面量的输出常有格式抖动——多余空白、markdown 强调包一层、全角=、=数量增减。
+# 精确字面匹配会把这些无害抖动误判成「格式漂移」,在干净章节上假警报——假警报比
+# 沉默更毁信任(见 scan_chapter 里这个判据的使用处)。宁可放过真漂移(少报),
+# 也不在纯格式抖动上误报;规则本身仍是确定性正则,不是解析器。
+_REPORT_MARKER_RE = re.compile(
+    r"^\s*[*_~`]*\s*[=＝]+\s*[*_~`]*\s*除虫报告\s*[*_~`]*\s*[=＝]+\s*[*_~`]*\s*$",
+    re.MULTILINE,
+)
+
+
+def _has_report_marker(raw: str) -> bool:
+    """除虫报告分隔行是否存在(容忍格式漂移,见 _REPORT_MARKER_RE 注释)。"""
+    return bool(_REPORT_MARKER_RE.search(raw))
+
 
 def parse_scan(raw: str) -> tuple[list[BugItem], list[str]]:
     """双段宽容解析。报告段「通过」→ [];入账段只认 statebook 四类行,「- 无」→ []。"""
@@ -427,8 +476,23 @@ def scan_chapter(project_root: Path, chapter_n: int, body: str, backend: Backend
         parts.append("## 你的任务\n按系统要求输出两段:除虫报告 + 状态入账。")
         raw = backend.complete(_SCAN_SYSTEM, "\n\n".join(parts), max_chars=900)
         llm_items, state_lines = parse_scan(raw)
-    except Exception:
-        pass   # LLM 侧任何失败都吞:确定性结果照出,附赠动作绝不拖累出稿
+    except Exception as e:  # noqa: BLE001 — 不拖累出稿,但**必须留下痕迹**
+        # 裸吞会让「prompt 漂移 / 配额耗尽 / parse 全不匹配」的表象与「本章无矛盾」
+        # 完全一样,除虫的双引擎可能长期只剩单引擎而无人知(确定性侧仍照常出结果)。
+        progress(events.warn(f"除虫的 LLM 侧这次没跑成({type(e).__name__}:{e});"
+                             "确定性检测结果仍然有效,但这一章没有 LLM 侧的交叉验证。"))
+    else:
+        # 两段都空,有两种可能:①本章真的无矛盾且无状态变化(LLM 老实回「通过」/「无」,
+        # 分段标记原样保留);②响应没法按格式解析(prompt 漂移/后端乱回)。两者单看
+        # llm_items/state_lines 无法区分,但分段标记在不在能区分:①即使内容空,
+        # 「===除虫报告===」这行本身仍会被原样回传;②真漂移时连这行都没有。
+        # 用标记存在与否兜底,不确定的情况宁可措辞保守("没能解析出"),不武断说"格式漂移"。
+        # 标记判据用 _has_report_marker(宽容匹配),不是精确子串——避免模型对固定字面量
+        # 的无害格式抖动(空白/强调/全角=/=数量)在干净章节上被误判成"格式漂移"。
+        if not llm_items and not state_lines and not _has_report_marker(raw):
+            progress(events.warn("除虫的 LLM 侧返回了内容,但没能按预期格式解析出结果"
+                                 "(响应里找不到除虫报告/状态入账的分段标记);"
+                                 "本章只有确定性检测的结果,这一章没有 LLM 侧的交叉验证。"))
 
     issues = merge_items(det, llm_items)
     note_path = _note_report(project_root, chapter_n, issues)

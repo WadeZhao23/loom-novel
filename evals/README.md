@@ -38,12 +38,19 @@
 | `run_eval --gate` | 0 | 和基线比对,无回归 |
 | `run_eval --gate` | 1 | 检测到质量回归——**CI 红灯就靠这个码** |
 | `run_eval --gate` / `--baseline` | 2 | infra 问题:case 目录是空的 / 基线文件不存在,**不是质量回归** |
-| `generate`(demo / configured) | 0 | 跑完(单条 case 的 ✅/❌ 只体现在打印和 `report.json` 里,不改变进程退出码) |
+| `run_eval --judge --gate`(同传) | 2 | 用法错误:LLM grader 会把权重和从 0.70 顶到 1.00,和无 judge 的基线口径不一致必然伪回归,直接拒绝,不当质量回归处理 |
+| `generate`(demo / configured,`--repeat` 缺省=1) | 0 | 跑完(单条 case 的 ✅/❌ 只体现在打印和 `report.json` 里,不改变进程退出码) |
 | `generate` | 2 | infra 问题:`gen_cases/` 目录不存在 / 指定的 `--case` 找不到 |
+| `generate --repeat N`(N≥2) | 2 | 该 case 全部 N 次运行都 infra,没有任何可读分布——不是质量结论 |
+| `generate --compare A B` | 0 | 比对完成,没有一项判定「回归」(「分不出」「改进」「无数据」都不算回归) |
+| `generate --compare A B` | 1 | 至少一项判定「回归」 |
+| `generate --compare A B` | 2 | 拒绝出结论:`--compare` 参数不是两个 / 批次目录缺 `summary.json` / 任一批 `n_valid == 0` / 两批 `case_id` 不一致 |
 
 关键差异:`run_eval --gate` 把「回归」单独留成 1,好让 CI 只在这一种情况下拦人;`generate`
-是手动/探索工具,不接 CI 门禁,目前没有为「这条 case 没通过」单开退出码——想知道结果,看命令行
-打印的 ✅/❌ 或 `run_dir/report.json` 里的 `"passed"`。
+(单条/`--repeat`)是手动/探索工具,不接 CI 门禁,目前没有为「这条 case 没通过」单开退出码——
+想知道结果,看命令行打印的 ✅/❌ 或 `run_dir/report.json` 里的 `"passed"`。`generate --compare`
+例外:它明确对比「改动前/后」,所以确实把 1 留给「检测到回归」,退出码含义与 `run_eval --gate`
+同构——两处「1」都专指「质量往回走了」,不是随便什么失败都占这个码。
 
 ## Fixture suite 怎么跑
 
@@ -225,6 +232,74 @@ gitignore(`.gitignore` 里 `evals/runs/` 那一行),不会进版本库,也不会
 **不可复现声明**:这条链路没有 seed 通道,同一个 case 跑两次不保证字符级甚至语义级一致——
 这是当前 Backend 协议的现实,不是缺陷。判断「这次 prompt 改动到底有没有让生成变好」,
 应该看**多次运行的分数分布**(比如同一 case 连续跑 5 次的区间),而不是拿单次结果定生死。
+
+### 棒级归因:每一棒单独体检,不只看终稿总分
+
+只对终稿打一个总分,回答不了「该改哪一棒的 prompt」。棒级归因把流水线五棒(设定师→大纲师→
+写手→编辑→润色师)的**中间产物**各收一份、各挂一组零 LLM 的确定性体检(`evals/stepgraders.py`),
+体检项设计成「上游有、这一棒输出里没了」的差分——命中就能直接定位到棒,不用再猜。跑完一个
+case,`run_dir/` 下多出:
+
+| 文件 | 内容 |
+|---|---|
+| `steps/<角色>.md` | 该棒的完整产物原文(WYSIWYG 旁路 / 续跑跳过的棒没有文件) |
+| `steps.json` | 五棒各自 `collected` / `skipped` |
+| `step_report.json` | 五棒各体检项的分数 + `weakest`(该点名哪一棒;所有 gating 项都过或无严格多数则为 `null`) |
+
+**三种「没测到」,含义不同,别混**:
+- `skipped(...)`——这一棒没有产物(旁路或续跑跳过),真没跑。
+- `[not-measurable]`——这一棒跑了,但这个信号本次结构性测不出(如章目标 ≤0 时篇幅预算
+  检查不适用;或编辑·留痕围栏——controller 在落 ledger 前就把围栏剥走了,永远测不到)。
+- **observe-only**(`gating=False, weight=0.0`,但每次都真测了,如 写手·AI翻转句)——**这不是
+  没测到**,只是这一项本身不参与门禁计分,分数依旧照实进分布 / `summary.md` / `--compare`。
+
+三者共用 `gating=False`,但只有前两种(靠 `detail` 字符串的 `[skipped]` / `[not-measurable]`
+前缀识别,不是靠 `gating`)会被排除出分布——这条界线一度弄反过(`gating=False` 直接排除,
+把 observe-only 项也当没测到丢了,报告因此把一项每次都真测出数字的信号印成「从未测过」),
+现在按 detail 前缀走,别再退回去按 `gating` 判断。
+
+### `--repeat N`:对抗无 seed 的噪声
+
+```bash
+LOOM_DEMO=1 python -m evals.generate --case gen_01_mine_rebirth --repeat 5
+```
+
+同一个 case 连跑 N 次(N≥2),`evals/aggregate.py` 把 N 份 `step_report.json` 聚成**每个体检项
+的分布**(中位数 + 区间 + 有效/总次数)落进 `batch/summary.json` + `batch/summary.md`,并按
+多数决(超过半数有效 run 都点了同一棒才算数)点名 `weakest`。单次崩了记 infra 继续跑,不因
+一次崩溃丢掉整批;summary 老实披露「N 次里 M 次有效」,不拿 M 次冒充 N 次(全 infra 则退出码 2,
+见上面「退出码」表)。
+
+### `--compare`:两批之间,证不出差异就不算改进
+
+```bash
+python -m evals.generate --compare evals/runs/<批次A> evals/runs/<批次B>
+```
+
+**最重要的一条纪律**:证不出差异 → 判「分不出」,绝不宣称改进——生成链路
+temperature=0.9 写死、无 seed,中位数涨了一点很可能只是这次运气好。
+
+**判据 = Mann-Whitney U 双尾 `p < 0.05`**(`ALPHA` 预注册在 `generate.py`,先定阈值再看结果)。
+总样本 ≤60 走**精确**检验(秩和 DP 枚举,结用 midrank 处理),更大才退正态近似,报告末尾
+如实标明用的哪种——实测结多时两者能差 0.1 以上,足以在阈值附近翻盘,不能混为一谈。
+
+> **为什么不是 min~max 区间重叠(2026-08-10 换掉)**:那条判据描述的是「这批样本铺多开」,
+> 不是「统计量有多不确定」,**不随 N 收窄**——N 越大越容易抽到极端值、区间反而更宽,于是
+> 双峰/计数型指标**任何 N 都判不开**。真事故:设定师·锚点篇幅 10v10,改前 `[0.0 … 0.934]`
+> vs 改后 `[0.537 … 1.0]`,旧判据判「重叠→分不出」,精确检验 `p=0.0245`——**把一个真实的
+> 改进判成了没变化**。换 IQR 也不行(同样描述散布、同样不收窄);中位数置信区间方向对但
+> 本数据结太多、分辨力不够。区间现在只作展示,不参与判定。
+> 老批次的 `summary.json` 没存原始分数,`--compare` 会退回旧区间判据并在结论里标
+> 「·老批次」,免得两种成色的结论混着读。
+
+出结论前有两道硬闸,
+任一不满足就拒绝、退出码 2,不往下算:
+- 任一批 `n_valid == 0`(整批 infra,没有可读分布,连「分不出」都算不出);
+- 两批的 `case_id` 不一致(比如误拿 gen_01 的批次去比 gen_02——不同 case 的分布没有可比性,
+  硬比出来的「改进/回归」是假结论)。
+
+两批的键集合取并集(`a ∪ b`),不是只取 a——只取 a 会把「b 独有的体检项」(改完 prompt 新增的
+检查、或某棒只在其中一批被旁路)静默丢掉;b 独有项判「无数据」,不当它不存在。
 
 ## Judge 校准数据集(Phase 2)
 

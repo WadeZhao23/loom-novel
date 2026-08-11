@@ -19,6 +19,11 @@ from .fingerprint import _segment as segment_sentences
 from .gates import CRITIC_去AI味, CRITIC_质检, Issue
 from .gates import _parse_verdict as parse_critic_verdict
 
+# 判词「通过」的精确匹配口径(parse_verdict 同款):graders._verdict_is_unparsable 要判断
+# 「模型有没有明确说通过」,不能自己发明子串匹配——「未通过/不通过」都是子串命中「通过」,
+# 会把否定判词误判成合法通过。必须复用产品侧这份精确匹配集合,而不是各判各的。
+from .parse import _PASS_PHRASES as PASS_PHRASES
+
 # ── Generation suite 接缝(Phase 1)──纯再导出,零逻辑:evals/generate.py 真调
 #    五 Agent 流水线所需的最小集合。引擎侧改这些符号的签名 = 改契约,先改这里。
 from .agents import run_pipeline
@@ -27,10 +32,20 @@ from .config import Config, load_config, save_config
 from .paths import outline_path
 from .scaffold import init as scaffold_init
 
+# ── 棒级归因接缝(2026-08)──纯再导出,零逻辑:evals 的棒级体检项要复用产品
+#    已有的判据(工序表/场次预算/留痕切分/ledger 读取),别在 evals 里重写一套。
+from .agents import PIPELINE, _SHORT as STEP_SHORT_BUDGETS
+from .agents import _parse_scene_budgets as parse_scene_budgets
+from .agents import _scene_range as scene_range
+from .ledger import load_ledger
+from .parse import split_edit_note
+from .paths import ledger_path
+
 __all__ = [
     "CRITIC_去AI味",
     "CRITIC_质检",
     "Issue",
+    "PASS_PHRASES",
     "detect_aitell",
     "parse_critic_verdict",
     "segment_sentences",
@@ -41,4 +56,11 @@ __all__ = [
     "run_pipeline",
     "save_config",
     "scaffold_init",
+    "PIPELINE",
+    "STEP_SHORT_BUDGETS",
+    "ledger_path",
+    "load_ledger",
+    "parse_scene_budgets",
+    "scene_range",
+    "split_edit_note",
 ]

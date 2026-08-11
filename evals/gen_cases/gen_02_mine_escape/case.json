@@ -1,0 +1,14 @@
+{
+  "id": "gen_02_mine_escape",
+  "title": "废矿逃生·首章(生成型·大纲师真跑)",
+  "chapter_n": 1,
+  "chapter_chars": 1000,
+  "expect": {
+    "must_include": ["沈砚", "矿"],
+    "hardfact_terms": ["逆息"],
+    "must_not_include": ["二中", "一阶0级"],
+    "max_aitell_hits": 0,
+    "len_tolerance": 0.6
+  },
+  "note": "与 gen_01 的结构差异:【overlay 给外置大脑,但不给细纲】,所以大纲师不走 WYSIWYG 旁路、真调模型(8 调而非 7 调,已用 LOOM_DEMO=1 离线冒烟实测验证)。gen_01 覆盖不到大纲师这一棒,这个 case 就是为它存在的。【2026-08-10 修正:此前本 case 没有 overlay 目录】——只删细纲不给外置大脑,scaffold 铺出来的是一本空书(世界观/人物卡全是「(占位示例,换成你自己的。)」空字段),沈砚/逆息/矿在书里根本不存在。首次真机 ×5 基线暴露:5 次里 2 次设定师如实拒绝出锚点(「无世界观可用、无人物卡可用」)、3 次凭空编造设定,硬设定专名恒 0.0(0 方差),大纲师/写手必含要素恒 0.5——测的全是「拿空书生成」这个 ADR-0014 起书门槛结构上禁止用户到达的状态,不是 agent 能力。现补 overlay/外置大脑/{世界观/一句话定位+力量体系+地理与势力, 人物/主角·沈砚, 卡章纲}:逆息落在 力量体系.md(文件名命中 _HARDFACT_KW 才进逐字直送块)、沈砚落在 人物/主角·沈砚.md(文件名带「·」才进专名册;scaffold 的 主角·未命名.md 被 _name_roster_for 的「未命名」过滤挡掉,不会污染名册)、卡章纲只给一行脊柱不给分镜,细纲仍由大纲师自己拆。chapter_chars 原计划取 2000(落进 scene_range 的 (3,4) 档,便于检验大纲师有没有按字数预算拆场),但实测发现 DemoBackend 的罐头终稿固定 144 视觉字(loom/backends.py `_DEMO['final']`),而 guard.chapter_profile 的最短闸是 max(40, chapter_chars*0.12)——2000 时闸值 240 > 144,run_pipeline 会在离线冒烟里直接抛 LoomBackendError,整条 run 连 steps.json 都落不下来,冒烟必挂。(3,4) 档下限是 1501,闸值 180 同样打不穿 144,这一档在离线冒烟下无解。因此改取 1000(仍是 (2,3) 档,闸值 120,冒烟安全过)。(3,4) 档的按预算拆场眼下测不到:chapter_chars: 1000 是这份 case 文件本身钉死的,不随后端切换而变,--backend configured 跑 gen_02 同样落在 (2,3) 档,要测 (3,4) 档得另开一个 chapter_chars≥1501 的 case。另外,DemoBackend 的罐头细纲(loom/backends.py `_DEMO['outline']`)在任何 chapter_chars 下都不带「约X字」标注,篇幅预算这一项在 demo 模式下永远 not-measurable,是与上面终稿闸值无关的第二个独立原因。hardfact_terms 单列「逆息」:设定师的锚点里必须带上这个硬设定专名,丢了下游就只能靠 hardfacts 直送兜底。"
+}

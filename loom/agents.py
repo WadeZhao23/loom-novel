@@ -386,28 +386,36 @@ _CONSTRAINT_KW = ("底线", "身段", "命格", "原则", "禁忌")
 
 def _char_constraints_for(project_root: Path) -> str:
     """人物卡里标签含 底线/身段/命格/原则/禁忌 的行,逐字直送写手——人设跌份的根治点。
-    纯字符串切片,双形态同口径;成长档案与 [AI补充] 照旧排除;无命中返回空串。"""
+    纯字符串切片,双形态同口径;成长档案与 [AI补充] 照旧排除;无命中返回空串。
+
+    两类占位一律不进(与 _name_roster_for 同口径「绝不把占位喂写手」):
+    ①【占位人物】文件名/小节名含「未命名」的 scaffold 卡——否则写手 prompt 里会凭空
+      多出一个叫「未命名」的人;②【没填完的行】标签命中但冒号后为空(`- 底线:`)——
+      纯噪声,且换个文件名绕不过 ① 的过滤,故要单独拦。
+    """
     def pick(name: str, text: str) -> list[str]:
         out = []
         for line in text.splitlines():
             s = line.strip()
             if not s.startswith("-"):
                 continue
-            label = re.split(r"[:：]", s.lstrip("- ").strip(), 1)[0]
-            if any(kw in label for kw in _CONSTRAINT_KW):
-                out.append(f"- {name}|{s.lstrip('- ').strip()}")
+            body = s.lstrip("- ").strip()
+            parts = re.split(r"[:：]", body, 1)
+            value = parts[1].strip() if len(parts) > 1 else ""
+            if any(kw in parts[0] for kw in _CONSTRAINT_KW) and value:
+                out.append(f"- {name}|{body}")
         return out
 
     lines: list[str] = []
     form = paths.brain_form(project_root, paths.CHARS_REL, paths.CHARS_DIR_REL)
     if form == "file":
         for head, body in _md_h2_sections((project_root / paths.CHARS_REL).read_text(encoding="utf-8")):
-            if "AI 补充" in head or "AI补充" in head:
+            if "AI 补充" in head or "AI补充" in head or "未命名" in head:
                 continue
             lines += pick(head, body)
     elif form == "dir":
         for f in paths.brain_dir_files(project_root, paths.CHARS_DIR_REL):
-            if f.name == paths.GROWTH_NAME:
+            if f.name == paths.GROWTH_NAME or "未命名" in f.stem:
                 continue
             lines += pick(f.stem, f.read_text(encoding="utf-8"))
     return "\n".join(lines)
@@ -526,14 +534,21 @@ def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Age
     return a, _read_file_items(project_root, rels, _noop)
 
 
-def _scene_budget(chapter_target: int) -> str:
-    """章目标字数 → 细纲场次预算。超长的真根因:大纲师不知道章目标,按惯例拆 3-6 场,
-    写手照多场细纲每场写透 → 2000 字目标干出 6000+。场次跟着篇幅走,结构上先锁死。"""
+def _scene_range(chapter_target: int) -> tuple[int, int]:
+    """章目标字数 →(最少场次, 最多场次)。场次预算的**单一真相**:
+    _scene_budget 的字符串形态由它派生,evals 的棒级体检也读它——两边永不漂。"""
     if chapter_target <= 1500:
-        return "拆 2-3 场"
+        return (2, 3)
     if chapter_target <= 3000:
-        return "拆 3-4 场"
-    return "拆 4-6 场"
+        return (3, 4)
+    return (4, 6)
+
+
+def _scene_budget(chapter_target: int) -> str:
+    """章目标字数 → 细纲场次预算(喂 prompt 的字符串形态)。超长的真根因:大纲师不知道
+    章目标,按惯例拆 3-6 场,写手照多场细纲每场写透 → 2000 字目标干出 6000+。"""
+    lo, hi = _scene_range(chapter_target)
+    return f"拆 {lo}-{hi} 场"
 
 
 def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars: int = 0) -> str:
@@ -558,7 +573,15 @@ def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars:
                     "删冗余描写、重复信息与注水铺垫,压回目标量级,不动情节骨架;绝不扩写。")
         return (f"篇幅目标约 {chapter_target} 字:原稿明显超目标就顺手压回来——"
                 "删冗余描写、重复信息与注水铺垫,不动情节骨架;绝不扩写。")
-    return f"≤{step_budget} 字。"  # 设定师
+    if role == "设定师":
+        # 真机 ×5 基线:600/454/373/516/587 字,5/5 全超 350 预算(中位数 516,超 47%)。
+        # 原先这里只有一句裸「≤350 字。」——是全表最弱的措辞,而同一份 docstring 的
+        # 「三管齐下」教训(软话压不住篇幅)当初只落到了大纲师/写手/编辑/润色师身上,漏了设定师。
+        # 锚点是【压缩后的选择】,不是设定摘抄:超长会把写手 prompt 里的写作指纹稀释掉。
+        return (f"≤{step_budget} 字,这是硬上限。锚点是**压缩后的选择**(这一章用哪几条),"
+                "不是把设定抄一遍——只写这一章真正用得上的,用不上的一条都不要列;"
+                "宁可漏一条边角设定,也不许超字数。超了下游写手的写作指纹会被你挤掉。")
+    return f"≤{step_budget} 字。"
 
 
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
@@ -792,8 +815,8 @@ def _scan_continuity(project_root: Path, chapter_n: int, body: str, backend: Bac
         rep = scan_chapter(project_root, chapter_n, body, backend,
                            hardfacts=hardfacts, progress=progress)
         progress(events.debug_report(chapter_n, rep["issues"], rep["note_path"]))
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — 附赠动作绝不阻断出稿,但不静默
+        progress(events.warn(f"除虫这次没跑成({type(e).__name__}:{e});不影响本章出稿。"))
 
 
 def _scan_sensitive(project_root: Path, chapter_n: int, text: str, progress: Progress) -> None:

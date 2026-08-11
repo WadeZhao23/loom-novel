@@ -1,4 +1,6 @@
 """连续性除虫:确定性双检测(零 LLM)+ LLM 扫描(Task 4 补)。守只报告不改稿。"""
+import re
+
 from loom import statebook
 from loom.continuity import BugItem, detect_consumed_reuse, detect_rule_drift, merge_items,     detect_time_mismatch, detect_char_continuity
 
@@ -386,4 +388,233 @@ def test_char_continuity_no_alias_match():
     book = {1: [('状态', '苏清瑶:闭关冲击金丹 | 证据:闭生死关')]}
     items = detect_char_continuity(book, 2, '陈墨走入庭院。', {'苏清瑶', '陈墨'})
     assert items == []
+
+
+# ── Task 13: detect_char_continuity 四个 bug 回归 ────────
+# 状态一律放在非第 1 章:第 1 章的 fixture 会掩盖 prior 用了泄漏循环变量的 bug②。
+
+def test_char_continuity_prior_points_at_the_right_chapter():
+    """双证据的价值全在指对地方:prior 必须指状态实际所在那一章,不是最早那章。"""
+    book = {
+        1: [("状态", "沈砚:健全|第1章")],
+        5: [("状态", "沈砚:重伤|第5章")],
+    }
+    body = "沈砚推开门，屋里空无一人。" * 30
+    out = detect_char_continuity(book, 7, body, {"沈砚"})
+    assert out, "第5章重伤、第7章出场未交代 → 应当报"
+    assert "第5章" in out[0].prior, f"prior 指错章:{out[0].prior}"
+
+
+def test_char_continuity_respects_char_names_whitelist():
+    """char_names 是白名单:账本里的非人物行(阵法/城主府)不该触发人设报警。"""
+    book = {2: [("状态", "护山大阵:封印|第2章")]}
+    body = "护山大阵嗡鸣了一声。" * 30
+    assert detect_char_continuity(book, 4, body, {"沈砚"}) == []
+
+
+def test_char_continuity_empty_whitelist_falls_back_to_no_filter():
+    """白名单为空(老书没有人物目录)→ 不过滤,特殊状态角色仍能被抓到——
+    这是兜底行为,不是把 bug① 放回来(bug① 是"非空白名单也不过滤")。"""
+    book = {2: [("状态", "沈砚:重伤|第2章")]}
+    body = "沈砚一跃三丈，长剑出鞘。" * 20
+    assert detect_char_continuity(book, 4, body, set()) != []
+
+
+def test_char_continuity_does_not_fire_when_status_change_is_narrated():
+    """全名出现且正文交代了状态变化 → 不该报。旧判据 `state_line not in body[:500]`
+    实质恒真,让这条分支变成噪声源。"""
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "沈砚的伤已经好了大半，他推门进来。" + "此后诸事顺遂。" * 30
+    assert detect_char_continuity(book, 5, body, {"沈砚"}) == []
+
+
+def test_char_continuity_still_fires_when_status_ignored():
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "沈砚一跃三丈，长剑出鞘，快得没人看清。" * 20
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out and "第3章" in out[0].prior
+
+
+def test_char_continuity_single_surname_is_not_an_alias():
+    """单汉字姓在中文里必然撞词(苏醒/苏州/复苏),不能当别名。"""
+    book = {2: [("状态", "苏昭:闭关|第2章")]}
+    body = "他从昏迷中苏醒过来，望向苏州方向。" * 20   # 有「苏」但没有苏昭
+    assert detect_char_continuity(book, 4, body, {"苏昭"}) == []
+
+
+def test_char_continuity_resolution_word_in_different_sentence_still_fires():
+    """钉死 _mentioned_and_addressed 是**句级**scope,不是整篇正文扫描。
+
+    计划原稿写的是 `any(w in _RESOLVED for w in body)`——对整篇正文做全局扫描。
+    实现者收窄成同句检查,理由是:全局扫描一旦命中「好了」这类高频词,会让全书**所有**
+    角色的连续性检测集体静音,比"总是不报"的原 bug 精度更差。这条测试把状态解除词
+    (「痊愈」)放在人物提及的**前一句**,两句之间用句号隔开:
+    - 句级 scope:人物那句「沈砚推门而入。」本身没有解除词 → 仍应报。
+    - 整篇 scope(计划原稿的写法):「痊愈」出现在正文任意位置就会静音整章 → 不会报。
+    若未来有人把 _mentioned_and_addressed "简化"回整篇扫描,这条测试会变红。
+    """
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = "他的伤早已痊愈。沈砚推门而入。" + "此后诸事顺遂。" * 30
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out, "解除词在人物那句之外 → 句级 scope 下仍应报;若不报说明退化成了整篇扫描"
+    assert "第3章" in out[0].prior
+
+
+def test_char_continuity_unrelated_dialogue_cannot_silence_report():
+    """句级 scope 的动机场景本身:「好了」这种高频寒暄词出现在与人物无关的对话里,
+    不该让整章的连续性检测失明。这正是实现者拒绝整篇扫描的理由——用真实场景钉死它。
+    """
+    book = {3: [("状态", "沈砚:重伤|第3章")]}
+    body = ("王婶笑着说道：好了好了，饭都凉了，快来吃饭吧。" + "闲话家常。" * 20
+            + "沈砚一跃三丈，长剑出鞘，快得没人看清。" + "此后诸事顺遂。" * 20)
+    out = detect_char_continuity(book, 5, body, {"沈砚"})
+    assert out, "无关对话里的「好了」不该让含沈砚那句的报告被静音"
+    assert "第3章" in out[0].prior
+
+
+def test_char_continuity_alias_evidence_is_deterministic():
+    """纯函数必须可复现:同一份输入多次调用,证据逐字相同(旧代码 set 遍历会飘)。
+    body 里同时放「沈公子/沈兄/沈某」三个候选别名,逼旧代码的 set 遍历暴露顺序不稳
+    (旧代码里 bare 单姓「沈」也是候选,命中即碰上,更加剧了不稳定)。"""
+    book = {2: [("状态", "沈砚:闭关|第2章")]}
+    body = "沈公子与沈兄一同站着，沈某也在。" * 20
+    outs = [detect_char_continuity(book, 4, body, {"沈砚"}) for _ in range(20)]
+    evidences = {tuple(b.evidence for b in o) for o in outs}
+    assert len(evidences) == 1, f"证据不稳定:{evidences}"
+    assert outs[0] and outs[0][0].evidence == "沈公子"  # 别名生成顺序固定,首个命中恒为「沈公子」
+
+
+# ── Task 14: 裸 except 不再静默吞掉除虫的失败 ────────
+
+def test_scan_chapter_llm_failure_is_visible_not_silent(tmp_path):
+    """LLM 侧挂掉时表象不得与「本章无矛盾」相同——否则双引擎哑一半没人知道。"""
+    from loom.continuity import scan_chapter
+
+    class _BoomBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            raise RuntimeError("配额耗尽")
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    rep = scan_chapter(root, 2, "正文内容。" * 20, _BoomBackend(), progress=seen.append)
+    msgs = " ".join(str(e) for e in seen)
+    assert "配额耗尽" in msgs, f"失败原因必须可见:{seen}"
+    assert rep["issues"] is not None, "确定性侧仍要照常出结果,不阻断"
+
+
+def test_scan_chapter_reports_when_llm_returns_unparsable(tmp_path):
+    """后端返回了、但 parse_scan 一条都没抓到 —— 这是 prompt 漂移的典型表象,
+    不走 except、连异常都没有,同样必须报出来。"""
+    from loom.continuity import scan_chapter
+
+    class _GarbageBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return "本章读下来没发现什么问题。"      # 非空但格式不合,parse_scan 抓 0 条
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _GarbageBackend(), progress=seen.append)
+    msgs = " ".join(str(e) for e in seen)
+    assert "格式" in msgs or "没抓到" in msgs, f"哑火必须可见:{seen}"
+
+
+def test_scan_chapter_clean_chapter_does_not_false_positive(tmp_path):
+    """本章真的干净:LLM 按格式老老实实回「通过」+「无」——两段标记都在,只是内容为空。
+    这与上面的「格式漂移」表象都是 llm_items/state_lines 双空,但不该被当成哑火误报,
+    否则每一章「确实无矛盾」都会被拉响警报,警报也就失去意义了。"""
+    from loom.continuity import scan_chapter
+
+    class _CleanBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return "===除虫报告===\n通过\n===状态入账===\n- 无"
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _CleanBackend(), progress=seen.append)
+    warns = [e for e in seen if e.get("type") == "warn"]
+    assert warns == [], f"本章确实无矛盾,不该被误报成哑火:{warns}"
+
+
+def _drifted_marker_warns(tmp_path, marker_line: str) -> list[dict]:
+    """跑一次 scan_chapter,LLM 回复用给定的漂移版「===除虫报告===」分隔行,内容仍老实
+    干净(「通过」+「无」)。返回 warn 事件——供各变体测试断言「没有假警报」。"""
+    from loom.continuity import scan_chapter
+
+    class _DriftedMarkerBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return f"{marker_line}\n通过\n===状态入账===\n- 无"
+
+    seen = []
+    root = tmp_path / "book"
+    (root / "正文").mkdir(parents=True)
+    scan_chapter(root, 2, "正文内容。" * 20, _DriftedMarkerBackend(), progress=seen.append)
+    return [e for e in seen if e.get("type") == "warn"]
+
+
+def test_scan_chapter_report_marker_extra_whitespace_not_false_positive(tmp_path):
+    """分隔行等号与文字之间多打了空格——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "===  除虫报告  ===")
+    assert warns == [], f"纯空白抖动不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_different_equals_count_not_false_positive(tmp_path):
+    """等号数量从 3 个变成 2 个——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "==除虫报告==")
+    assert warns == [], f"等号数量抖动不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_markdown_emphasis_not_false_positive(tmp_path):
+    """模型把文字部分包了一层 markdown 强调——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "===**除虫报告**===")
+    assert warns == [], f"markdown 强调包裹不该被误报成格式漂移:{warns}"
+
+
+def test_scan_chapter_report_marker_fullwidth_equals_not_false_positive(tmp_path):
+    """等号写成全角——本章仍是干净的,不该被误报成格式漂移。"""
+    warns = _drifted_marker_warns(tmp_path, "＝＝＝除虫报告＝＝＝")
+    assert warns == [], f"全角等号不该被误报成格式漂移:{warns}"
+
+
+def test_agents_scan_continuity_does_not_swallow_silently(tmp_path):
+    """agents 侧的外层裸 except 会连 scan_chapter 整个炸掉都吞掉——也要留痕。
+
+    崩溃点必须选在 scan_chapter 自己那个 LLM try/except 之外,否则内层先吞,外层永远
+    够不着(用 backend.complete() 直接抛异常测不出外层——它会被 continuity.py 的内层
+    except 拦下,两条 warn 文案都恰好带「除虫」子串,断言等于白测)。这里让 project_root
+    指向一个普通文件而非目录:LLM 段正常走完后,_note_report 的 path.parent.mkdir()
+    因为父路径不是目录而抛 NotADirectoryError——这发生在 scan_chapter 自身 try 块之外,
+    只有 _scan_continuity 的外层 except 才可能抓到它。backend 用能正常解析的干净响应,
+    确保内层「LLM 侧没跑成」那条 warn 不会被顺带触发,断言也专挑外层独有的措辞。
+    """
+    from loom.agents import _scan_continuity
+    from loom.config import Config
+
+    class _CleanBackend:
+        def complete(self, system, user, *, max_chars=None, on_chunk=None):
+            return "===除虫报告===\n通过\n===状态入账===\n- 无"
+
+    not_a_dir = tmp_path / "not_a_dir"
+    not_a_dir.write_text("我是文件,不是目录", encoding="utf-8")
+
+    seen = []
+    cfg = Config()
+    cfg.continuity_scan = True
+    _scan_continuity(not_a_dir, 2, "正文。" * 20, _CleanBackend(), cfg, seen.append)
+
+    warns = [e for e in seen if e.get("type") == "warn"]
+    assert len(warns) == 1, f"应且只应有外层这一条 warn:{seen}"
+    msg = str(warns[0])
+    # 不断言具体异常类名:同一次 mkdir("父路径其实是个文件") 在 POSIX 上抛
+    # NotADirectoryError,在 Windows 上抛 FileExistsError([WinError 183])——
+    # 类名是平台细节,不是本测试要证明的东西(CI 已在 windows-latest 上验证过差异)。
+    # 改为断言两件与平台无关的事:①消息里确实格式化进了一个"XxxError:"形态的真实
+    # 异常类型(不是空字符串、不是被吞掉);②消息带着这次失败的哨兵路径片段
+    # (not_a_dir 的目录名),证明这条异常确实源于我们构造的这次 mkdir,而不是巧合。
+    assert re.search(r"[A-Za-z]+Error:", msg), f"外层必须报出真实异常类型:{seen}"
+    assert not_a_dir.name in msg, f"外层异常消息必须带上失败路径(哨兵目录名),证明确实来自这次 mkdir:{seen}"
+    assert "不影响本章出稿" in msg, f"这句措辞只在 _scan_continuity 的外层 warn 里出现:{seen}"
+    assert "LLM 侧" not in msg, f"不该是 continuity.py 内层那条 warn 被截胡:{seen}"
 

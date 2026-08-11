@@ -37,3 +37,13 @@ def test_gate_returns_1_on_regression(tmp_path):
     bf.write_text(json.dumps({"cases": {"phantom_gone": {"score": 1.0, "passed": True}}}),
                   encoding="utf-8")
     assert main(["--gate", "--baseline-file", str(bf)]) == 1
+
+
+def test_judge_and_gate_are_mutually_exclusive(tmp_path, capsys):
+    """--judge --gate 同传必须拒绝:LLM grader gating=True 会把权重和从 0.70 顶到 1.00,
+    所有 case 分数整体位移,与 no-judge 基线比对必然伪回归。"""
+    from evals.run_eval import main
+    code = main(["--judge", "--gate", "--cases", str(tmp_path)])
+    assert code == 2, "同传应判 infra(2),不是跑完再比"
+    out = capsys.readouterr().out
+    assert "--judge" in out and "--gate" in out
