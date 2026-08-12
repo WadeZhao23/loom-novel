@@ -1,15 +1,25 @@
 {
   "id": "case_01_clean",
   "title": "废矿·逆息觉醒(干净基准)",
-  "chapter_chars": 600,
+  "chapter_chars": 330,
   "fixture": "chapter.md",
   "setting": "世界观:灵气复苏第三年,主角觉醒「逆息」体质,只能在濒死时爆发,每用一次折损寿元。地名:主角少年时在「一中」读书(不是二中)。力量体系只有 F~SSS,没有「一阶0级」。人物:师姐(宗门同门,立场未明)。卡章纲:本章承上一章「追兵火把已到矿口」,章末钩=师姐登场。",
   "fingerprint": "## anchor 例句\n> 他没说话。\n> 那笑没到眼睛里。",
-  "fingerprint_anchors": ["他没说话。", "那笑没到眼睛里。"],
+  "fingerprint_anchors": [
+    "他没说话。",
+    "那笑没到眼睛里。"
+  ],
   "expect": {
-    "must_include": ["逆息", "师姐"],
-    "must_not_include": ["二中", "一阶0级"],
+    "must_include": [
+      "逆息",
+      "师姐"
+    ],
+    "must_not_include": [
+      "二中",
+      "一阶0级"
+    ],
     "max_aitell_hits": 0,
-    "len_tolerance": 0.6
-  }
+    "len_tolerance": 0.25
+  },
+  "note": "chapter_chars 由 600 改为 330(2026-08-11):fixture 是人手写的 329 字静态样本,600 是从未对上的元数据,±60% 一直在掩盖它。收紧容差到 0.25 后必须改对,否则「干净基准应当 PASS」这条契约会被自己的元数据打破。这不是看完分数倒推阈值——阈值 0.25 由真机基线先定,这里改的是描述静态产物的元数据。"
 }

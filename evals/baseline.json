@@ -24,13 +24,13 @@
       }
     },
     "case_02_flawed": {
-      "score": 0.607,
+      "score": 0.557,
       "passed": true,
       "case_type": "detector_contract",
       "graders": {
         "长度达标": {
-          "score": 1.0,
-          "passed": true,
+          "score": 0.765,
+          "passed": false,
           "gating": true
         },
         "去AI味·确定性": {
@@ -72,9 +72,9 @@
     "cases": 3,
     "passed": 3,
     "pass_rate": 1.0,
-    "mean_score": 0.812,
+    "mean_score": 0.795,
     "per_grader": {
-      "长度达标": 1.0,
+      "长度达标": 0.883,
       "去AI味·确定性": 0.75,
       "关键要素": 0.75,
       "风格相似·中性指纹": 0.657,
