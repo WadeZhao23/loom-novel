@@ -9,7 +9,12 @@ authors = [{ name = "Chambers" }]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
-    "openai>=1.30",
+    # 上限 <3 是必须的,不是保守:openai 3.0.0 把传输层从 httpx 换成了 httpx2,
+    # 而 backends.py 用 httpx.Timeout 配显式超时。不钉上限时全新安装会拉到 3.x,
+    # `import httpx` 直接 ModuleNotFoundError,且被 except 包成「缺少 openai 这个依赖包」
+    # 这种误导性报错(openai 明明装着)。2026-08-12 CI 双平台实测撞上。
+    # 要升 openai 3 得先把 httpx→httpx2 迁移做完并真机验证,那是独立任务。
+    "openai>=1.30,<3",
     "python-dotenv>=1.0",
     "fastapi>=0.110",
     "uvicorn>=0.29",

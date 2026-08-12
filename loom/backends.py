@@ -252,10 +252,16 @@ class OpenAICompatBackend:
             raise LoomBackendError(render(code), code=code)
         # 延迟 import,免得没装 openai 时连 --help 都跑不起来
         try:
-            import httpx  # openai 的传输层依赖,随它一起装
             from openai import OpenAI
         except ModuleNotFoundError as e:
             raise LoomBackendError(render("openai_not_installed"), code="openai_not_installed") from e
+        try:
+            # openai 1.x/2.x 的传输层是 httpx,随它一起装;3.0 起换成了 httpx2(故 pyproject 钉 <3)。
+            # 单独 try:这里缺的是【传输层】不是 openai 本身,混进上面那个 except 会报出
+            # 「缺少 openai」这种假话——2026-08-12 CI 上就是这么误导了半天。
+            import httpx
+        except ModuleNotFoundError as e:
+            raise LoomBackendError(render("httpx_not_installed"), code="httpx_not_installed") from e
         # 显式超时(SDK 默认 600s,挂了要等 10 分钟才有反馈):连接 10s / 其余 120s;
         # 流式的 read 按 chunk 间隔计,思考型模型思考期可能久无正文,放宽到 300s。
         self._client = OpenAI(api_key=api_key, base_url=base_url,
