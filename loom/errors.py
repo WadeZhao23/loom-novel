@@ -31,6 +31,14 @@ author_errors: dict[str, AuthorError] = {
         impact="DeepSeek 后端无法初始化,写作流水线起不来。",
         next_action="在 Loom 的环境里跑 `pip install openai`(或重装 Loom 依赖)后重试。",
     ),
+    "httpx_not_installed": AuthorError(
+        title="缺少 httpx 这个传输层依赖",
+        reason="openai 库装着,但它用来发请求的 httpx 不在环境里。常见成因:装到了 "
+               "openai 3.x——它把传输层换成了 httpx2,Loom 目前用的是 httpx。",
+        impact="后端无法初始化,写作流水线起不来。",
+        next_action="跑 `pip install 'openai<3'` 把 openai 降回 2.x(会一并带上 httpx),"
+                    "或直接 `pip install httpx` 后重试。",
+    ),
     "deepseek_auth_failed": AuthorError(
         title="DeepSeek 的 API key 没通过验证",
         reason="DeepSeek 拒绝了这个 key(填错、复制时多了空格、或 key 已被删/停用)。",
