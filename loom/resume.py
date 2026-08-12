@@ -53,11 +53,18 @@ def sig_v1(knowledge: str, workspace: list[tuple[str, str]], prev: str) -> str:
     return ledger.sha(knowledge + "\x1f" + "\n".join(t for _, t in workspace) + "\x1f" + prev)
 
 
-def resume_point(root: Path, n: int, upstream_v2, upstream_v1) -> tuple[int, list]:
+def resume_point(root: Path, n: int, upstream_v2, upstream_v1, stale_local=None) -> tuple[int, list]:
     """返回 (起始工序下标, 预填 workspace)。
 
     逐工序:v2 命中→跳过;老签名(无 v2: 前缀)且 v1 复核命中→原位升级为 v2 后跳过
     (零重跑);都不中→从此工序重算。升级过的账本落盘一次。
+
+    `stale_local(role, ledger_output) -> bool`:该工序有【本地可编辑产物】且它已与账本里的
+    不一致(作者手改过)→ 即便签名命中也要从这一棒重算。目前唯一的用户是大纲师的 WYSIWYG 细纲。
+    为什么不折进签名:细纲是大纲师【产出后】才落盘的,首跑算 up_sha 时它还不存在,
+    折进去会让每本书第一次续跑都从大纲师起重算(还会改动 golden 事件流)。
+    判定所需的「哪些棒有本地产物、产物在哪」属工序行为,按 agents.py 的红线只住代码侧
+    STEPS 表,故由 run_pipeline 以回调注入,不下沉进本模块。
     """
     from .agents import PIPELINE, load_agent   # 函数级导入:resume 是策略层,静态依赖单向
 
@@ -83,6 +90,9 @@ def resume_point(root: Path, n: int, upstream_v2, upstream_v1) -> tuple[int, lis
             entry["upstream_sha"] = want2   # 老账本原位升级:同一上游,只换签名算法
             upgraded = True
         else:
+            return _done(i)
+        # 签名命中 ≠ 可以跳过:本地可编辑产物(细纲)可能被作者手改过,那份才是真相
+        if stale_local is not None and stale_local(role, entry.get("output", "")):
             return _done(i)
         workspace.append((load_agent(root, role).produces, entry["output"]))
     return _done(len(PIPELINE))

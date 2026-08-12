@@ -43,7 +43,11 @@ def test_pipeline_prompts_carry_length_hints(project):
     assert "≤350 字" in _user_of(be, "本章设定锚点")
     # 大纲师:结构闸——知道章目标、按目标定场次、每场标字数预算(超长的真根因在这)
     outliner = _user_of(be, "本章场景骨头(分镜细纲)")
-    assert "细纲本身 ≤450 字" in outliner
+    # 细纲上限不再是写死的 450,按章目标现算(2400 → (3,4) 档 → 200+350×4=1600)。
+    # 450 是 spec §10.4 的自相矛盾:真机 20/20 全部越线,它从来不是约束。
+    from loom.agents import outline_budget
+    assert f"细纲本身 ≤{outline_budget(2400)} 字" in outliner
+    assert outline_budget(2400) == 1600
     assert "本章正文目标约 2400 字" in outliner
     assert "拆 3-4 场" in outliner            # 2400 字 → 3-4 场,不再放任 5-6 场撑爆篇幅
     assert "约X字」的篇幅预算" in outliner
@@ -99,3 +103,49 @@ def test_normal_length_final_leaves_no_note(project):
 
     p = project / ".审稿留痕" / "第1章.md"
     assert not p.exists() or "篇幅提醒" not in p.read_text(encoding="utf-8")
+
+
+# ── spec §10.1:编辑不再失明 ────────────────────────────────────────────
+# 它的 12 项自检里「承诺兑现/章首衔接/时间连续性/物品·状态连续性」四项此前结构上
+# 拿不到材料——StepSpec("编辑") 既无 wants_prev 也无 wants_state,只能靠 ≤350 字锚点转述。
+
+def test_editor_now_sees_prev_chapter(project):
+    """承诺兑现/章首衔接/时间连续性:要对照上一章原件,不是锚点的二手转述。"""
+    (project / "正文").mkdir(exist_ok=True)
+    (project / "正文" / "第1章.md").write_text(
+        "# 旧章\n\n上一章的结尾钩子:矿道尽头有人提灯走来。", encoding="utf-8")
+    be = _capture()
+    cfg = Config(provider="deepseek", model="x", chapter_chars=600, gate_rounds=0)
+    run_pipeline(project, 2, be, cfg)
+    editor = _user_of(be, "本章改稿")
+    assert "## 上一章正文" in editor
+    assert "矿道尽头有人提灯走来" in editor
+
+
+def test_editor_now_sees_statebook(project):
+    """物品/状态连续性:自检原文就写着「对照状态账本」,此前编辑一个字都读不到。"""
+    from loom import paths
+    p = project / paths.STATEBOOK_REL
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # 格式必须合 statebook 的 _SEC_RE/_LINE_RE,否则 parse_book 宽容跳过、快照恒空
+    p.write_text("# 状态账本\n\n## 第1章\n- [物品] 半块旧矿牌:拾得,仍在沈砚手上\n",
+                 encoding="utf-8")
+    be = _capture()
+    cfg = Config(provider="deepseek", model="x", chapter_chars=600, gate_rounds=0)
+    # 用第 2 章:快照取的是 snapshot_for(root, chapter_n - 1),第 1 章的上游是第 0 章、恒空
+    run_pipeline(project, 2, be, cfg)
+    editor = _user_of(be, "本章改稿")
+    assert "## 当前状态" in editor and "半块旧矿牌" in editor
+
+
+def test_editor_still_denied_hardfacts(project):
+    """刻意不给编辑硬设定逐字块:那是写手防专名漂移用的,编辑吃了只是灌 token。
+    拆 wants_state / wants_hardfacts 两个开关的意义就在这——别图省事合并回去。"""
+    d = project / "外置大脑" / "世界观"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "力量体系.md").write_text("# 力量体系\n\n- 逆息:吸灵反噬。\n", encoding="utf-8")
+    be = _capture()
+    cfg = Config(provider="deepseek", model="x", chapter_chars=600, gate_rounds=0)
+    run_pipeline(project, 1, be, cfg)
+    assert "## 硬设定" not in _user_of(be, "本章改稿")
+    assert "## 硬设定" in _user_of(be, "本章初稿")      # 写手照旧拿得到
