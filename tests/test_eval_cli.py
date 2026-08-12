@@ -47,3 +47,22 @@ def test_judge_and_gate_are_mutually_exclusive(tmp_path, capsys):
     assert code == 2, "同传应判 infra(2),不是跑完再比"
     out = capsys.readouterr().out
     assert "--judge" in out and "--gate" in out
+
+
+def test_all_cases_len_tolerance_is_capped():
+    """字数容差封顶 0.25:超过它这个 grader 事实上不设防,不如老实标 observe。
+
+    值本身是「先量后定」的——真机 gen_02 ×15 次终稿实测 |相对偏差| 最大 0.236
+    (实际字数 764~1146,目标 1000),p90=0.199。0.25 刚好罩住实测分布、又留了牙齿。
+    git 历史即「先跑基线后定值」的证据。
+    """
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    bad = []
+    for p in list((root / "evals" / "cases").glob("*/case.json")) + \
+            list((root / "evals" / "gen_cases").glob("*/case.json")):
+        tol = json.loads(p.read_text(encoding="utf-8")).get("expect", {}).get("len_tolerance")
+        if tol is not None and tol > 0.25:
+            bad.append(f"{p.parent.name}: {tol}")
+    assert not bad, f"这些 case 的 len_tolerance 超过封顶 0.25:{bad}"
