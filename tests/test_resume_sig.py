@@ -98,3 +98,54 @@ def test_config_change_forces_rerun(project):
     cfg2 = load_config(project)
     v2b, v1b = _mk_upstreams(project, cfg2)
     assert resume_point(project, 1, v2b, v1b)[0] == 0, "改终稿字数必须全量重算(v1 缺口)"
+
+
+# ── 续跑 × WYSIWYG 细纲:手改细纲后不许静默沿用旧的(spec §10.3) ────────────
+# 真 bug:细纲文件不在大纲师 reads → 不进 sig_v2 → 半截章续跑时大纲师被判「上游未变」
+# 跳过,workspace 回填 ledger 里的【旧】细纲,作者手改的那份根本没被读。
+# 修法不碰 sig_v2(细纲首跑时尚未落盘,折进签名会让每本书第一次续跑都从大纲师重算),
+# 而是给 resume_point 加「本地可编辑产物已陈旧」的判定。
+
+def _outline(project, n=1):
+    from loom.agents import _outline_path
+    return _outline_path(project, n)
+
+
+def test_resume_reruns_outliner_when_author_edited_the_outline(project):
+    """作者在半截章上手改了细纲 → 写手必须读到【新】细纲,不许沿用 ledger 里的旧的。
+
+    走 run_pipeline 而不是直接调 resume_point:stale_local 回调是在 run_pipeline 里
+    按 STEPS 表构造的(WYSIWYG 属工序行为、只住代码侧),直接调 resume_point 测不到真实接线。
+    """
+    from loom.gates import CRITIC_去AI味, CRITIC_质检
+    cfg = _run_once(project)
+
+    p = _outline(project)
+    assert p.is_file(), "大纲师首跑应落一份可看可改的细纲"
+    NEW = "作者手改后的细纲:分镜一改成雨夜,分镜二矿灯灭,分镜三门被推开。"
+    p.write_text(NEW + "\n", encoding="utf-8")
+
+    be = FakeBackend(lambda s, u: "通过" if s in (CRITIC_质检, CRITIC_去AI味) else (_OUT * 3))
+    run_pipeline(project, 1, be, cfg, resume=True)
+
+    writer_prompts = [u for s_, u in be.calls if "本章初稿" in u or "本章场景骨头" in u]
+    assert writer_prompts, "写手/下游应被重跑,却一次都没调用——细纲改动被静默吞了"
+    assert any(NEW in u for _, u in be.calls), \
+        "写手拿到的仍是旧细纲:作者手改的那份没进 workspace(spec §10.3 的真 bug)"
+
+
+def test_resume_still_skips_all_when_outline_only_differs_by_whitespace(project):
+    """只差首尾空白不算「改过」——ledger 存的是模型原文、文件存的是 strip 后的,
+    不做双向 strip 会每次续跑都误判改动、白重跑写手及下游(烧钱红线)。"""
+    cfg = _run_once(project)
+    v2, v1 = _mk_upstreams(project, cfg)
+    p = _outline(project)
+    p.write_text("\n\n" + p.read_text(encoding="utf-8").strip() + "  \n\n", encoding="utf-8")
+    assert resume_point(project, 1, v2, v1)[0] == len(PIPELINE), "只差空白不该触发重跑"
+
+
+def test_resume_skips_all_when_outline_untouched(project):
+    """回归护栏:没动细纲就该全跳,别因为新判定引入无条件重跑。"""
+    cfg = _run_once(project)
+    v2, v1 = _mk_upstreams(project, cfg)
+    assert resume_point(project, 1, v2, v1)[0] == len(PIPELINE)

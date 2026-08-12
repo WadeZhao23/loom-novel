@@ -70,6 +70,7 @@ STEPS: tuple[StepSpec, ...] = (
 # 派生量(既有消费点:ledger.resume_point 按 PIPELINE 遍历;测试引用 _SHORT)
 PIPELINE = [s.role for s in STEPS]
 _SHORT = {s.role: s.short_budget for s in STEPS if s.short_budget}
+_SPEC_BY_ROLE = {s.role: s for s in STEPS}
 
 # agents/<角色>.md 缺 produces 字段时的兜底文案(角色元数据,非工序行为,不进 StepSpec)
 _PRODUCES = {
@@ -662,10 +663,29 @@ def run_pipeline(
         _, knowledge = _knowledge_for(project_root, chapter_n, role)
         return resume_mod.sig_v1(knowledge, ws, prev)
 
+    def _stale_local(role: str, ledger_output: str) -> bool:
+        """作者手改过本地可编辑产物(大纲师的 WYSIWYG 细纲)→ 这一棒不能跳。
+
+        两边都 strip 再比:账本存的是模型原文(record_step 未 strip),文件存的是
+        output.strip()+"\\n"——不 strip 会因尾部空白每次都误判「改过」,白重跑写手及下游。
+        """
+        spec = _SPEC_BY_ROLE.get(role)
+        if spec is None or not spec.outline_wysiwyg:
+            return False
+        p = _outline_path(project_root, chapter_n)
+        if not p.is_file():
+            return False
+        disk = p.read_text(encoding="utf-8").strip()
+        return bool(disk) and disk != (ledger_output or "").strip()
+
     if resume:
-        start_idx, workspace = resume_mod.resume_point(project_root, chapter_n, _sig, _upstream_v1)
+        start_idx, workspace = resume_mod.resume_point(project_root, chapter_n, _sig, _upstream_v1,
+                                                       stale_local=_stale_local)
         for role in PIPELINE[:start_idx]:
             progress(events.agent_skip(role, "已完成且上游未变"))
+        if start_idx < len(PIPELINE) and _SPEC_BY_ROLE[PIPELINE[start_idx]].outline_wysiwyg:
+            # 花钱可解释:让作者知道跳过失效是因为细纲被改了,不是签名失配
+            progress(events.info(f"第 {chapter_n} 章细纲已改动,从大纲师起重算"))
     else:
         start_idx, workspace = 0, []
 
