@@ -16,6 +16,7 @@ import re
 
 from loom.evalapi import (
     STEP_SHORT_BUDGETS,
+    outline_budget,
     detect_aitell,
     parse_scene_budgets,
     scene_range,
@@ -113,7 +114,8 @@ def grade_outliner(outline: str | None, chapter_target: int,
       这项检查本身不适用,记不可测(不伪造分数,也不让 passed/score 互相矛盾)。
     """
     if outline is None:
-        return [skipped("大纲师", "必含要素"), skipped("大纲师", "场次数"),
+        return [skipped("大纲师", "细纲篇幅"),
+                skipped("大纲师", "必含要素"), skipped("大纲师", "场次数"),
                 skipped("大纲师", "篇幅预算")]
 
     must = must_include or []
@@ -156,7 +158,20 @@ def grade_outliner(outline: str | None, chapter_target: int,
                            round(max(0.0, 1.0 - drift / chapter_target), 3), ok,
                            weight=0.15,
                            detail=f"各场合计约 {total_budget} 字(章目标 {chapter_target},容差 30%)")
-    return [inc, cnt, bud]
+    # 细纲自身篇幅:上限按章目标现算(outline_budget,evalapi 接缝),不是写死的 450。
+    # 这一项此前【不存在】——旧的 450 既没 grader 也没 warn 覆盖,改成多少都没有信号
+    # 告诉你它对不对,于是 20/20 越线也没人发现(spec §10.4)。
+    obudget = outline_budget(chapter_target) if chapter_target > 0 else 0
+    if obudget <= 0:
+        olen = not_measurable("大纲师·细纲篇幅",
+                              "章目标字数 ≤0,细纲上限按它派生,这项无从算起")
+    else:
+        n = _chars(outline)
+        over = max(0, n - obudget)
+        olen = GraderResult(
+            "大纲师·细纲篇幅", round(max(0.0, 1.0 - over / max(1, obudget)), 3), over == 0,
+            weight=0.10, detail=f"{n} 字(上限 {obudget} 字,按 {chapter_target} 字章目标现算)")
+    return [olen, inc, cnt, bud]
 
 
 # ──────────────────────────────── 写手 ────────────────────────────────

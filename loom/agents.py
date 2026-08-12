@@ -44,6 +44,31 @@ _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
 }
 
 
+def _scene_range(chapter_target: int) -> tuple[int, int]:
+    """章目标字数 →(最少场次, 最多场次)。场次预算的**单一真相**:
+    _scene_budget 的字符串形态由它派生,evals 的棒级体检也读它——两边永不漂。"""
+    if chapter_target <= 1500:
+        return (2, 3)
+    if chapter_target <= 3000:
+        return (3, 4)
+    return (4, 6)
+
+
+def outline_budget(chapter_target: int) -> int:
+    """细纲自身的字数上限——按场次数派生,不再是写死的 450。
+
+    先量后定(与 len_tolerance ±60%→±25% 同一套做法):真机 20 份细纲实测
+    **20/20 全部超过旧的 450**,中位 ~1060、p90 1187、最大 1873;逐场骨头 230-370 字、
+    固定开销(章首接钩/章末钩类型/爽点自检)约 200 字。450 从来没被满足过,
+    它不是约束、只是一句被模型整体折扣掉的空话——同段还要求每场 5 要素 + 爆发点 +
+    接钩 + 钩类型 + 爽点,算术上就写不下(spec §10.4)。
+
+    取 200 + 350×最多场次:(2,3)档→1250、(3,4)档→1600、(4,6)档→2300,覆盖实测 p90。
+    """
+    return 200 + 350 * _scene_range(chapter_target)[1]
+
+
+
 # ── 工序表(S4:拓扑与工序行为的唯一真相;此前散作 5 处 role== 特判焊死在主循环里) ──
 # 【红线】安全攸关行为(哨兵协议/gate 挂接/WYSIWYG 旁路)只住在这张代码侧表里,
 # 绝不下放到用户可编辑的 agents/*.md frontmatter——用户删一行 yaml 不该能让留痕混进正文。
@@ -51,8 +76,13 @@ _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
 class StepSpec:
     role: str
     short_budget: int | None = None   # None → config.chapter_chars(写手/编辑/润色师)
+    budget_fn: Callable[[int], int] | None = None  # 给了就按章目标现算(大纲师),优先于 short_budget
     wants_prev: bool = False          # prompt 注入上一章正文(接钩子)
     wants_hardfacts: bool = False     # prompt 注入硬设定逐字块
+    wants_state: bool = False         # prompt 注入状态账本摘录(物品/规则数值现状)
+    #   注:状态账本曾与 hardfacts 共用 wants_hardfacts 开关。拆开是因为编辑要账本
+    #   (自检有「物品/状态连续性」一项)却【不该】吃硬设定逐字块——那块是给写手防专名漂移的,
+    #   编辑吃了只是灌 token。见 spec §10.1。
     outline_wysiwyg: bool = False     # 细纲文件存在即旁路模型、首次生成即落盘(大纲师)
     edit_sentinel: bool = False       # 输出带哨兵留痕:流式过滤 + 切分落 .审稿留痕(编辑)
     deslop: bool = False              # 该棒 gate 挂确定性预筛(aitell+fatigue,润色师)
@@ -61,9 +91,13 @@ class StepSpec:
 
 STEPS: tuple[StepSpec, ...] = (
     StepSpec("设定师", short_budget=350),
-    StepSpec("大纲师", short_budget=450, wants_prev=True, wants_hardfacts=True, outline_wysiwyg=True),
-    StepSpec("写手", wants_prev=True, wants_hardfacts=True),
-    StepSpec("编辑", edit_sentinel=True, foreshadow_after=True),
+    StepSpec("大纲师", budget_fn=outline_budget, wants_prev=True, wants_hardfacts=True,
+             wants_state=True, outline_wysiwyg=True),
+    StepSpec("写手", wants_prev=True, wants_hardfacts=True, wants_state=True),
+    # 编辑拿上一章正文 + 状态账本:它的 12 项自检里「承诺兑现/章首衔接/时间连续性/
+    # 物品·状态连续性」四项此前结构上拿不到材料(spec §10.1),只能靠 ≤350 字锚点的二手转述。
+    # 刻意【不】给 wants_hardfacts:那是写手防专名漂移用的,编辑不需要。
+    StepSpec("编辑", wants_prev=True, wants_state=True, edit_sentinel=True, foreshadow_after=True),
     StepSpec("润色师", deslop=True),
 )
 
@@ -535,16 +569,6 @@ def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Age
     return a, _read_file_items(project_root, rels, _noop)
 
 
-def _scene_range(chapter_target: int) -> tuple[int, int]:
-    """章目标字数 →(最少场次, 最多场次)。场次预算的**单一真相**:
-    _scene_budget 的字符串形态由它派生,evals 的棒级体检也读它——两边永不漂。"""
-    if chapter_target <= 1500:
-        return (2, 3)
-    if chapter_target <= 3000:
-        return (3, 4)
-    return (4, 6)
-
-
 def _scene_budget(chapter_target: int) -> str:
     """章目标字数 → 细纲场次预算(喂 prompt 的字符串形态)。超长的真根因:大纲师不知道
     章目标,按惯例拆 3-6 场,写手照多场细纲每场写透 → 2000 字目标干出 6000+。"""
@@ -588,7 +612,8 @@ def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars:
 def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
                        prev: str, workspace: list[tuple[str, str]], hardfacts: str = "",
                        target_chars: int = 0, *, chapter_target: int = 0, wants_prev: bool = False,
-                       wants_hardfacts: bool = False, book_title: str = "", state_snapshot: str = "") -> str:
+                       wants_hardfacts: bool = False, wants_state: bool = False,
+                       book_title: str = "", state_snapshot: str = "") -> str:
     # 书名必进 prompt:没有它,模型对「这本书是什么」一无所知(第一章漂移的根因一)
     head = (f"# 你要写的是《{book_title}》第 {chapter_n} 章。" if book_title.strip()
             else f"# 你要写的是第 {chapter_n} 章。")
@@ -598,7 +623,7 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
     if hardfacts and wants_hardfacts:
         parts.append("## 硬设定(逐字照搬,等级/境界名、专名、金手指代价一字不改、不许新增体系)\n"
                      + hardfacts)
-    if state_snapshot and wants_hardfacts:
+    if state_snapshot and wants_state:
         parts.append("## 当前状态(状态账本摘录——物品消耗/规则数值以此为准,"
                      "不许复活已消耗物品、不许改规则数值)\n" + state_snapshot)
     if prev and wants_prev:
@@ -695,7 +720,8 @@ def run_pipeline(
         progress(events.agent_start(role))
         up_sha = _sig(role, workspace)  # 记录入此工序时的上游签名 v2(供下次续跑比对)
 
-        max_chars = spec.short_budget or config.chapter_chars
+        max_chars = (spec.budget_fn(config.chapter_chars) if spec.budget_fn
+                     else (spec.short_budget or config.chapter_chars))
         outline_path = _outline_path(project_root, chapter_n) if spec.outline_wysiwyg else None
         if outline_path and outline_path.is_file() and outline_path.read_text(encoding="utf-8").strip():
             # 已有细纲(多半你手改过)→ 直接用它,不再调大纲师;改它/清空它即重新生成(WYSIWYG)。
@@ -707,6 +733,7 @@ def run_pipeline(
             user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                              target_chars=max_chars, chapter_target=config.chapter_chars,
                                              wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
+                                             wants_state=spec.wants_state,
                                              book_title=config.title, state_snapshot=state_snap)
             # 哨兵棒(编辑)的输出含哨兵+留痕,流式时只放哨兵前的干净改稿;其余棒原样透传。
             chunk_cb = (_edit_stream_filter(progress) if spec.edit_sentinel
@@ -879,10 +906,12 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         role = spec.role
         agent, knowledge = _knowledge_prompt(project_root, chapter_n, role)
         progress(events.agent_start(role))
-        max_chars = spec.short_budget or config.chapter_chars  # 与主线 run_pipeline 同口径
+        max_chars = (spec.budget_fn(config.chapter_chars) if spec.budget_fn
+                     else (spec.short_budget or config.chapter_chars))  # 与主线 run_pipeline 同口径
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                          target_chars=max_chars, chapter_target=config.chapter_chars,
                                          wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
+                                             wants_state=spec.wants_state,
                                          book_title=config.title, state_snapshot=state_snap)
         out = backend.complete(
             agent.system_prompt, user_prompt, max_chars=max_chars,
