@@ -22,7 +22,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dist = ["pyinstaller>=6.0"]   # 打包成 .app/.exe:pip install -e ".[dist]"
-dev = ["pytest>=8.0", "pyyaml>=6.0"]   # 跑测试:pip install -e ".[dev]" && pytest
+dev = ["pytest>=8.0", "pyyaml>=6.0", "build>=1.0"]   # 跑测试:pip install -e ".[dev]" && pytest
+#   build 是给 tests/test_wheel_build.py 用的:没它那条测试会 skip,
+#   而它护的正是「wheel 装不上」这类只有全新安装才暴露的缺陷——静默 skip 等于没护栏。
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -39,7 +41,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["loom"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"loom/templates" = "loom/templates"
-"loom/webui" = "loom/webui"
-"loom/sample" = "loom/sample"
+# 不要再加 force-include:packages = ["loom"] 已经把 loom/ 整棵树(含 templates/webui/sample)
+# 收进 wheel 了,再 force-include 一遍会让同一路径被添加两次,hatchling 直接报
+# 「A second file is being added to the wheel archive at the same path」构建失败。
+# 实测 v0.4.2 起 `pip install git+…` 就一直因此装不上(PyInstaller 包与
+# `pip install -e .` 不走 wheel 构建,所以一直没暴露)。见 tests/test_wheel_build.py。
