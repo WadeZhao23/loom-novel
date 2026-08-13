@@ -142,8 +142,8 @@ def grade_steps(steps: dict[str, str | None], case: dict) -> dict:
         "设定师": grade_setter(steps.get("设定师"), hardfact_terms),
         "大纲师": grade_outliner(steps.get("大纲师"), target, must),
         "写手": grade_writer(steps.get("写手"), target, must, anchors),
-        "编辑": grade_editor(steps.get("编辑"), steps.get("写手"), must),
-        "润色师": grade_polisher(steps.get("润色师"), steps.get("编辑"), anchors),
+        "编辑": grade_editor(steps.get("编辑"), steps.get("写手"), must, target),
+        "润色师": grade_polisher(steps.get("润色师"), steps.get("编辑"), anchors, target),
     }
 
     worst_weight, weakest = -1.0, None

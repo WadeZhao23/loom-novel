@@ -25,11 +25,37 @@ def _openai_spec() -> str:
     return hits[0]
 
 
-def test_openai_is_capped_below_3():
-    spec = _openai_spec()
-    assert "<3" in spec, (
-        f"openai 依赖没有 <3 上限(当前 {spec!r})。openai 3.0 起传输层换成 httpx2,"
-        f"而 backends.py 用 httpx.Timeout——放开上限会让全新安装直接起不来。")
+def test_transport_shim_accepts_both_httpx_flavors():
+    """上限已解开(见 pyproject 注释),取而代之的是 backends 两种传输层都认。
+
+    钉 <3 是 2026-08-12 的止血;真修法是 _http_transport 同时支持 httpx / httpx2,
+    已在 openai 2.46+httpx 与 openai 3.0.0+httpx2 两套 venv 各跑一遍全量测试确认。
+    """
+    from loom.backends import _http_transport
+    mod = _http_transport()
+    assert mod.__name__ in ("httpx", "httpx2")
+    t = mod.Timeout(120.0, connect=10.0, read=300.0)   # 两者签名一致,我们只用这一个 API
+    assert t is not None
+
+
+def test_http_transport_prefers_httpx_but_falls_back(monkeypatch):
+    """httpx 缺席时必须回退 httpx2,而不是抛「缺少 openai」那种假话。"""
+    import builtins
+    from loom.backends import _http_transport
+    real = builtins.__import__
+
+    def fake(name, *a, **kw):
+        if name == "httpx":
+            raise ModuleNotFoundError("no httpx")
+        return real(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    try:
+        mod = _http_transport()
+    except Exception as e:            # 环境里也没有 httpx2 时,报的必须是传输层缺失
+        assert "httpx" in str(e)
+        return
+    assert mod.__name__ == "httpx2"
 
 
 def test_backends_reports_missing_transport_honestly():

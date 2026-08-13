@@ -85,7 +85,7 @@ def test_writer_counts_aitell_hits():
 def test_polisher_flags_aitell_not_reduced():
     edited = "他不是累，而是怕。" * 5
     polished = edited                      # 一处都没擦掉
-    g = _by_name(grade_polisher(polished, edited, []), "润色师·AI味下降")
+    g = _by_name(grade_polisher(polished, edited, [], 1000), "润色师·AI味下降")
     assert g.passed is False
     assert "0" in g.detail
 
@@ -93,18 +93,18 @@ def test_polisher_flags_aitell_not_reduced():
 def test_polisher_passes_when_aitell_drops():
     edited = "他不是累，而是怕。" * 5
     polished = "他累，也怕。" * 5           # 翻转句被擦掉
-    assert _by_name(grade_polisher(polished, edited, []), "润色师·AI味下降").passed is True
+    assert _by_name(grade_polisher(polished, edited, [], 1000), "润色师·AI味下降").passed is True
 
 
 def test_polisher_flags_shrinkage():
     edited = "字" * 1000
     polished = "字" * 500                   # 越擦越短一半
-    g = _by_name(grade_polisher(polished, edited, []), "润色师·篇幅保持")
+    g = _by_name(grade_polisher(polished, edited, [], 1000), "润色师·篇幅保持")
     assert g.passed is False
 
 
 def test_polisher_skipped_when_upstream_missing():
-    res = grade_polisher("终稿", None, [])
+    res = grade_polisher("终稿", None, [], 1000)
     assert all(g.gating is False for g in res)
 
 
@@ -159,7 +159,7 @@ _EDITED_OK = (_DRAFT_FIX + "\n<LOOM:EDIT-NOTE>\n- 钩子更硬。\n</LOOM:EDIT-N
 # 通过/失败,那是对着一个 controller 已经证明不可能发生的信号写的假设——已按
 # task-8 review 的结论改为断言 unmeasurable 形状。
 def test_editor_fence_check_is_unmeasurable_even_with_fence_present():
-    g = _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, []), "编辑·留痕围栏")
+    g = _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, [], 1000), "编辑·留痕围栏")
     assert g.passed is True
     assert g.gating is False
     assert g.weight == 0.0
@@ -168,7 +168,7 @@ def test_editor_fence_check_is_unmeasurable_even_with_fence_present():
 
 def test_editor_fence_check_is_unmeasurable_with_unclosed_fence():
     bad = _DRAFT_FIX + "\n<LOOM:EDIT-NOTE>\n- 忘了收尾。"
-    g = _by_name(grade_editor(bad, _DRAFT_FIX, []), "编辑·留痕围栏")
+    g = _by_name(grade_editor(bad, _DRAFT_FIX, [], 1000), "编辑·留痕围栏")
     assert g.passed is True
     assert g.gating is False
     assert g.detail.startswith("[not-measurable]")
@@ -177,7 +177,7 @@ def test_editor_fence_check_is_unmeasurable_with_unclosed_fence():
 def test_editor_fence_check_is_unmeasurable_with_no_note_at_all():
     """真实 ledger 内容的形状:编辑产出没有围栏(controller 已剥离)。这是最常见的
     真实输入,绝不能被报成失败——这正是本次修的缺陷本身。"""
-    g = _by_name(grade_editor(_DRAFT_FIX, _DRAFT_FIX, []), "编辑·留痕围栏")
+    g = _by_name(grade_editor(_DRAFT_FIX, _DRAFT_FIX, [], 1000), "编辑·留痕围栏")
     assert g.passed is True
     assert g.gating is False
     assert g.weight == 0.0
@@ -187,46 +187,46 @@ def test_editor_fence_check_is_unmeasurable_with_no_note_at_all():
 def test_editor_flags_must_include_dropped_by_editor():
     """初稿有、改稿没了 —— 这比「初稿本来就缺」严重得多,必须单独抓。"""
     edited = "沈砚睁开眼。他记得三年后的那一刀。\n<LOOM:EDIT-NOTE>\n- 删了。\n</LOOM:EDIT-NOTE>"
-    g = _by_name(grade_editor(edited, _DRAFT_FIX, ["矿灯"]), "编辑·必含要素保持")
+    g = _by_name(grade_editor(edited, _DRAFT_FIX, ["矿灯"], 1000), "编辑·必含要素保持")
     assert g.passed is False
     assert any("矿灯" in e and "改丢" in e for e in g.evidence)
 
 
 def test_editor_does_not_blame_editor_for_what_draft_never_had():
     """初稿本来就没有的必含项,不算编辑改丢的——归因必须指对棒。"""
-    g = _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, ["师姐"]), "编辑·必含要素保持")
+    g = _by_name(grade_editor(_EDITED_OK, _DRAFT_FIX, ["师姐"], 1000), "编辑·必含要素保持")
     assert g.passed is True
 
 
 def test_editor_flags_expansion():
     edited = ("字" * 2000) + "\n<LOOM:EDIT-NOTE>\n- 扩写了。\n</LOOM:EDIT-NOTE>"
-    g = _by_name(grade_editor(edited, "字" * 500, []), "编辑·篇幅变化")
+    g = _by_name(grade_editor(edited, "字" * 500, [], 1000), "编辑·篇幅变化")
     assert g.passed is False
 
 
 def test_editor_note_body_excluded_from_length():
     """留痕不是正文:算篇幅必须先剥围栏,否则留痕越长越显得「扩写」。"""
     long_note = "\n<LOOM:EDIT-NOTE>\n" + ("留痕。" * 300) + "\n</LOOM:EDIT-NOTE>"
-    g = _by_name(grade_editor(_DRAFT_FIX + long_note, _DRAFT_FIX, []), "编辑·篇幅变化")
+    g = _by_name(grade_editor(_DRAFT_FIX + long_note, _DRAFT_FIX, [], 1000), "编辑·篇幅变化")
     assert g.passed is True
 
 
 def test_editor_skipped_when_upstream_missing():
-    assert all(g.gating is False for g in grade_editor(None, _DRAFT_FIX, []))
+    assert all(g.gating is False for g in grade_editor(None, _DRAFT_FIX, [], 1000))
 
 
 # ── Finding 1: 篇幅变化/篇幅保持 score 不能越界(单边 clamp 会漏出负分)──────────
 def test_editor_size_score_bounded_on_extreme_expansion():
     """回归:round(min(1.0, 1.0-abs(1.0-ratio)),3) 只夹了上界,4x 扩写会把 score 打到 -2.0。"""
     edited = ("字" * 2000) + "\n<LOOM:EDIT-NOTE>\n- 扩写了。\n</LOOM:EDIT-NOTE>"
-    g = _by_name(grade_editor(edited, "字" * 500, []), "编辑·篇幅变化")
+    g = _by_name(grade_editor(edited, "字" * 500, [], 1000), "编辑·篇幅变化")
     assert 0.0 <= g.score <= 1.0
     assert g.passed is False
 
 
 def test_editor_size_score_bounded_on_extreme_shrinkage():
     edited = ("字" * 50) + "\n<LOOM:EDIT-NOTE>\n- 删得只剩骨架。\n</LOOM:EDIT-NOTE>"
-    g = _by_name(grade_editor(edited, "字" * 500, []), "编辑·篇幅变化")
+    g = _by_name(grade_editor(edited, "字" * 500, [], 1000), "编辑·篇幅变化")
     assert 0.0 <= g.score <= 1.0
     assert g.passed is False
 
@@ -234,7 +234,7 @@ def test_editor_size_score_bounded_on_extreme_shrinkage():
 def test_polisher_size_score_bounded_on_extreme_expansion():
     edited = "字" * 500
     polished = "字" * 2000                  # 4x 扩写,同样的单边 clamp 漏洞
-    g = _by_name(grade_polisher(polished, edited, []), "润色师·篇幅保持")
+    g = _by_name(grade_polisher(polished, edited, [], 1000), "润色师·篇幅保持")
     assert 0.0 <= g.score <= 1.0
     assert g.passed is False
 
@@ -242,7 +242,7 @@ def test_polisher_size_score_bounded_on_extreme_expansion():
 def test_polisher_size_score_bounded_on_extreme_shrinkage():
     edited = "字" * 500
     polished = "字" * 50                     # 10x 缩水
-    g = _by_name(grade_polisher(polished, edited, []), "润色师·篇幅保持")
+    g = _by_name(grade_polisher(polished, edited, [], 1000), "润色师·篇幅保持")
     assert 0.0 <= g.score <= 1.0
     assert g.passed is False
 
@@ -286,3 +286,44 @@ def test_outliner_scene_count_unchanged_when_budgets_present():
     assert g.passed is True
     assert g.gating is True
     assert "3 场" in g.detail
+
+
+# ── 篇幅类 grader 改判「离目标更近还是更远」(2026-08-12 真事故) ──────────
+# 旧口径是 1-|1-ratio|(「这一棒不该改长度」),但产品在 _length_hint 里明确给
+# 编辑/润色师【压缩授权】:「原稿明显超目标就顺手压回来」。两者正面冲突——
+# 一次让终稿距目标偏差 0.236→0.142 的客观改善,被旧口径判成「回归」(p=0.0247)。
+
+def test_compression_toward_target_is_not_penalized():
+    """写手超写 → 编辑压回目标附近 = 它在干正事,不该扣分。"""
+    from evals.stepgraders import grade_editor
+    draft = "字" * 1600          # 目标 1000,超写 60%
+    edited = "字" * 1050         # 压回目标附近
+    size = [g for g in grade_editor(edited, draft, [], 1000) if g.name == "编辑·篇幅变化"][0]
+    assert size.passed, f"压回目标反被判失败:{size.detail}"
+    assert size.score > 0.9
+
+
+def test_moving_away_from_target_still_fails():
+    """已经达标却乱压 → 必须扣得动,否则这个 grader 就废了。"""
+    from evals.stepgraders import grade_polisher
+    edited = "字" * 1000         # 已经正好在目标上
+    polished = "字" * 500        # 砍掉一半,推离目标
+    size = [g for g in grade_polisher(polished, edited, [], 1000) if g.name == "润色师·篇幅保持"][0]
+    assert not size.passed, f"把达标稿砍半却判通过:{size.detail}"
+    assert size.score < 0.6
+
+
+def test_expansion_away_from_target_fails():
+    """反方向也要抓:润色师被明令绝不扩写。"""
+    from evals.stepgraders import grade_polisher
+    size = [g for g in grade_polisher("字" * 1800, "字" * 1000, [], 1000)
+            if g.name == "润色师·篇幅保持"][0]
+    assert not size.passed and size.score < 0.4
+
+
+def test_no_target_is_not_measurable_not_a_fake_score():
+    """章目标缺失时不许编分数——不造数红线。"""
+    from evals.stepgraders import grade_polisher
+    size = [g for g in grade_polisher("字" * 900, "字" * 1000, [], 0)
+            if g.name == "润色师·篇幅保持"][0]
+    assert "[not-measurable]" in size.detail
