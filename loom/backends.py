@@ -229,6 +229,24 @@ def _budget_tokens(provider: str, max_chars: int | None) -> int:
     return base
 
 
+
+def _http_transport():
+    """返回 openai 用的传输层模块:1.x/2.x 是 httpx,3.0 起换成 httpx2。
+
+    两者的 Timeout(总秒数, connect=, read=) 构造签名一致(实测 httpx2 2.10.0),
+    我们只用这一个 API,所以取到哪个都能用。
+    单独成函数、单独 except:缺的是【传输层】不是 openai 本身——把它混进 openai 的
+    except 会报出「缺少 openai」这种假话(openai 明明装着),2026-08-12 就是这么
+    在 CI 上误导了半天。
+    """
+    for name in ("httpx", "httpx2"):
+        try:
+            return __import__(name)
+        except ModuleNotFoundError:
+            continue
+    raise LoomBackendError(render("httpx_not_installed"), code="httpx_not_installed")
+
+
 class OpenAICompatBackend:
     """OpenAI 兼容 HTTP 后端:DeepSeek(锁死 base_url)和 openai_compat(自填 base_url)共用。"""
 
@@ -255,13 +273,7 @@ class OpenAICompatBackend:
             from openai import OpenAI
         except ModuleNotFoundError as e:
             raise LoomBackendError(render("openai_not_installed"), code="openai_not_installed") from e
-        try:
-            # openai 1.x/2.x 的传输层是 httpx,随它一起装;3.0 起换成了 httpx2(故 pyproject 钉 <3)。
-            # 单独 try:这里缺的是【传输层】不是 openai 本身,混进上面那个 except 会报出
-            # 「缺少 openai」这种假话——2026-08-12 CI 上就是这么误导了半天。
-            import httpx
-        except ModuleNotFoundError as e:
-            raise LoomBackendError(render("httpx_not_installed"), code="httpx_not_installed") from e
+        httpx = _http_transport()
         # 显式超时(SDK 默认 600s,挂了要等 10 分钟才有反馈):连接 10s / 其余 120s;
         # 流式的 read 按 chunk 间隔计,思考型模型思考期可能久无正文,放宽到 300s。
         self._client = OpenAI(api_key=api_key, base_url=base_url,

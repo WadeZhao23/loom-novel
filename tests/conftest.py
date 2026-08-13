@@ -81,3 +81,19 @@ class ScriptedBackend:
             else:
                 on_chunk(out)
         return out
+
+
+def require_http_transport():
+    """starlette TestClient 需要 httpx;openai 3.0 起环境里装的是 httpx2。
+
+    两个都认——只写 importorskip("httpx") 的话,openai 3 环境下这批 endpoint 测试会
+    【静默 skip】,覆盖率悄悄掉一块而 CI 依旧是绿的(比红更危险)。
+    """
+    import importlib
+    for name in ("httpx", "httpx2"):
+        try:
+            importlib.import_module(name)
+            return
+        except ModuleNotFoundError:
+            continue
+    pytest.skip("需要 httpx 或 httpx2(starlette TestClient 的传输层依赖)")

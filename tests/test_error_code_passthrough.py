@@ -5,6 +5,8 @@ import json
 
 import pytest
 
+from conftest import require_http_transport  # noqa: E402
+
 from loom import events
 from loom.backends import LoomBackendError
 from loom.errors import author_errors, render
@@ -25,7 +27,7 @@ def test_error_event_none_code_emits_no_key():
 
 
 def test_write_stream_error_event_carries_code(project, monkeypatch):
-    pytest.importorskip("httpx")
+    require_http_transport()
     from starlette.testclient import TestClient
     import loom.server as server
     import loom.usecases as usecases
@@ -54,7 +56,7 @@ def test_write_stream_error_event_carries_code(project, monkeypatch):
 
 
 def test_json_endpoint_carries_code(project, monkeypatch):
-    pytest.importorskip("httpx")
+    require_http_transport()
     from starlette.testclient import TestClient
     import loom.server as server
 
@@ -72,7 +74,7 @@ def test_json_endpoint_carries_code(project, monkeypatch):
 
 def test_json_endpoint_without_code_has_no_code_key(project, monkeypatch):
     # ValueError 等无 code 的错误:响应形状不变,不凭空多出 code 键
-    pytest.importorskip("httpx")
+    require_http_transport()
     from starlette.testclient import TestClient
     import loom.server as server
 

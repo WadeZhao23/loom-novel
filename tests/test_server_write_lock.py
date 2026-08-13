@@ -6,7 +6,9 @@ import threading
 
 import pytest
 
-pytest.importorskip("httpx")   # starlette TestClient 依赖 httpx(随 openai 一起装)
+from conftest import require_http_transport  # noqa: E402
+
+require_http_transport()   # starlette TestClient 依赖 httpx(随 openai 一起装)
 from starlette.testclient import TestClient  # noqa: E402
 
 import loom.server as server  # noqa: E402

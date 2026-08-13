@@ -97,6 +97,36 @@ def grade_setter(anchor: str | None, hardfact_terms: list[str]) -> list[GraderRe
     return [term_result, len_result]
 
 
+
+
+def _toward_target(name: str, n_before: int, n_after: int, chapter_target: int,
+                   *, weight: float, label_before: str, label_after: str) -> GraderResult:
+    """按【离章目标更近还是更远】评分,而不是【长度变没变】。
+
+    真事故(2026-08-12):旧口径是 1-|1-ratio|,即「这一棒不该改长度」。但产品在
+    _length_hint 里明确给编辑/润色师**压缩授权**——「原稿明显超目标就顺手压回来」。
+    两者正面冲突:一次让终稿距目标偏差从 0.236 降到 0.142(客观变好)的改动,
+    被旧口径判成「润色师·篇幅保持 回归」(p=0.0247)。判据在惩罚产品刻意要的行为。
+
+    新口径只问一件事:这一棒把稿子推向目标了,还是推离了?
+    - passed:没推离(容 0.02 噪声),或推完之后本来就落在容差带内
+    - score:按推完之后离目标多远算(越近越高)——仍然扣得动「已经达标还乱压」
+
+    chapter_target<=0 时无从判断,记不可测(不伪造分数)。
+    """
+    if chapter_target <= 0:
+        return not_measurable(name, f"章目标 {chapter_target} 非正数,无从判断离目标更近还是更远")
+    dev_before = abs(n_before - chapter_target) / chapter_target
+    dev_after = abs(n_after - chapter_target) / chapter_target
+    # 与 gen case 的 len_tolerance 封顶同口径:落在 ±25% 内就算达标,不管它动没动
+    ok = dev_after <= dev_before + 0.02 or dev_after <= 0.25
+    arrow = "更近" if dev_after < dev_before else ("更远" if dev_after > dev_before else "持平")
+    return GraderResult(
+        name, round(max(0.0, min(1.0, 1.0 - dev_after)), 3), ok, weight=weight,
+        detail=(f"{label_before} {n_before} → {label_after} {n_after} 字"
+                f"(目标 {chapter_target};离目标 {dev_before:.0%}→{dev_after:.0%},{arrow})"))
+
+
 # ─────────────────────────────── 大纲师 ───────────────────────────────
 
 def grade_outliner(outline: str | None, chapter_target: int,
@@ -216,7 +246,8 @@ def grade_writer(draft: str | None, target_chars: int,
 # ──────────────────────────────── 编辑 ────────────────────────────────
 
 def grade_editor(edited: str | None, draft: str | None,
-                 must_include: list[str]) -> list[GraderResult]:
+                 must_include: list[str],
+                 chapter_target: int) -> list[GraderResult]:
     """编辑产出「本章改稿」;controller 在落 ledger 前会把《本章改动留痕》切出另存到
     .审稿留痕/(loom/agents.py:682-685 `_split_edit_note`),只把干净正文交给下游润色师
     并写进 ledger。所以这里收到的 `edited` 就是 evals.generate.collect_steps 从 ledger
@@ -254,20 +285,16 @@ def grade_editor(edited: str | None, draft: str | None,
                         detail=f"初稿有而改稿没了的必含项:{len(dropped)} 个",
                         evidence=[f"编辑把「{k}」改丢了" for k in dropped])
 
-    n_draft, n_edit = _chars(draft), _chars(body)
-    ratio = n_edit / max(1, n_draft)
-    size_ok = 0.7 <= ratio <= 1.3
-    size = GraderResult("编辑·篇幅变化",
-                        round(max(0.0, min(1.0, 1.0 - abs(1.0 - ratio))), 3), size_ok,
-                        weight=0.10,
-                        detail=f"初稿 {n_draft} → 改稿 {n_edit} 字(×{ratio:.2f},应在 0.7~1.3)")
+    size = _toward_target("编辑·篇幅变化", _chars(draft), _chars(body), chapter_target,
+                          weight=0.10, label_before="初稿", label_after="改稿")
     return [fence, keep, size]
 
 
 # ─────────────────────────────── 润色师 ───────────────────────────────
 
 def grade_polisher(polished: str | None, edited: str | None,
-                   anchors: list[str]) -> list[GraderResult]:
+                   anchors: list[str],
+                   chapter_target: int) -> list[GraderResult]:
     """润色师产出「本章终稿」,职责是擦掉通用机器味、保住写作指纹。
 
     体检两项(全是 终稿 vs 改稿 的差分):
@@ -293,11 +320,6 @@ def grade_polisher(polished: str | None, edited: str | None,
                       weight=0.35,
                       detail=f"改稿 {before} 处 → 终稿 {after} 处(降 {dropped} 处)")
 
-    n_edit, n_pol = _chars(edited_body), _chars(polished)
-    ratio = n_pol / max(1, n_edit)
-    size_ok = 0.8 <= ratio <= 1.2
-    size = GraderResult("润色师·篇幅保持",
-                        round(max(0.0, min(1.0, 1.0 - abs(1.0 - ratio))), 3), size_ok,
-                        weight=0.10,
-                        detail=f"改稿 {n_edit} → 终稿 {n_pol} 字(×{ratio:.2f},应在 0.8~1.2)")
+    size = _toward_target("润色师·篇幅保持", _chars(edited_body), _chars(polished), chapter_target,
+                          weight=0.10, label_before="改稿", label_after="终稿")
     return [ai, size]

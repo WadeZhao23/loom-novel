@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("httpx")
+from conftest import require_http_transport  # noqa: E402
+
+require_http_transport()
 from starlette.testclient import TestClient  # noqa: E402
 
 from loom import server  # noqa: E402

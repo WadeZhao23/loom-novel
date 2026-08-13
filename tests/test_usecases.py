@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from conftest import require_http_transport  # noqa: E402
+
 from loom import ledger, paths, usecases
 from loom.fingerprint import neutral_default
 
@@ -87,7 +89,7 @@ def test_locked_usecases_raise_project_busy(project):
 
 # ---------------------------------------------------------------- 锁:新覆盖端点(HTTP 面)
 def test_lock_covers_new_endpoints_but_not_file_put(project):
-    pytest.importorskip("httpx")
+    require_http_transport()
     from starlette.testclient import TestClient
     import loom.server as server
 
