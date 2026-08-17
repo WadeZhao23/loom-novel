@@ -932,6 +932,10 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
 
     只刷细纲、不碰正文——用于"我想要个新的分镜方案"。之后重写本章会按这份新细纲来。
     设定师此刻会读到最新的世界观/人物卡/卡章纲,所以改了上游再「重新生成细纲」就能吃到。
+
+    终审②Important:新细纲落盘后顺手记进轨迹,当「AI 侧最新一份」。`evolve.collect` 的判据是
+    「轨迹里最后一次提交的细纲 ≠ 盘上那份」即认作者改过——不记这一笔,重新生成出的这份 AI 稿
+    会被误判成「作者改成的」喂进 refine 的证据,直接违背判据只能是作者实际改成了什么这条红线。
     """
     prev = _prev_chapter(project_root, chapter_n)
     hardfacts = _hardfacts_for(project_root, progress)
@@ -941,12 +945,22 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
     state_snap = statebook.snapshot_for(project_root, chapter_n - 1)
     workspace: list[tuple[str, str]] = []
     outline = ""
+    outline_sig = ""
     for spec in STEPS[:2]:   # 设定师→大纲师:与主线同一张工序表,不再手抄角色元组
         role = spec.role
         agent, knowledge = _knowledge_prompt(project_root, chapter_n, role)
         progress(events.agent_start(role))
         max_chars = (spec.budget_fn(config.chapter_chars) if spec.budget_fn
                      else (spec.short_budget or config.chapter_chars))  # 与主线 run_pipeline 同口径
+        if role == "大纲师":
+            # 签名必须在 workspace.append 之前算——签的是「产它时的上游」,同
+            # run_pipeline._sig / write_tools.artifact_sig 那一套算法(resume.sig_v2),
+            # 不是为了续跑用(这里不续跑),只为给下面记进轨迹的这笔提交留一个合规的 sig 字段。
+            from . import resume as resume_mod
+            cfg_bits = {"chapter_chars": config.chapter_chars,
+                        "gate_rounds": config.gate_rounds, "title": config.title}
+            _, sig_items = _knowledge_items(project_root, chapter_n, role)
+            outline_sig = resume_mod.sig_v2(agent.system_prompt, sig_items, workspace, prev, cfg_bits)
         user_prompt = _build_user_prompt(chapter_n, role, agent, knowledge, prev, workspace, hardfacts,
                                          target_chars=max_chars, chapter_target=config.chapter_chars,
                                          wants_prev=spec.wants_prev, wants_hardfacts=spec.wants_hardfacts,
@@ -968,6 +982,8 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
         raise LoomBackendError(render("model_output_invalid", detail="细纲:模型这次返回空"),
                                code="model_output_invalid")
     atomic_write_text(_outline_path(project_root, chapter_n), outline.strip() + "\n")
+    from . import trail
+    trail.record_commit(project_root, chapter_n, agent.produces, outline.strip(), outline_sig)
     _check_scene_budget(project_root, chapter_n, outline.strip(), config.chapter_chars, reused=False, progress=progress)
     progress(events.outline_done(chapter_n))
     return outline.strip()

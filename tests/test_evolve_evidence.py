@@ -82,3 +82,23 @@ def test_细纲编码损坏不让collect抛穿(project):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"\xff\xfe")   # 非法 UTF-8,读它必抛 UnicodeDecodeError
     assert evolve.collect(project) == []   # 不该抛穿,这一章当没有证据跳过
+
+
+def test_重新生成细纲不污染证据源(project):
+    """终审②Important:`collect` 的判据是「轨迹里最后一次提交的细纲 ≠ 盘上那份」即认作者改过。
+    `agents.regen_outline`(走 /api/outline/regen)会用【新的 AI 输出】覆盖同一份
+    `正文/.细纲/第N章.md`——作者点一次「重新生成细纲」,这份全新 AI 稿若不记进轨迹,就会被
+    误判成「作者改成的」喂进 refine 的证据,直接违背判据只能是作者实际改成了什么这条设计红线。
+    """
+    from conftest import ScriptedBackend
+    from loom.agents import regen_outline
+    from loom.config import load_config, save_config
+
+    # 先铺一版「旧」的 agent 提交(regen 之前的轨迹底子)
+    trail.record_commit(project, 1, "本章场景骨头(分镜细纲)", "原始细纲(agent 交的)。", "v2:old")
+    cfg = load_config(project)
+    cfg.gate_rounds = 0
+    save_config(project, cfg)
+    be = ScriptedBackend(["锚点:接上一章,危机迫近。", "分镜一:朝会。分镜二:遇刺。章末钩。"])
+    regen_outline(project, 1, be, load_config(project))
+    assert evolve.collect(project) == []   # 新 AI 稿刚落盘,不该被当成「作者改的」证据
