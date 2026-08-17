@@ -154,6 +154,43 @@ def _segment(text: str) -> list[str]:
     return [s.strip() for s in _SENT_RE.findall(text) if s.strip()]
 
 
+def align_stats(ai: str, edited: str) -> dict:
+    """句级对齐的**唯一**计数出口:`_aligned_signal`(喂 prompt)与镜台(算比率)共用它。
+
+    绝不让这两处各写一份——否则曲线和 learn 学到的东西会对不上,而镜台的全部说服力
+    就来自「它和 learn 学的是同一件事」。
+
+    口径(spec 2026-08-17 §3,写死避免二义):
+    - `改写句数` 取 **AI 侧**(`replace` 块两侧句数可不等,作者会把一句拆成两句);
+      分子分母同侧,比率才读得懂:「这份 AI 稿有多少比例被改写了」。
+    - `增删句数` 跨两侧(删的算 AI 侧、加的算作者侧)。它量的是「相对这份 AI 稿,
+      做了多少句增删动作」,故理论上可以超过总句数——**不要钳**。
+    """
+    a_seg, b_seg = _segment(ai), _segment(edited)
+    sm = difflib.SequenceMatcher(None, a_seg, b_seg, autojunk=False)
+    rewrites: list[tuple[str, str]] = []
+    added: list[str] = []
+    removed: list[str] = []
+    rewritten = 0
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            a, b = a_seg[i1:i2], b_seg[j1:j2]
+            rewritten += len(a)                  # 取 AI 侧
+            if len(a) == len(b):                 # 逐句改写 → 1:1 配对
+                rewrites += list(zip(a, b))
+            else:                                # 句数变了(拆/合句)→ 整块对照
+                rewrites.append(("".join(a), "".join(b)))
+        elif tag == "delete":
+            removed += a_seg[i1:i2]
+        elif tag == "insert":
+            added += b_seg[j1:j2]
+    return {"改写句数": rewritten, "增删句数": len(removed) + len(added),
+            "总句数": len(a_seg), "rewrites": rewrites,
+            "removed": removed, "added": added}
+
+
 def _aligned_signal(snapshot: str, edited: str) -> str:
     """把手改拆成【改写候选】(同位置改写=文风候选)和【纯增删】(多半改剧情)。
 
@@ -162,26 +199,11 @@ def _aligned_signal(snapshot: str, edited: str) -> str:
     让下游模型能逐对判定"改写(文风) vs 改情节",而不是从一团 diff 里瞎猜。
     (注:同位置≠同语义——SequenceMatcher 按位置对齐,语义上是不是文风改写,
      由 _LEARN_SYSTEM 的第一步交给模型判定。Loom 不引入向量/embedding。)
-    """
-    ai, you = _segment(snapshot), _segment(edited)
-    sm = difflib.SequenceMatcher(None, ai, you, autojunk=False)
-    rewrites: list[tuple[str, str]] = []
-    added: list[str] = []
-    removed: list[str] = []
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            continue
-        if tag == "replace":
-            a, b = ai[i1:i2], you[j1:j2]
-            if len(a) == len(b):                 # 逐句改写 → 1:1 配对
-                rewrites += list(zip(a, b))
-            else:                                # 句数变了(拆/合句)→ 整块对照
-                rewrites.append(("".join(a), "".join(b)))
-        elif tag == "delete":
-            removed += ai[i1:i2]
-        elif tag == "insert":
-            added += you[j1:j2]
 
+    切分与计数走 `align_stats`(同一份,镜台也用它);这里只负责渲染成喂 prompt 的文本。
+    """
+    st = align_stats(snapshot, edited)
+    rewrites, removed, added = st["rewrites"], st["removed"], st["added"]
     parts: list[str] = []
     if rewrites:
         parts.append("## 改写候选(同一处:AI 的说法 → 你改成的说法)")
