@@ -204,6 +204,39 @@ def test_取人格人物卡文件名含秘密不该被株连消失(project):
     assert "绝不公开身份" in ev["text"]
 
 
+def test_取人格写手skills埋伏笔小节不该被株连消失(project):
+    """终审⑥important:`_deny_spoiler_items` 的 H3+ 层 deny(`_drop_spoiler_subsections`)
+    此前对**每一个** read 条目无差别生效,不像同一函数里 H2 层那样收窄到世界观条目
+    (`in_world_dir or rel == paths.WORLD_REL`)。写手读的 skills/网文大神.md 是作者自己
+    写的写作手艺,追加「### 怎么埋伏笔」这种正常方法论小节,标题撞上反转关键词「伏笔」,
+    整节就被静默剔除——这不是反转段,是作者自己写的写作指南,不该被株连。真机复现见
+    2026-08-17 审查记录:取人格:写手 之后,「怎么埋伏笔」节的正文查不到。"""
+    skill_path = project / "skills/网文大神.md"
+    skill_path.write_text(
+        skill_path.read_text(encoding="utf-8") + "\n\n"
+        "## 手艺补充\n### 怎么埋伏笔\n每章留一个没解释的细节,三章之内不要碰它。\n"
+        "### 怎么起名\n姓氏用单字,名用双字。\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "写手"})
+    assert "三章之内不要碰它" in ev["text"]   # 断正文内容,不是断标题串
+    assert "姓氏用单字" in ev["text"]          # 没撞关键词的姊妹小节本就该在,做个对照
+
+
+def test_取人格世界观单文件形态里体系背后的真相仍被剔除(project):
+    """回归闸:上面那条把 H3+ 层 deny 收窄到世界观条目之后,世界观自己的反转子块依旧要
+    被剔——这是既有行为,收窄范围时别连世界观自己都放过了。单文件形态复现参照
+    `test_取人格单文件形态也不吐冰山真相`,换成 H3 层(### 体系背后的真相),专门盯
+    `rel == paths.WORLD_REL` 这条分支。"""
+    (project / "agents/设定师.md").write_text(
+        "---\nname: 设定师\nreads:\n  - 外置大脑/世界观.md\nreads_first_chapter:\n"
+        "produces: 本章设定锚点\n---\n你是设定师。", encoding="utf-8")
+    (project / "外置大脑/世界观.md").write_text(
+        "## 力量体系\n凡阶→灵阶→天阶,每阶九品。\n"
+        "### 体系背后的真相\n其实每次突破都要以寿命为代价,官方从不公开。\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
+    assert "凡阶→灵阶→天阶" in ev["text"]
+    assert "以寿命为代价" not in ev["text"]
+
+
 def test_产物名写错回可回喂的错误而不是炸掉(project):
     """agent 会把产物名写错(错别字/自己造名)。这必须是一条能自纠的错误,不是崩掉整章。"""
     sess = _sess(project)

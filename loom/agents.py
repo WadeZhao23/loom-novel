@@ -405,6 +405,15 @@ def _drop_spoiler_h2_sections(text: str) -> str:
 def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """按反转段 deny 过滤 knowledge 条目(`_knowledge_prompt(deny_spoiler=True)` 专用)。
 
+    为什么三层 deny 都只作用在世界观条目上:冰山真相这类反转段本就只住在世界观里
+    (目录形态 外置大脑/世界观/冰山真相.md、单文件形态 外置大脑/世界观.md 的
+    `## 冰山真相` 小节)。而 `_SPOILER_KW` 那十个词(冰山/真相/反转/伏笔/底牌/终局/
+    结局/隐藏/暗线/秘密)在世界观以外是**正常词汇**,不是反转信号:卡章纲会写
+    「## 第12章 · 真相揭露」,人物卡会写「## 配角 · 秘密情人」,写手的 skills 方法论
+    会写「### 怎么埋伏笔」。deny 的范围一旦放宽过世界观这一层,就变成见词就杀,
+    静默吃掉作者自己写的东西——这正是这里三层判据都要收在 `in_world_dir`/
+    `rel == paths.WORLD_REL` 之内、不能只看关键词的原因。
+
     与 `_hardfacts_for` 目录形态那条先例同一判据、**复用**同一份 `_SPOILER_KW`/
     `_drop_spoiler_subsections`,不另写一套关键词(两处 deny 判据只能有一份,否则会漂):
     文件名(stem)命中 _SPOILER_KW 的条目整份剔除——**只对世界观目录内的条目生效**
@@ -412,15 +421,14 @@ def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
     同一判据同一范围;人物卡/技能卡等其他 read 条目文件名撞上关键词(如
     外置大脑/人物/配角·秘密情人.md)不该被株连整份消失。
 
-    H2 层 deny(`_drop_spoiler_h2_sections`,单文件形态的冰山真相是 `## 冰山真相`)同理
-    **只对世界观条目生效**(`in_world_dir` 或单文件形态 `rel == paths.WORLD_REL`)——
-    此前无条件套在每一个 read 条目上,卡章纲/人物卡/skills 方法论这些不在世界观里的条目,
-    只要标题撞上反转关键词(如「## 第12章 · 真相揭露」「## 配角 · 秘密情人」「## 怎么埋
-    伏笔」)整节就被静默剔除,同一批修复里 stem-deny 收窄的判词正是「不该套到世界观以外
-    的条目上」,H2 deny 在上一层又犯了一次,这里收进同一范围。
-
-    其余所有条目(不分是否世界观)都再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的
-    反转子块——`_drop_spoiler_subsections` 的范围本次不动。
+    H2 层与 H3+ 层 deny(`_drop_spoiler_h2_sections`/`_drop_spoiler_subsections`,单文件
+    形态的冰山真相是 `## 冰山真相`)同理**只对世界观条目生效**(`in_world_dir` 或单文件
+    形态 `rel == paths.WORLD_REL`)——此前两层都无条件套在每一个 read 条目上,卡章纲/
+    人物卡/skills 方法论这些不在世界观里的条目,只要标题撞上反转关键词(如「## 第12章 ·
+    真相揭露」「## 配角 · 秘密情人」「### 怎么埋伏笔」)整节就被静默剔除,同一批修复里
+    stem-deny 收窄的判词正是「不该套到世界观以外的条目上」——H2 层先照此收窄过一轮,
+    H3+ 层在这里又犯了同一个错(写手读的 skills/网文大神.md 追加「### 怎么埋伏笔」,标题
+    撞上「伏笔」,作者自己写的写作手艺被整节吞掉),两层判据必须一致,故收进同一个 if。
     """
     out: list[tuple[str, str]] = []
     for rel, text in items:
@@ -428,8 +436,9 @@ def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
         if in_world_dir and any(s in Path(rel).stem for s in _SPOILER_KW):
             continue   # 目录形态、且在世界观目录内:整份文件名就是反转(如 冰山真相.md),整份剔除
         if in_world_dir or rel == paths.WORLD_REL:
-            text = _drop_spoiler_h2_sections(text)   # H2 层 deny 只对世界观条目生效
-        out.append((rel, _drop_spoiler_subsections(text)))
+            text = _drop_spoiler_h2_sections(text)      # H2 层 deny 只对世界观条目生效
+            text = _drop_spoiler_subsections(text)       # H3+ 层同一判据,不再对其余条目无差别生效
+        out.append((rel, text))
     return out
 
 
