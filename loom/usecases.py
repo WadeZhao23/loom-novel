@@ -413,11 +413,17 @@ def _slot_preview(root: Path, slot_id: str) -> str | None:
 
 
 def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
-    """拍板落盘:找 proposal → 快照比对 → 按其 slot 定址落盘 → 记一条 confirm 事件。
+    """拍板落盘:找 proposal → 按它的形状分流落盘 → 记一条 confirm 事件。
+
+    候选卡有两种形状,落点/落法都不同:
+    - 「提设定」(kind 缺省):slot/content 定址,走快照比对 + `_land_slot`(见下方主分支)。
+    - 「人格增补」(终审①,evolve.propose 出的卡):角色/内容,没有 slot 概念,落点固定是
+      `agents/<角色>.md` 的个人增补区,走 `evolve.confirm`(它自带「历史/」快照供一键撤销,
+      与这里的 slot 快照守卫是两套不同机制,不重复做)。
 
     幂等(防双击/重发对 file 类落点二次追加):jsonl 里已有该 pid 的 confirm 事件,
-    直接返已落盘结果,不重跑 _land_slot。proposal 过期(find_proposal 返 None)或
-    落点冲突/未知(_land_slot 抛 ValueError,如 filename 撞车、槽位不存在)都不崩,
+    直接返已落盘结果,不重跑落盘。proposal 过期(find_proposal 返 None)或
+    落点冲突/未知(落盘函数抛 ValueError,如 filename 撞车、槽位不存在)都不崩,
     返 {"error": ...}——两种情况都不追加 confirm 事件,原 proposal 仍可重试。
 
     快照守卫(收敛范围,详见 docs/superpowers/sdd/task-1-report.md):proposal 产生时
@@ -439,6 +445,21 @@ def partner_confirm(root: Path | str, pid: str, *, ts: str) -> dict:
         proposal = partner_store.find_proposal(root, pid)
         if proposal is None:
             return {"error": "提案已过期,重新问一次"}
+        if proposal.get("kind") == "人格增补":
+            # 终审①:evolve.propose 出的候选卡形状与「提设定」不同——没有 slot/content,
+            # 只有 角色/内容;落点固定是 agents/<角色>.md 的个人增补区,走 evolve.confirm。
+            role = proposal.get("角色")
+            content = proposal.get("内容")
+            if not role or not content:   # 同下方主分支:字段缺一律当过期,不许 KeyError 崩
+                return {"error": "提案已过期,重新问一次"}
+            from . import evolve
+            landed_path = evolve.confirm(root, role, content)
+            try:
+                landed = str(landed_path.relative_to(root))
+            except ValueError:   # 理论兜底:root 非绝对路径等边界情况,退化为原样字符串
+                landed = str(landed_path)
+            partner_store.append_event(root, {"t": "confirm", "id": pid, "ts": ts, "landed": landed})
+            return {"landed": landed, "state": journey_mod.journey_state(root)}
         # .get() 取字段:proposal 损坏/缺字段(旧版本残留、手改 jsonl)一律当过期处理,
         # 不许 KeyError 崩(slot/content 是 _land_slot 的必需参数,缺一都没法落盘)。
         slot_id = proposal.get("slot")

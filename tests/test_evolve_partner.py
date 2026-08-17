@@ -49,11 +49,57 @@ def test_学改法在证据不够时给一句人话而不是空卡(project):
 
 
 def test_没有后端时不假装能学(project):
-    """伙伴通道的既有调用点不传 backend(读类工具用不着)。这条工具要发 LLM,
-    拿不到后端就老实说,别静默返回空卡。"""
+    """内部契约(handler 层面):`_handle_xuegaifa` 要发一次 LLM 调用,拿不到 backend 就该
+    老实报错,不能静默返回空卡。这里直接调 `run_tool` 且不传 `backend`,钉的是 handler
+    自身的防御——不是在断言「伙伴通道不传 backend」这件事本身(那是终审①的 bug,
+    产品路径上 backend 确实该被传下去,见下面 `test_产品路径上backend被传给学改法`)。"""
     _ripe(project)
     ev = partner_tools.run_tool(project, "学改法", {"角色": "大纲师"}, ts="t")
     assert ev.get("error")
+
+
+def test_产品路径上backend被传给学改法(project):
+    """终审①critical:`partner.run_turn` 调 `partner_tools.run_tool` 时若不传 `backend`,
+    「学改法」handler 必抛 ValueError——领航员每次调它都失败,白烧一轮 tool_rounds,
+    还给作者屏幕上留一条错误。这里走真正的产品入口 `partner.run_turn`(不是直接调
+    `partner_tools.run_tool`),证明 backend 确实被传下去、工具能跑通到候选卡,
+    且提议阶段 `agents/<角色>.md` 一个字没动。"""
+    from conftest import ScriptedBackend
+    from loom.partner import run_turn
+    _ripe(project)
+    before = (project / "agents/大纲师.md").read_text(encoding="utf-8")
+    be = ScriptedBackend([
+        "好,我来学一下大纲师的改法。\n用:学改法\n角色:大纲师",
+        "- 默认拆三场。",   # 「学改法」handler 内部再调一次 backend.complete 蒸增补
+    ])
+    evs = []
+    run_turn(project, "帮我学一下大纲师的改法", be, emit=evs.append, ts="t")
+    assert not any(e["t"] == "result" and e.get("error") for e in evs)   # 没有因缺 backend 报错
+    proposals = [e for e in evs if e["t"] == "proposal"]
+    assert proposals and proposals[0]["kind"] == "人格增补"
+    assert "拆三场" in proposals[0]["内容"]
+    assert (project / "agents/大纲师.md").read_text(encoding="utf-8") == before   # 提议阶段一个字没动
+
+
+def test_端到端_学改法候选卡经partner_confirm落盘且基座不变(project):
+    """终审①收口:产品路径全链路——`partner.run_turn` 产候选卡 → `usecases.partner_confirm`
+    拍板 → 落增补区、基座不变。用假后端,不真打网络。"""
+    from conftest import ScriptedBackend
+    from loom import usecases
+    from loom.partner import run_turn
+    _ripe(project)
+    base_before = persona.split(project, "大纲师")[0]
+    be = ScriptedBackend([
+        "好,我来学一下大纲师的改法。\n用:学改法\n角色:大纲师",
+        "- 默认拆三场。",
+    ])
+    evs = []
+    run_turn(project, "帮我学一下大纲师的改法", be, emit=evs.append, ts="t")
+    proposal = next(e for e in evs if e["t"] == "proposal")
+    result = usecases.partner_confirm(project, proposal["id"], ts="t2")
+    assert not result.get("error")
+    assert "拆三场" in persona.split(project, "大纲师")[1]   # 增补区落了
+    assert persona.split(project, "大纲师")[0] == base_before   # 基座一个字没变
 
 
 def test_工具契约段里有它(project):

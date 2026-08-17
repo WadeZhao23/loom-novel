@@ -122,8 +122,11 @@ def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
             for tool in tools[:_MAX_TOOLS_PER_MSG]:
                 tool_rounds += 1
                 _persist({"t": "tool", "name": tool["name"], "params": tool["params"]})
+                # 终审①critical:把本轮手上的 backend 传下去——「学改法」的 handler 要发一次
+                # LLM 调用蒸增补,没有 backend 会直接 ValueError(见 partner_tools._handle_xuegaifa)。
+                # run_tool 只把它转给声明了 backend 形参的 handler(既有机制),读类工具不受影响。
                 result_ev = partner_tools.run_tool(root, tool["name"], tool["params"],
-                                                    ts=f"{ts}-{tool_rounds}")
+                                                    ts=f"{ts}-{tool_rounds}", backend=backend)
                 _persist(result_ev)
                 if result_ev.get("t") == "proposal":
                     emitted_proposal = True
