@@ -32,40 +32,22 @@ def _noop(event: dict) -> None:
     pass
 
 
+# 产物侧行为(篇幅预算、gate 挂接)归产物规格表 artifacts.py(spec 2026-08-16 §4);
+# 这里保薄别名保引用面——evalapi.py 的 evals 接缝与既有测试都按 `agents.*` 引用它们,
+# 两边永远是同一个对象、不可能漂。
+from . import artifacts as _artifacts  # noqa: E402
+from .artifacts import outline_budget  # noqa: E402,F401
+from .artifacts import scene_budget as _scene_budget  # noqa: E402,F401
+from .artifacts import scene_range as _scene_range  # noqa: E402,F401
+
 # 质检/去AI味 关卡:挂在某一棒产出之后。挑硬伤→回炉,不打分、不硬阻断(见 ADR-0006)。
 # role -> (人看的名字, 复审提示词, 回炉提示词, 复审要读的设定/方法论, 是否带上一章看钩子)
+# 【派生量】真相是 artifacts.GATES + ArtifactSpec.gate;这里只把它翻成老流水线用的角色键形状。
 _GATES: dict[str, tuple[str, str, str, list[str], bool]] = {
-    # 世界观/人物 双形态都列上:_read_files 对缺失路径静默跳过(_noop),单文件老书/目录新书各取其一
-    "编辑": ("质检", gates.CRITIC_质检, gates.REVISE_质检,
-            ["skills/评估自检.md", paths.CHARS_REL, paths.CHARS_DIR_REL,
-             paths.WORLD_REL, paths.WORLD_DIR_REL, paths.CARD_REL, paths.STATEBOOK_REL], True),
-    "润色师": ("去AI味", gates.CRITIC_去AI味, gates.REVISE_去AI味,
-             ["skills/去AI味.md", paths.FINGERPRINT_REL], False),
+    a.persona: (g.label, g.critic_system, g.revise_system, list(g.reads), g.wants_prev)
+    for a in _artifacts.ARTIFACTS if a.gate and a.persona
+    for g in (_artifacts.GATES[a.gate],)
 }
-
-
-def _scene_range(chapter_target: int) -> tuple[int, int]:
-    """章目标字数 →(最少场次, 最多场次)。场次预算的**单一真相**:
-    _scene_budget 的字符串形态由它派生,evals 的棒级体检也读它——两边永不漂。"""
-    if chapter_target <= 1500:
-        return (2, 3)
-    if chapter_target <= 3000:
-        return (3, 4)
-    return (4, 6)
-
-
-def outline_budget(chapter_target: int) -> int:
-    """细纲自身的字数上限——按场次数派生,不再是写死的 450。
-
-    先量后定(与 len_tolerance ±60%→±25% 同一套做法):真机 20 份细纲实测
-    **20/20 全部超过旧的 450**,中位 ~1060、p90 1187、最大 1873;逐场骨头 230-370 字、
-    固定开销(章首接钩/章末钩类型/爽点自检)约 200 字。450 从来没被满足过,
-    它不是约束、只是一句被模型整体折扣掉的空话——同段还要求每场 5 要素 + 爆发点 +
-    接钩 + 钩类型 + 爽点,算术上就写不下(spec §10.4)。
-
-    取 200 + 350×最多场次:(2,3)档→1250、(3,4)档→1600、(4,6)档→2300,覆盖实测 p90。
-    """
-    return 200 + 350 * _scene_range(chapter_target)[1]
 
 
 
@@ -569,13 +551,6 @@ def _knowledge_items(project_root: Path, chapter_n: int, role: str) -> tuple[Age
     return a, _read_file_items(project_root, rels, _noop)
 
 
-def _scene_budget(chapter_target: int) -> str:
-    """章目标字数 → 细纲场次预算(喂 prompt 的字符串形态)。超长的真根因:大纲师不知道
-    章目标,按惯例拆 3-6 场,写手照多场细纲每场写透 → 2000 字目标干出 6000+。"""
-    lo, hi = _scene_range(chapter_target)
-    return f"拆 {lo}-{hi} 场"
-
-
 def _length_hint(role: str, step_budget: int, chapter_target: int, actual_chars: int = 0) -> str:
     """任务行里的字数指令(按角色措辞)。篇幅只靠说,绝不靠调小 max_tokens 截断——
     那会拦腰斩章 + 复发思考型空响应(见 backends._budget_tokens,2.0.1 踩过)。
@@ -661,6 +636,9 @@ def run_pipeline(
     critic_backend 给了就让质检/去AI味的**复审员**走它(通常是便宜模型);写作/回炉仍用 backend。
     """
     from . import ledger, resume as resume_mod
+
+    if getattr(config, "agentic", False):   # 【实验·灰度】走 agent 循环;默认关,老路一字不动
+        return _run_agentic(project_root, chapter_n, backend, config, progress, critic_backend)
 
     progress(events.pipeline_start(chapter_n, PIPELINE))
     prev = _prev_chapter(project_root, chapter_n)
@@ -780,7 +758,20 @@ def run_pipeline(
         if slow:
             time.sleep(slow)
 
-    final_body = _strip_edit_note(workspace[-1][1])  # 兜底:终稿/快照绝不含留痕哨兵
+    return _finish_chapter(project_root, chapter_n, workspace[-1][1], backend, config,
+                           progress, critic_backend=critic_backend, hardfacts=hardfacts)
+
+
+def _finish_chapter(project_root: Path, chapter_n: int, final_text: str, backend: Backend,
+                    config: Config, progress: Progress, *, critic_backend: Backend | None = None,
+                    hardfacts: str = "") -> tuple[Path, str]:
+    """收尾:非空硬闸 → 起标题 → 落正文+快照 → 入账本 → 违禁词/超长/除虫 → chapter_done。
+
+    **两条路(流水线 / agent 循环)共用这一份**——收尾动作是 learn 的 diff 源、drifted 判定、
+    前端完成信号的地基,绝不能因为中间怎么跑变了就长出第二份会漂的实现。
+    """
+    from . import ledger
+    final_body = _strip_edit_note(final_text)  # 兜底:终稿/快照绝不含留痕哨兵
     # 终稿非空硬闸:别把空/残废正文写进 正文+.原稿(空快照会让下次 learn 学到空、二次污染指纹)
     reasons = validate_output(final_body, chapter_profile(config.chapter_chars))
     if reasons:
@@ -798,6 +789,27 @@ def run_pipeline(
     progress(events.chapter_done(chapter=chapter_n, path=path, title=title,
                                   chars=len(final_body), preview=final_body[:300], text=final))
     return path, final
+
+
+def _run_agentic(project_root: Path, chapter_n: int, backend: Backend, config: Config,
+                 progress: Progress, critic_backend: Backend | None = None,
+                 should_cancel=None) -> tuple[Path, str]:
+    """agent 模式:一个写作 agent、五个人格、循环到终稿提交(spec 2026-08-16 §3.2)。
+
+    与流水线的差异只在【中间怎么跑】:没有固定拓扑,agent 自己决定顺序、可以回头重来。
+    护栏一条不少(挂在产物提交上,见 §4),收尾走与流水线同一份 `_finish_chapter`。
+
+    注:**尚无产物级续跑**(轨迹落盘归 P2);这条路目前每次从头跑。
+    """
+    from . import write_tools, writeloop
+    # 五个人格照旧发进度表:UI 的 pill 进度条与五个头像不用改(§3.2 承诺,产物名/角色名都没变)
+    progress(events.pipeline_start(chapter_n, list(PIPELINE)))
+    sess = write_tools.Session(root=project_root, chapter_n=chapter_n, config=config,
+                               backend=backend, critic_backend=critic_backend, progress=progress)
+    final_text = writeloop.run_chapter(sess, should_cancel=should_cancel)
+    return _finish_chapter(project_root, chapter_n, final_text, backend, config, progress,
+                           critic_backend=critic_backend,
+                           hardfacts=_hardfacts_for(project_root))
 
 
 def _aitell_factory(project_root: Path, chapter_n: int, anchors: list[str]):

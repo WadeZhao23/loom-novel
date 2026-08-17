@@ -27,7 +27,7 @@ def test_multi_blocks_filters_invalid_names():
 def test_singular_wrapper_returns_first():
     # 薄兼容层:parse_tool_block 仍返回第一个(既有调用点/测试不受影响)
     _, tool = parse_tool_block("用:提设定\n落点:a\n\n用:提设定\n落点:b", valid_names={"提设定"})
-    assert tool == {"name": "提设定", "params": {"落点": "a"}}
+    assert tool == {"name": "提设定", "params": {"落点": "a"}, "body": ""}
 
 
 def test_parenthesized_trigger_still_parsed():
@@ -60,7 +60,7 @@ def test_speech_only():
 def test_tool_block():
     say, tool = parse_tool_block("我看看金手指定得怎么样。\n\n用:读文件\n路径:外置大脑/世界观/金手指.md")
     assert say == "我看看金手指定得怎么样。"
-    assert tool == {"name": "读文件", "params": {"路径": "外置大脑/世界观/金手指.md"}}
+    assert tool == {"name": "读文件", "params": {"路径": "外置大脑/世界观/金手指.md"}, "body": ""}
 
 
 def test_only_first_block_tail_dropped():
@@ -71,18 +71,18 @@ def test_only_first_block_tail_dropped():
 
 def test_decorated_tool_line_tolerated():
     _, tool = parse_tool_block("**用**:读文件\n**路径**:外置大脑/立项卡.md")
-    assert tool == {"name": "读文件", "params": {"路径": "外置大脑/立项卡.md"}}
+    assert tool == {"name": "读文件", "params": {"路径": "外置大脑/立项卡.md"}, "body": ""}
 
 
 def test_fullwidth_colon():
     _, tool = parse_tool_block("用：看地基")
-    assert tool == {"name": "看地基", "params": {}}
+    assert tool == {"name": "看地基", "params": {}, "body": ""}
 
 
 def test_valid_names_skips_false_trigger():
     # 说话行「用：xxx」名字不在注册表→跳过,真工具块被找到,说话行留在说话段
     say, tool = parse_tool_block("用:这是个例子\n\n用:读文件\n路径:x", valid_names={"读文件", "看地基", "提设定"})
-    assert tool == {"name": "读文件", "params": {"路径": "x"}}
+    assert tool == {"name": "读文件", "params": {"路径": "x"}, "body": ""}
     assert "这是个例子" in say          # 误触发行留在说话段,没丢
 
 
@@ -95,7 +95,7 @@ def test_valid_names_all_unknown_is_speech():
 
 def test_numbered_prefix_tolerated():
     say, tool = parse_tool_block("1. 用:看地基", valid_names={"看地基"})
-    assert tool == {"name": "看地基", "params": {}}
+    assert tool == {"name": "看地基", "params": {}, "body": ""}
 
 
 def test_valid_names_none_keeps_legacy_first_block():

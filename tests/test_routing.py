@@ -20,13 +20,39 @@ def test_catalog_providers_order():
     assert any(m["id"] == "deepseek-v4-pro" for m in ds["models"])
 
 
+def test_budget_tokens_survives_real_thinking_length():
+    """真机实测 2026-08-16(v4-flash,样例书《重生记忆》第 3 章的真实 prompt,非流式重放)。
+
+    写手棒(prompt 5964 字):
+        6736 (旧代码给的值)→ finish=length,思考  9652 字,正文    0 字
+        12288              → finish=length,思考 17289 字,正文    0 字
+        16384              → finish=stop,  思考 10057 字,正文 1102 字
+        32768              → finish=stop,  思考 19489 字,正文 1055 字
+    润色师棒(prompt 5308 字):
+        16384              → finish=length,思考【43433】字,正文  0 字   ← 16384 也不够
+        32768              → finish=stop,  思考 13084 字,正文 1332 字
+
+    三条结论:
+    ① 思考长度方差极大(9.6k~43.4k 字),**没有哪个按 max_chars 现算的公式对每一棒都够** →
+       不算了,直接给一个装得下最坏情况的常数。
+    ② 旧注释「封顶 8192(DeepSeek 接受的上限)」对 V4 是错的:65536 与 131072 都正常受理。
+    ③ 抬上限**零成本**:按实际产出的 token 计费,65536 那次只出了 31 个 token。
+    """
+    from loom.backends import _budget_tokens
+    # 写章/复审/标题——每一步都必须拿到装得下【最坏那次思考】的预算,故是同一个常数
+    assert _budget_tokens("deepseek", 1200) == 65536
+    assert _budget_tokens("deepseek", 600) == 65536
+    assert _budget_tokens("deepseek", None) == 65536
+    # 非思考型供应商一律不动:各家输出上限不同,贸然抬高可能被拒
+    assert _budget_tokens("zhipu", 800) == int(800 * 2.2)
+
+
 def test_budget_tokens_deepseek_reserves_thinking_room():
     # 真因:DeepSeek V4 是思考型,小步骤(标题 max_chars=24)旧公式只给 52 → 思考占满 → 空响应。
-    # 修复:DeepSeek 给 6144 底线 + 思考余量,封顶 8192。
-    assert _budget_tokens("deepseek", 24) == 6144          # 标题/短步骤拿到底线,不再被思考饿死
-    assert _budget_tokens("deepseek", 800) == 6144         # base 1760+4096=5856 < 底线 → 6144
-    assert _budget_tokens("deepseek", 2000) == 8192        # base 4400+4096=8496 → 封顶 8192
-    assert _budget_tokens("deepseek", None) == 8192
+    # 真机把这里的形状改过一次:曾是「底线+余量、封顶」的算式(6144/8192),现在是一个常数。
+    # 原因是思考长度方差太大(实测 9.6k~43.4k 字),没有哪个算式能对每一棒都刚好够。
+    assert _budget_tokens("deepseek", 24) == 65536         # 标题这种极短步骤也给满
+    assert _budget_tokens("deepseek", 20000) == 65536      # 长章同样是它,不随 max_chars 变
 
 
 def test_budget_tokens_other_providers_unchanged():

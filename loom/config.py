@@ -29,6 +29,9 @@ class Config:
     gate_rounds: int = 1               # 质检/去AI味 复审轮数:1=只诊断列留痕(默认,不替作者改稿)、≥2 才自动回炉重写、0=关闭(见 ADR-0006)
     foreshadow_distance: int = 8       # 伏笔悬空提醒章距:埋设超过这么多章仍无推进/回收 → 写第N章时进留痕提醒(纯提示、不回炉、不阻断);0=关
     continuity_scan: bool = True       # 每章终稿后自动除虫(跨章连续性,非阻断附赠);False=只手动
+    agentic: bool = False              # 【实验·灰度】写章走 agent 循环(五角色降级为人格、可回头重来)
+    #   默认关:新路子在真机跑通一章之前不顶掉老流水线(spec 2026-08-16 §6 P1 验收)。
+    #   两条路的护栏完全一致——只是挂点从「棒」换到了「产物提交」(§4)。
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -74,6 +77,7 @@ def load_config(project_root: Path) -> Config:
         gate_rounds=int(gate.get("轮数", gate.get("rounds", 1))),
         foreshadow_distance=int(gate.get("伏笔提醒章距", gate.get("foreshadow_distance", 8))),
         continuity_scan=bool(gate.get("除虫", gate.get("continuity_scan", True))),
+        agentic=bool(novel.get("agent模式", novel.get("agentic", False))),  # 老 toml 没这行 → False,行为不变
     )
 
 
@@ -160,7 +164,10 @@ def save_config(project_root: Path, cfg: Config) -> None:
         "[novel]\n"
         f'title = {_toml_str(cfg.title)}\n'
         f'{idea_line}'
-        f'"章节字数" = {int(cfg.chapter_chars)}\n\n'
+        f'"章节字数" = {int(cfg.chapter_chars)}\n'
+        "# 【实验】写章走 agent 循环:五个角色从固定工序降级为可反复戴的人格,写崩了能自己回头重来。\n"
+        "# 护栏与流水线完全一致(质检/去AI味/篇幅/留痕/伏笔),只是挂在「产物提交」上而不是「棒」上。\n"
+        f'"agent模式" = {"true" if cfg.agentic else "false"}\n\n'
         "[gate]\n"
         "# 质检/去AI味 复审轮数:1=只挑硬伤写进 .审稿留痕/(默认,不自动改稿);≥2 才回炉重写;0=关闭。不打分、不硬阻断(见 ADR-0006)\n"
         f'"轮数" = {int(cfg.gate_rounds)}\n'

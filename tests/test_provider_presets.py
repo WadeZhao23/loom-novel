@@ -59,7 +59,7 @@ def test_capability_fields_drive_dispatch():
     assert PROVIDERS["deepseek"].get("thinking_budget") is True
     assert PROVIDERS["deepseek"].get("error_family") == "deepseek"
     assert not PROVIDERS["zhipu"].get("thinking_budget")
-    assert _budget_tokens("deepseek", 24) == 6144           # 思考型底线
+    assert _budget_tokens("deepseek", 24) == 65536          # 思考型底线(真机量,见 test_routing)
     assert _budget_tokens("zhipu", 24) == int(24 * 2.2)     # 非思考型:通用换算,不吃底线
 
 

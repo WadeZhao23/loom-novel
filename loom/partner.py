@@ -20,109 +20,27 @@
 """
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
-from . import journey, partner_context, partner_store, partner_tools
-from .parse import _TOOL_KV_RE, _TOOL_USE_RE, parse_tool_blocks
+from . import backends as _backends
+from . import journey, parse as parse_mod, partner_context, partner_store, partner_tools
+from .parse import _TOOL_KV_RE, _TOOL_USE_RE, parse_tool_blocks  # noqa: F401  引用面保留
 
 _MAX_TOOL_ROUNDS = 6   # 每轮工具调用上限(spec §4 常量表:每轮工具调用 ≤6 次)
 _MAX_TOOL_FAIL_STREAK = 2   # 连续「解析失败」(botched 工具调用)上限(spec §5.2)
 _MAX_TOOLS_PER_MSG = 3   # FB-B:一条消息里最多执行几个「用:」块(多候选护栏,防刷屏)
 
 
-def _accepts_kwarg(backend, name: str) -> bool:
-    """`backend.complete` 是否声明了 `name` 形参(或用 `**kwargs` 兜底吃掉任意关键字)。
-
-    伙伴通道要按需传后加的关键字参数(`agent_mode` 解 CLI 反 agent 护栏 spec §3;`on_reasoning`
-    收思考型后端的思维链,v2 思考层)——但这些参数都是 Backend Protocol 定稿之后才补的,
-    `tests/conftest.py` 的极简假后端(ScriptedBackend/FakeBackend)先于它们存在、没声明,硬传会
-    直接 `TypeError` 炸掉一整批既有测试。探测后按需传:声明了的(真实后端 backends.py + 新写的
-    假后端)吃得到;没声明的旧假后端 / 无此能力的 CLI 后端优雅退化成不传,行为与改动前完全一致。
-    这是「不进 Protocol、只对声明者传」的通用套路(v2 思考层刻意不动 Backend Protocol)。
-    """
-    try:
-        params = inspect.signature(backend.complete).parameters
-    except (TypeError, ValueError):
-        return False
-    return name in params or any(
-        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
-    )
+# 后端能力探测搬进 backends.py(两条 agent 通道共用);这里保薄别名保引用面。
+_accepts_kwarg = _backends.accepts_kwarg
 
 
-def _is_trigger_line(line: str) -> bool:
-    """一行(剥装饰后)是否以「用:」开头——流式转发的停发判据。
-
-    刻意比 `parse_tool_block` 的 `valid_names` 校验更粗(只认前缀,不校验工具名是否在
-    注册表内):streaming 预览宁可少发也不可漏发协议行,即便某行最终被 `parse_tool_block`
-    判定不是真正的工具触发(名字不在注册表、当普通说话处理),那部分文字也早已经由
-    `complete()` 返回的完整文本走最终解析、正确地进了持久化的 assistant 事件——预览层
-    漏发一行不影响正确性,只是这一行没能提前显现。
-    """
-    return _TOOL_USE_RE.match(line) is not None
-
-
-def _strip_protocol_lines(text: str) -> tuple[str, bool]:
-    """剥掉 `say` 里混入的协议形状整行(剥装饰后以「用:」开头,但没被 `parse_tool_block`
-    选中——工具名瞎编/误触发块排在真工具前时会有这种残留)。
-
-    `parse_tool_block` 拿 `valid_names` 校验后,「说话段」只保证不含**被选中**的那个工具块,
-    不保证不含其它未被选中的 `用:` 行(它们仍在 say 里原样躺着)。这些行是协议行的形状,
-    绝不许漏到作者屏幕(spec §5.2 critical)——不管它是不是真工具触发。
-
-    返回 `(过滤后文本, 是否剥掉过至少一行)`:后者是「模型想调工具但名字没认出来」的判据,
-    供调用方决定要不要走「解析失败回喂」(spec §5.2)。
-
-    FB-B审(#1):剥掉一个「用:」行后,还要连它下面**紧跟的 `键:值` 参数行**一起剥——否则
-    名字打错的块(带参数、排在真工具前)的孤儿参数行(`落点:…`/`内容:…`)会漏进作者屏幕。
-    参数块到 空行 / 非kv行 / 下一个「用:」行 止(与 parse_tool_blocks 的块终止规则同口径)。
-    """
-    kept: list[str] = []
-    dropped = False
-    skipping_params = False   # 刚剥了一个「用:」行 → 连它的参数行一起剥
-    for line in text.splitlines():
-        if _TOOL_USE_RE.match(line):
-            dropped = True
-            skipping_params = True
-            continue
-        if skipping_params:
-            if line.strip() and _TOOL_KV_RE.match(line):
-                continue          # 仍是被剥块的参数行 → 丢弃
-            skipping_params = False   # 空行/非kv行:参数块到此为止,本行是真内容,正常保留
-        kept.append(line)
-    return "\n".join(kept).strip(), dropped
-
-
-def _stream_line_relay(sink):
-    """返回 `(on_chunk, flush)`。`sink(line)` 在整行落定且非触发行时被调用一次(该行
-    文本,不含换行符)。一旦遇到触发行,后续所有增量与残留行一律不再转发——工具块交给
-    `complete()` 返回的完整文本统一解析,不依赖这里的增量重建。
-
-    chunk 可能在行内截断(如「用」与「:」分两个 chunk 到达):这里只在遇到 `\\n` 时才
-    判定一整行,天然免疫——`buf` 持续累积,不管上一个 chunk 在哪个字符断开。
-    """
-    state = {"buf": "", "triggered": False}
-
-    def on_chunk(delta: str) -> None:
-        if state["triggered"] or not delta:
-            return
-        state["buf"] += delta
-        while "\n" in state["buf"]:
-            line, state["buf"] = state["buf"].split("\n", 1)
-            if _is_trigger_line(line):
-                state["triggered"] = True
-                return
-            sink(line)
-
-    def flush() -> None:
-        """流结束收尾:缓冲区残留的未终结行(没有尾随换行符的最后一行),非触发行则冲出。"""
-        if state["triggered"]:
-            return
-        rest, state["buf"] = state["buf"], ""
-        if rest.strip() and not _is_trigger_line(rest):
-            sink(rest)
-
-    return on_chunk, flush
+# 流式协议行纪律(spec §5.2 critical)搬进 parse.py:写章通道(writeloop)与伙伴通道
+# 共用同一份判据——「协议行绝不许漏到作者屏幕」这条只能有一个实现,不许各写一份会漂的。
+# 这里保薄别名保引用面(同 S7 的老做法)。
+_is_trigger_line = parse_mod.is_trigger_line
+_strip_protocol_lines = parse_mod.strip_protocol_lines
+_stream_line_relay = parse_mod.stream_line_relay
 
 
 def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:

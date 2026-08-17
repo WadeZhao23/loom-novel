@@ -234,14 +234,18 @@ _TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
 
 
 def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[str, list[dict]]:
-    """(说话段, [工具调用...])。工具调用 = {"name": str, "params": {键:值}}。FB-B 多候选:
-    一条消息里可连发多个「用:」块,逐块解析成一个工具(领航员想给作者几个方向挑时用)。
+    """(说话段, [工具调用...])。工具调用 = {"name": str, "params": {键:值}, "body": str}。
+    FB-B 多候选:一条消息里可连发多个「用:」块,逐块解析成一个工具(领航员想给作者几个方向挑时用)。
 
     `valid_names` 不给(默认):收全文所有「用:」块;给了:只收「名字 ∈ valid_names」的块——
     名字不认识的「用:」行不算触发,当普通文本(防中文里孤立的「用:xxx」说话句被误判)。
     每块 params 从块行下一行起,到 **空行 / 非kv行 / 下一个「用:」触发行** 止(下一个触发行
     必须终止上一块,否则 `用:提设定` 会被 `_TOOL_KV_RE` 当成 `用=提设定` 吞进 params)。
     say=第一个【有效】块之前的文本;有效块之间/之后的散文丢弃(协议行由调用方 _strip 清)。
+
+    **body**(写章通道要的):params 之后、到下一个「用:」触发行或结尾为止的原文。
+    `提交` 的「内容」是整章正文——多行散文塞不进一行 `键:值`,故走 body 这条路
+    (伙伴通道的三个工具参数都短,body 恒为空串,行为与加它之前逐字一致)。
     """
     lines = text.splitlines()
     triggers: list[tuple[int, str]] = []          # 所有「用:」行(有效+无效)
@@ -257,14 +261,19 @@ def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[s
     tools: list[dict] = []
     for (ui, name) in valid:
         params: dict = {}
-        for j in range(ui + 1, len(lines)):
+        j = ui + 1
+        while j < len(lines):
             if not lines[j].strip() or j in trigger_lines:
                 break                              # 空行 / 撞到下一个「用:」块 → 本块 params 止
             m = _TOOL_KV_RE.match(lines[j])
             if not m:
                 break
             params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
-        tools.append({"name": name, "params": params})
+            j += 1
+        # body:params 之后到下一个「用:」行(或结尾)为止的原文。整章正文走这条路。
+        end = next((t for t in sorted(trigger_lines) if t > ui), len(lines))
+        body = "\n".join(lines[j:end]).strip()
+        tools.append({"name": name, "params": params, "body": body})
     return say, tools
 
 
@@ -273,3 +282,77 @@ def parse_tool_block(text: str, valid_names: set[str] | None = None) -> tuple[st
     (流式预览裁剪、旧测试)不受 FB-B 多候选影响;多块场景走 `parse_tool_blocks`。"""
     say, tools = parse_tool_blocks(text, valid_names)
     return say, (tools[0] if tools else None)
+
+
+# ── 流式协议行纪律(从 partner.py 搬来;写章通道与伙伴通道共用一份) ─────────────
+# spec 2026-07-16 §5.2 critical:协议行绝不许漏到作者屏幕上。两条通道的模型都会输出
+# 「用:」块,漏一行就是把内部协议摆到作者脸上,故这套判据只能有一份。
+
+def is_trigger_line(line: str) -> bool:
+    """一行(剥装饰后)是否以「用:」开头——流式转发的停发判据。
+
+    刻意比 `parse_tool_block(s)` 的 `valid_names` 校验更粗(只认前缀,不校验工具名在不在
+    注册表内):streaming 预览宁可少发也不可漏发协议行。即便某行最终被判定不是真工具触发,
+    那部分文字也早已由 `complete()` 返回的完整文本走最终解析、正确地进了持久化的说话段
+    ——预览层漏发一行不影响正确性,只是这一行没能提前显现。
+    """
+    return _TOOL_USE_RE.match(line) is not None
+
+
+def strip_protocol_lines(text: str) -> tuple[str, bool]:
+    """剥掉说话段里混入的协议形状整行(剥装饰后以「用:」开头、但没被选中——工具名瞎编,
+    或误触发块排在真工具前时会有这种残留)。
+
+    返回 `(过滤后文本, 是否剥掉过至少一行)`:后者是「模型想调工具但名字没认出来」的判据,
+    供调用方决定要不要走「解析失败回喂」。
+
+    剥掉一个「用:」行后,还要连它下面**紧跟的 `键:值` 参数行**一起剥——否则名字打错的块
+    (带参数、排在真工具前)的孤儿参数行会漏进作者屏幕。参数块到 空行 / 非kv行 / 下一个
+    「用:」行 止(与 `parse_tool_blocks` 的块终止规则同口径)。
+    """
+    kept: list[str] = []
+    dropped = False
+    skipping_params = False
+    for line in text.splitlines():
+        if _TOOL_USE_RE.match(line):
+            dropped = True
+            skipping_params = True
+            continue
+        if skipping_params:
+            if line.strip() and _TOOL_KV_RE.match(line):
+                continue          # 仍是被剥块的参数行 → 丢弃
+            skipping_params = False   # 空行/非kv行:参数块到此为止,本行是真内容,正常保留
+        kept.append(line)
+    return "\n".join(kept).strip(), dropped
+
+
+def stream_line_relay(sink):
+    """返回 `(on_chunk, flush)`。`sink(line)` 在整行落定且非触发行时被调用一次(不含换行符)。
+    一旦遇到触发行,后续所有增量与残留行一律不再转发——工具块交给 `complete()` 返回的完整
+    文本统一解析,不依赖这里的增量重建。
+
+    chunk 可能在行内截断(如「用」与「:」分两个 chunk 到达):这里只在遇到 `\\n` 时才判定
+    一整行,天然免疫——`buf` 持续累积,不管上一个 chunk 在哪个字符断开。
+    """
+    state = {"buf": "", "triggered": False}
+
+    def on_chunk(delta: str) -> None:
+        if state["triggered"] or not delta:
+            return
+        state["buf"] += delta
+        while "\n" in state["buf"]:
+            line, state["buf"] = state["buf"].split("\n", 1)
+            if is_trigger_line(line):
+                state["triggered"] = True
+                return
+            sink(line)
+
+    def flush() -> None:
+        """流结束收尾:缓冲区残留的未终结行(没有尾随换行符的最后一行),非触发行则冲出。"""
+        if state["triggered"]:
+            return
+        rest, state["buf"] = state["buf"], ""
+        if rest.strip() and not is_trigger_line(rest):
+            sink(rest)
+
+    return on_chunk, flush

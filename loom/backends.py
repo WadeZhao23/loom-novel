@@ -194,6 +194,27 @@ def _openai_compat_error(e: Exception) -> LoomBackendError:
     return LoomBackendError(render("model_call_failed", detail=msg), code="model_call_failed")
 
 
+def accepts_kwarg(backend, name: str) -> bool:
+    """`backend.complete` 是否声明了 `name` 形参(或用 `**kwargs` 兜底吃掉任意关键字)。
+
+    两条 agent 通道(伙伴对话 / 写章循环)都要按需传后加的关键字参数(`agent_mode` 解 CLI
+    反 agent 护栏、`on_reasoning` 收思考型后端的思维链)——但这些参数都是 Backend Protocol
+    定稿之后才补的,测试里的极简假后端先于它们存在、没声明,硬传会直接 `TypeError` 炸掉一批
+    既有测试。探测后按需传:声明了的(真实后端 + 新写的假后端)吃得到;没声明的旧假后端 /
+    无此能力的后端优雅退化成不传,行为与改动前完全一致。
+
+    这是「不进 Protocol、只对声明者传」的通用套路(刻意不动 Backend Protocol)。
+    """
+    import inspect
+    try:
+        params = inspect.signature(backend.complete).parameters
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return name in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
 class Backend(Protocol):
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None, agent_mode: bool = False) -> str:
@@ -208,25 +229,44 @@ class Backend(Protocol):
         ...
 
 
+# 思考型后端的输出预算:一个常数,不再按 max_chars 现算(依据见 _budget_tokens 的 docstring)。
+_THINK_BUDGET = 65536
+
+
 def _budget_tokens(provider: str, max_chars: int | None) -> int:
     """max_tokens 预算——只防截断,【不是】篇幅刹车(篇幅靠 prompt 字数指令,见 agents._length_hint)。
 
     换算:DeepSeek 中文实测约 0.6 token/字(旧注释的 ~1.6 是按老式 tokenizer 高估的近 3 倍);
     base = max_chars*2.2 是按旧换算定的,如今相当于 ~3.5 倍余量——故意不缩,截断永远比宽裕更贵。
-    DeepSeek V4(v4-flash/v4-pro)是【思考型】:reasoning 也吃 max_tokens,小预算步骤(标题/复审)
-    易被思考占满 → content 空(deepseek_empty_response 的真因)。给思考留足余量(+4096)+ 底线(6144)、
-    封顶 8192(DeepSeek 接受的上限)。8192 token ≈ 1.3 万字空间,所以「章节超长」绝不能靠调小这里治
-    ——会拦腰截断 + 复发思考型空响应(2.0.1 的老坑)。其它 OpenAI 兼容供应商维持原样——它们各家
-    模型输出上限不同,贸然抬高 max_tokens 可能被拒。
+    DeepSeek V4(v4-flash/v4-pro)是【思考型】:reasoning 也吃 max_tokens,预算不够就在思考中途
+    被 `finish_reason=length` 腰斩、content 空着回来(deepseek_empty_response 的真因)。
+
+    **思考型不再按 max_chars 现算,直接给常数 65536**。三条真机证据(2026-08-16,v4-flash,
+    样例书《重生记忆》第 3 章的真实 prompt,非流式重放):
+
+        写手棒(prompt 5964 字):  6736→length 思考9652字 正文0 | 12288→length 思考17289字 正文0
+                                16384→stop 思考10057字 正文1102 | 32768→stop 思考19489字 正文1055
+        润色师棒(prompt 5308 字):16384→length 思考【43433】字 正文0 | 32768→stop 思考13084字 正文1332
+        上限探测:               max_tokens=65536 与 131072 都正常受理
+
+    三条结论:
+    ① **思考长度方差极大**——同一本书不同棒,实测跨度 9.6k~43.4k 字。任何「刚好够」的算式
+       都会在某一棒上翻车,所以不算了,直接给一个装得下最坏情况的常数。
+    ② 旧注释「封顶 8192(DeepSeek 接受的上限)」**对 V4 是错的**。
+    ③ **抬上限零成本**:按实际产出的 token 计费——上面 65536 那次只出了 31 个 token。
+       max_tokens 是纯上限,不是预付额度。
+
+    「章节超长」绝不能靠调小这里治——会拦腰截断 + 复发思考型空响应(2.0.1 的老坑);篇幅靠
+    prompt 字数指令(见 artifacts 的提交契约 / agents._length_hint)。其它 OpenAI 兼容供应商
+    维持原样——它们各家模型输出上限不同,贸然抬高 max_tokens 可能被拒。
 
     按 PROVIDERS 的 thinking_budget 字段分发(S7):openai_compat 接新思考型时只改数据。"""
     thinking = PROVIDERS.get(provider, {}).get("thinking_budget", False)
     if not max_chars:
-        return 8192 if thinking else 2048
-    base = int(max_chars * 2.2)
+        return _THINK_BUDGET if thinking else 2048
     if thinking:
-        return min(8192, max(6144, base + 4096))
-    return base
+        return _THINK_BUDGET   # 常数:思考长度方差太大,任何按 max_chars 现算的公式都会翻车
+    return int(max_chars * 2.2)
 
 
 
