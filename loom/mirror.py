@@ -24,6 +24,8 @@ from .chaptertext import strip_title
 from .fingerprint import align_stats
 from .state import load_state
 
+_SUMMARY_WINDOW = 5   # 摘要只看最近几章:趋势看近处,全量留给 UI 的曲线
+
 
 def _pair(root: Path, n: int) -> tuple[str, str] | None:
     """(AI 稿正文体, 作者改后正文体)。缺快照/读不了 → None(跳过该章,绝不抛)。"""
@@ -124,3 +126,18 @@ def mirror(root: Path | str) -> dict:
     """一次给全屏的四块。任一块自己兜底,不会因为某一块坏掉而整屏打不开。"""
     return {"曲线": curve(root), "指纹": fingerprint_view(root),
             "人格": persona_view(root), "覆盖": coverage(root)}
+
+
+def summary_line(root: Path | str) -> str:
+    """给 `loom status` 的一行摘要。没数据返回空串(调用方据此决定打不打)。
+
+    只报最近若干章的均值:一行字装不下曲线,但「最近这几章你还改多少」这个数
+    足够让作者知道方向对不对。
+    """
+    rows = curve(root)[-_SUMMARY_WINDOW:]
+    if not rows:
+        return ""
+    rw = sum(r["改写率"] for r in rows) / len(rows)
+    ad = sum(r["增删率"] for r in rows) / len(rows)
+    return (f"镜台 · 最近 {len(rows)} 章:你改写了 {rw:.0%} 的句子、"
+            f"增删了 {ad:.0%}(越低说明它越懂你)")

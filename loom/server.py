@@ -463,6 +463,16 @@ def studio_view(root: str):
         return JSONResponse({"error": f"书房读取失败:{e}"}, status_code=400)
 
 
+@app.get("/api/mirror")
+def mirror_view(root: str):
+    """镜台(它有多懂你):手改量双曲线 + 写作指纹 + 人格增补。纯只读投影,不调模型、不写盘。"""
+    from .mirror import mirror
+    try:
+        return mirror(Path(root))
+    except Exception as e:
+        return JSONResponse({"error": f"镜台读取失败:{e}"}, status_code=400)
+
+
 @app.put("/api/config")
 def update_config(b: ConfigBody):
     root = Path(b.root)

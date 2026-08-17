@@ -226,6 +226,13 @@ def status() -> None:
         table.add_row(f"第{n}章", parse_title(out_text) or "[dim]—[/dim]", "✓",
                       "[green]✓[/green]" if edited else "—", "[green]✓[/green]" if n in learned else "—")
     console.print(table)
+    try:                                  # 附赠摘要:任何异常都不该拖累 status
+        from .mirror import summary_line
+        line = summary_line(root)
+    except Exception:
+        line = ""
+    if line:
+        console.print(f"[dim]{line}[/dim]")
 
 
 @app.command(help="启动自检:检查 key/后端命令/agent/外置大脑齐不齐。")
