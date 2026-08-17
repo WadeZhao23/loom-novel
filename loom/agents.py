@@ -374,18 +374,38 @@ def _drop_spoiler_subsections(section: str) -> str:
     return "\n".join(out).rstrip()
 
 
+def _drop_spoiler_h2_sections(text: str) -> str:
+    """从整份 markdown 里剔掉标题命中 _SPOILER_KW 的 H2 节(连同其下所有子标题),
+    保留 H2 之前的前言与其余 H2 节——单文件形态的冰山真相多半是 `## 冰山真相`
+    (见 loom/sample/agents/设定师.md 的 reads 形状、draft.py 一键起稿模板、
+    journey.py 的 slot_order),`_drop_spoiler_subsections` 只认 ### 及更深,
+    补上这一层 H2 层 deny(与 `_pick_hardfacts` 的 `if spoiler(head): continue` 同一先例)。
+    """
+    out: list[str] = []
+    skip = False
+    for ln in text.splitlines():
+        m = _H2_RE.match(ln)
+        if m:
+            skip = any(s in m.group(1) for s in _SPOILER_KW)
+        if not skip:
+            out.append(ln)
+    return "\n".join(out).rstrip()
+
+
 def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """按反转段 deny 过滤 knowledge 条目(`_knowledge_prompt(deny_spoiler=True)` 专用)。
 
     与 `_hardfacts_for` 目录形态那条先例同一判据、**复用**同一份 `_SPOILER_KW`/
     `_drop_spoiler_subsections`,不另写一套关键词(两处 deny 判据只能有一份,否则会漂):
     文件名(stem)命中 _SPOILER_KW 的条目整份剔除(目录形态,如 冰山真相.md);
-    其余条目再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的反转子块(单文件形态)。
+    其余条目先剔一遍标题命中的 H2 节(单文件形态的冰山真相是 `## 冰山真相`),
+    再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的反转子块(单文件形态)。
     """
     out: list[tuple[str, str]] = []
     for rel, text in items:
         if any(s in Path(rel).stem for s in _SPOILER_KW):
             continue   # 目录形态:整份文件名就是反转(如 冰山真相.md),整份剔除
+        text = _drop_spoiler_h2_sections(text)
         out.append((rel, _drop_spoiler_subsections(text)))
     return out
 

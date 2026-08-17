@@ -127,6 +127,25 @@ def test_取人格绝不吐冰山真相(project):
     assert "幕后黑手" not in ev["text"]
 
 
+def test_取人格单文件形态也不吐冰山真相(project):
+    """终审①critical:`_deny_spoiler_items` 只做了两件事——文件名(stem)命中整份剔除
+    (目录形态,如 冰山真相.md)+ `_drop_spoiler_subsections` 剔 ### 及更深的反转子块。
+    但单文件形态的冰山真相是 H2(## 冰山真相,见 loom/sample/agents/设定师.md 的 reads
+    形状、draft.py 一键起稿模板的输出、journey.py 的 slot_order)——stem 不命中(文件名是
+    「世界观」)、H2 又不被 ### 那道剔除逻辑认,原文原样喂进写手落字那次调用,破 ADR 0010。
+    这里照 sample 那份把 reads 换成单文件形态复现。"""
+    (project / "agents/设定师.md").write_text(
+        "---\nname: 设定师\nreads:\n  - 外置大脑/世界观.md\nreads_first_chapter:\n"
+        "produces: 本章设定锚点\n---\n你是设定师。", encoding="utf-8")
+    (project / "外置大脑/世界观.md").write_text(
+        "# 世界观\n\n## 力量体系\n凡阶→灵阶→天阶,每阶九品。\n\n"
+        "## 冰山真相\n师姐才是幕后黑手。\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
+    # 先确认工具真的取到了正常设定——否则「不含幕后黑手」在空串上恒真,是条假绿
+    assert "凡阶→灵阶→天阶" in ev["text"]
+    assert "幕后黑手" not in ev["text"]
+
+
 def test_产物名写错回可回喂的错误而不是炸掉(project):
     """agent 会把产物名写错(错别字/自己造名)。这必须是一条能自纠的错误,不是崩掉整章。"""
     sess = _sess(project)
