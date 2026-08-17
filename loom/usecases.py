@@ -211,6 +211,20 @@ def learn_revert(root: Path | str, chapter: int) -> Path | None:
         return revert_learn(Path(root), chapter)
 
 
+def evolve_revert(root: Path | str, persona_name: str) -> Path | None:
+    """撤销某人格最近一次「学改法」落盘(锁内:防与写章竞态)。
+
+    终审④:`partner_confirm` 的「人格增补」分支 docstring 承诺 `evolve.confirm`
+    「自带『历史/』快照供一键撤销」,但 `evolve.revert` 此前全仓没有任何生产调用点
+    ——作者落盘后只能手工去编辑 `agents/<角色>.md`。这里补上唯一的生产入口(见
+    server.py 的 `POST /api/evolve/revert`)。没有快照(没落过 / 已撤过)返回 None,
+    是正常业务态,不是异常。
+    """
+    from . import evolve
+    with write_lock(root):
+        return evolve.revert(Path(root), persona_name)
+
+
 # ---------------------------------------------------------------- seed
 def seed_fingerprint(root: Path | str, *, text: str = "", inherit: Path | str | None = None,
                      reference: str = "", progress: Progress = _noop) -> Path:

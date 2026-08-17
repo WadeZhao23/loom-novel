@@ -154,3 +154,42 @@ def test_拍板后落增补且可撤销(project):
     assert persona.split(project, "大纲师")[0] == base_before
     evolve.revert(project, "大纲师")
     assert persona.split(project, "大纲师")[1] == ""
+
+
+def _http_client():
+    from fastapi.testclient import TestClient
+
+    from loom.server import app
+    # base_url 必须给 127.0.0.1:app 挂了 TrustedHostMiddleware,TestClient 默认的 host 是
+    # testserver,过不了这道闸——全仓其余端点测试都这么写(见 test_mirror_endpoints.py)。
+    return TestClient(app, base_url="http://127.0.0.1")
+
+
+def test_学改法拍板后可经接口一键撤销(project):
+    """终审④important:`usecases.partner_confirm` 的「人格增补」分支 docstring 说
+    `evolve.confirm`「自带『历史/』快照供一键撤销」,但 `evolve.revert` 此前全仓没有任何
+    生产调用点(cli.py 没有、server.py 51 个路由里没有)——作者落盘后只能手工去编辑
+    agents/<角色>.md。这里接一条 POST /api/evolve/revert,验证它真的能把落盘的增补撤空、
+    基座不动。"""
+    from conftest import FakeBackend, const, require_http_transport
+    require_http_transport()
+    _ripe(project)
+    ev = partner_tools.run_tool(project, "学改法", {"角色": "大纲师"}, ts="t",
+                                backend=FakeBackend(const("- 默认拆三场。")))
+    base_before = persona.split(project, "大纲师")[0]
+    evolve.confirm(project, ev["角色"], ev["内容"])
+    assert "拆三场" in persona.split(project, "大纲师")[1]
+
+    r = _http_client().post("/api/evolve/revert", json={"root": str(project), "角色": "大纲师"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert persona.split(project, "大纲师")[1] == ""            # 增补区撤空
+    assert persona.split(project, "大纲师")[0] == base_before   # 基座一个字没动
+
+
+def test_没有可撤销快照时接口回可读提示而不是崩掉(project):
+    """撤不了(没落过 / 已撤过)是正常业务态,不是系统错误——回可读的 400,不是 500。"""
+    from conftest import require_http_transport
+    require_http_transport()
+    r = _http_client().post("/api/evolve/revert", json={"root": str(project), "角色": "大纲师"})
+    assert r.status_code == 400
+    assert "撤销" in r.json()["error"]

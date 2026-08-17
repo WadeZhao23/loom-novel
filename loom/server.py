@@ -617,6 +617,25 @@ def learn_revert(b: ChapterBody):
     return {"ok": True, "fingerprint": p.read_text(encoding="utf-8")}
 
 
+class EvolveRevertBody(BaseModel):
+    root: str
+    角色: str
+
+
+@app.post("/api/evolve/revert")
+def evolve_revert_ep(b: EvolveRevertBody):
+    """撤销某人格最近一次「学改法」落盘(终审④:`evolve.propose`/`partner_confirm` 承诺的
+    「可见性 + 可撤销」红线里「可撤销」那半此前没有生产调用点)。没有快照(没落过 / 已撤过)
+    是正常业务态,回可读的 400,不是 500。"""
+    try:
+        p = usecases.evolve_revert(Path(b.root), b.角色)
+    except (ValueError, FileNotFoundError) as e:
+        return _err_json(e)
+    if p is None:
+        return JSONResponse({"error": "没有可撤销的学改法备份(可能已撤过,或还没落过)。"}, status_code=400)
+    return {"ok": True, "persona": p.read_text(encoding="utf-8")}
+
+
 # ----------------------------- 局部重写 -----------------------------
 class RewriteBody(BaseModel):
     root: str
