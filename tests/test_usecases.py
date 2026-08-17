@@ -106,6 +106,7 @@ def test_lock_covers_new_endpoints_but_not_file_put(project):
             ("/api/chapter/move", {"root": root, "n": 1, "direction": "up"}),
             ("/api/learn/revert", {"root": root, "chapter": 1}),
             ("/api/history/restore", {"root": root, "rel": "正文/第1章.md", "id": "x"}),
+            ("/api/evolve/revert", {"root": root, "角色": "写手"}),
         ]
         for url, body in busy_posts:
             r = client.post(url, json=body)
