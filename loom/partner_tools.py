@@ -150,6 +150,28 @@ def _handle_tishe(root: Path, 落点: str = "", 内容: str = "") -> dict:
     return {"slot": slot, "content": content, "before": before}
 
 
+def _handle_xuegaifa(root: Path, 角色: str = "", *, backend=None) -> dict:
+    """把「作者反复改成什么样」蒸成这个人格的个人增补候选(spec 2026-08-16 §5.4)。
+
+    与「提设定」同一条红线:**只出候选卡,不落盘**——作者在卡上拍板才算数。
+    区别只在落点:提设定落外置大脑(书的内容),这条落 `agents/<角色>.md` 的个人增补区
+    (工具配置),基座永不碰。
+    """
+    from . import evolve
+    role = str(角色 or "").strip()
+    if not role:
+        raise ValueError("学改法缺少「角色」参数(设定师/大纲师/写手/编辑/润色师)。")
+    if backend is None:
+        raise ValueError("这一步要发一次模型调用,但当前通道没有可用后端。")
+    if not evolve.ripe(root, role):
+        n = len(evolve.collect(root, persona=role))
+        raise ValueError(f"「{role}」目前只攒到 {n} 章证据,还不够归纳出稳定的改法——再写几章再说。")
+    prop = evolve.propose(root, role, backend)
+    if prop is None:
+        raise ValueError(f"这次没从「{role}」的证据里归纳出反复出现的改法。")
+    return {k: v for k, v in prop.items() if k != "t"}
+
+
 REGISTRY: dict[str, ToolSpec] = {
     "读文件": ToolSpec(
         name="读文件", params=("路径",),
@@ -161,6 +183,12 @@ REGISTRY: dict[str, ToolSpec] = {
         desc="槽位扫描器全量明细:各段(立项/世界观/人物/卡章纲)每个槽位的完整ID(容器#键)、已填/未填、preview。"
               "落点必须从本工具的返回值中完整复制,不要自己构造 ID 或路径。",
         handler=_handle_kandiji, mutates=False,
+    ),
+    "学改法": ToolSpec(
+        name="学改法", params=("角色",),
+        desc="把作者反复改成什么样,蒸成这个人格的写法增补(候选卡,作者拍板才落)。"
+             "只在环境快照提示某个人格「攒够证据」时才用。",
+        handler=_handle_xuegaifa, mutates=True,
     ),
     "提设定": ToolSpec(
         name="提设定", params=("落点", "内容"),
@@ -179,7 +207,7 @@ def render_contract() -> str:
     return "\n".join(lines)
 
 
-def run_tool(root: Path | str, name: str, params: dict | None, *, ts: str) -> dict:
+def run_tool(root: Path | str, name: str, params: dict | None, *, ts: str, backend=None) -> dict:
     """执行一次工具调用 → 结果事件 dict(不落盘;提设定产 proposal,真正落盘走 P3 拍板通道)。
 
     id 由传入的 ts 派生(无 Date.now 依赖);同一轮内多次 mutates 调用的 ts 唯一性由调用方
@@ -191,7 +219,12 @@ def run_tool(root: Path | str, name: str, params: dict | None, *, ts: str) -> di
     if spec is None:
         return {"t": "result", "error": f"未知工具:{name}"}
     try:
-        result = spec.handler(root, **params)
+        # backend 只传给声明了它的 handler(「学改法」要发一次调用;读类工具用不着)——
+        # 同 backends.accepts_kwarg 的老套路,不为一个工具改全体 handler 的签名。
+        from .backends import accepts_kwarg as _ak
+        import inspect
+        wants = "backend" in inspect.signature(spec.handler).parameters
+        result = spec.handler(root, **params, **({"backend": backend} if wants else {}))
     except TypeError as e:
         return {"t": "result", "error": f"参数不对(「{name}」需要 {spec.params}):{e}"}
     except (ValueError, FileNotFoundError, OSError) as e:

@@ -51,6 +51,18 @@ def _system_prefix(root: Path) -> str:
     return "\n\n".join(p for p in parts if p.strip())
 
 
+def _ripe_personas(root: Path) -> list[tuple[str, int]]:
+    """哪些人格攒够了「作者反复改法」的证据。任何异常都吞掉——它是附赠提示,绝不拖累对话。"""
+    try:
+        from . import evolve
+        seen: dict[str, int] = {}
+        for e in evolve.collect(root):
+            seen[e.persona] = seen.get(e.persona, 0) + 1
+        return [(who, n) for who, n in sorted(seen.items()) if evolve.ripe(root, who)]
+    except Exception:
+        return []
+
+
 def env_snapshot(root: Path) -> str:
     """≤400 字只读投影:门禁完成度/未填槽位摘要/章节数/书名/一句话设定。
 
@@ -100,6 +112,11 @@ def env_snapshot(root: Path) -> str:
                 lines.append("立项已定:" + " · ".join(parts))
 
     lines.append(f"章节数:{len(paths.chapter_numbers(root))}")
+    ripe = _ripe_personas(root)
+    if ripe:
+        # 攒够证据的人格 → 让领航员知道可以开口问「要不要把你的改法学下来」(spec §5.4)。
+        # 只报「谁 + 几章」,细节靠「学改法」工具现蒸——快照是 400 字预算的只读投影,不塞证据原文。
+        lines.append("可学的改法:" + " · ".join(f"{who}({n} 章证据)" for who, n in ripe))
 
     idea = cfg.idea.strip()
     if len(idea) > _IDEA_MAX:
