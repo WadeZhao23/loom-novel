@@ -158,7 +158,16 @@ def _have(sess: Session, artifact_name: str) -> bool:
     if req.outline_file:
         from . import paths
         p = paths.outline_path(sess.root, sess.chapter_n)
-        return p.is_file() and bool(p.read_text(encoding="utf-8").strip())
+        if not p.is_file():
+            return False
+        try:
+            return bool(p.read_text(encoding="utf-8").strip())
+        except (OSError, UnicodeDecodeError):
+            # UnicodeDecodeError 继承自 ValueError 而非 OSError,裸 `except OSError` 抓不到,
+            # 编码损坏的细纲不该在这里抛穿——虽然会被 run_tool 的 except ValueError 兜住不至于
+            # 崩整章,但回喂给 agent 的会是一条读不懂的 codec 报错(同 mirror.py 已踩过的坑)。
+            # 读不了就当没有,交给上面 missing 分支给出「先提交细纲」这种能自纠的话。
+            return False
     return False
 
 

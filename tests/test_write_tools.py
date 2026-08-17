@@ -136,6 +136,20 @@ def test_产物名写错回可回喂的错误而不是炸掉(project):
     assert sess.workspace == []
 
 
+def test_细纲编码损坏时提交前置产物给可读错误而不是抛穿(project):
+    """终审③:`_have` 判「有没有细纲」直接 `p.read_text(encoding="utf-8")`,没有 try 保护。
+    `UnicodeDecodeError` 继承自 `ValueError` 不是 `OSError`——细纲编码损坏时,虽然会被
+    `run_tool` 的 `except (..., ValueError, ...)` 兜住不至于崩整章,但回喂给 agent 的会是
+    一条读不懂的 codec 报错,不是「先提交细纲」这种它能自纠的话。"""
+    sess = _sess(project, outline=False)
+    p = paths.outline_path(project, 1)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"\xff\xfe")   # 非法 UTF-8,读它必抛 UnicodeDecodeError
+    ev = write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": "灵气复苏第三年，主角觉醒逆息体质。"})
+    assert ev.get("error")
+    assert "先提交细纲" in ev["error"]   # 细纲当「没有」处理,给可自纠的话,不是裸 codec 报错
+
+
 def test_留痕提交成功但不进工作区(project):
     """§4:留痕与稿子链的隔离闸,运行时这一侧。into_workspace=False 意味着下游人格
     看不到它 → 它进不了终稿、进不了 .原稿 快照、也进不了 learn 的 diff 源。"""
