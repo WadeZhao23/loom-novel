@@ -137,7 +137,14 @@ def propose(root: Path | str, persona_name: str, backend, *, min_edits: int = 3)
 
     红线(§7.1):绝不替作者做决定。改了提示词下一章出稿就变,而作者不知道为什么——
     可见性 + 可撤销,是这条自进化链唯一让人放心的形状。
-    候选卡的形状与领航员的「提设定」一致,前端不用新建概念。
+
+    候选卡的形状与领航员的「提设定」【不】完全一致(终审③:这句此前写反过,误导过上一轮
+    修复者)——这里多带 kind="人格增补"/角色/证据章数 三个字段:角色/内容 没有 slot 概念,
+    落点固定是 agents/<角色>.md 的个人增补区(见 `partner_confirm` 按 kind 分流的落盘路径,
+    不是「提设定」那套 slot 定址 + 快照守卫)。webui 复用既有卡片渲染读的是 slot/content
+    两个别名,这两个别名不在这里补——由调用方 `partner_tools._handle_xuegaifa` 加上
+    (slot=agents/<角色>.md,content=本函数产出的「内容」),这里出的是这件事本身的产物
+    形状,不掺前端渲染细节。
     """
     text = refine(root, persona_name, backend, min_edits=min_edits)
     if not text:

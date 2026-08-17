@@ -106,6 +106,42 @@ def test_工具契约段里有它(project):
     assert "学改法" in partner_tools.render_contract()
 
 
+def test_学改法候选卡带slot与content供webui渲染(project, monkeypatch):
+    """终审③critical:webui 的 `pcProposal` 统一读 `slot`/`content` 渲染候选卡
+    (`humanizeSlot(ev.slot)` 填落点行、`content.textContent = ev.content || ""` 填正文、
+    「改一改」按钮填 `ev.content`)——「学改法」出的候选卡此前只有 kind/角色/内容/证据章数,
+    没有 slot/content,candidate 卡会渲染成空白正文(作者盲签)。且 `slotTakenBySibling` 用
+    `prop.slot === ev.slot` 判「这一格是否已被同伴占了」——两张卡的 slot 都是 undefined 时,
+    `undefined === undefined` 恒真,第二张会被误灰成「这一格已选了其他方向」。
+
+    这里直接 monkeypatch `evolve.ripe`/`evolve.propose`(不必真凑两个人格各自的证据——今天
+    只有大纲师这一件产物可比对,见 evolve.py 的 `_COMPARABLE`),模拟两个不同人格各自出一张
+    候选卡,断言两者的 slot 都指向各自的 `agents/<角色>.md` 且互不相等。
+    """
+    from conftest import FakeBackend, const
+
+    from loom import evolve
+
+    def fake_propose(root, persona_name, backend, **kw):
+        return {"t": "proposal", "kind": "人格增补", "角色": persona_name,
+                "内容": f"- {persona_name}的改法。", "证据章数": 3}
+
+    monkeypatch.setattr(evolve, "ripe", lambda root, persona, **kw: True)
+    monkeypatch.setattr(evolve, "propose", fake_propose)
+
+    ev1 = partner_tools.run_tool(project, "学改法", {"角色": "大纲师"}, ts="t1",
+                                 backend=FakeBackend(const("x")))
+    ev2 = partner_tools.run_tool(project, "学改法", {"角色": "写手"}, ts="t2",
+                                 backend=FakeBackend(const("x")))
+
+    assert ev1["slot"] == "agents/大纲师.md"
+    assert ev1["content"] == ev1["内容"]        # content 别名与 内容 同值
+    assert ev2["slot"] == "agents/写手.md"
+    assert ev1["slot"] != ev2["slot"]           # 防误灰:两张卡不再共享 undefined slot
+    # 角色/内容 两个键仍保留——partner_confirm 的「人格增补」分支在用
+    assert ev1["角色"] == "大纲师" and ev1["内容"]
+
+
 def test_拍板后落增补且可撤销(project):
     """整条链的收口:提议 → 拍板 → 落增补 → 撤销。"""
     from conftest import FakeBackend, const

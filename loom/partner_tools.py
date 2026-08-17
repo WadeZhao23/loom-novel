@@ -169,7 +169,17 @@ def _handle_xuegaifa(root: Path, 角色: str = "", *, backend=None) -> dict:
     prop = evolve.propose(root, role, backend)
     if prop is None:
         raise ValueError(f"这次没从「{role}」的证据里归纳出反复出现的改法。")
-    return {k: v for k, v in prop.items() if k != "t"}
+    out = {k: v for k, v in prop.items() if k != "t"}
+    # 终审③critical:webui 的 pcProposal 统一读 slot/content 渲染候选卡(与「提设定」出的卡
+    # 同一套渲染逻辑)——不带这两个键,候选卡会渲染成空白正文(humanizeSlot(undefined) 填
+    # 落点行、content.textContent = ev.content || "" 填空正文),且两张「人格增补」卡的 slot
+    # 都是 undefined,slotTakenBySibling(prop.slot === ev.slot)会把第二张误灰成
+    # 「这一格已选了其他方向」。落点固定是 agents/<角色>.md(人格增补的落点,不是外置大脑),
+    # content 就是蒸出的增补正文;角色/内容 两个键仍保留(partner_confirm 的「人格增补」
+    # 分支在用,见 usecases.partner_confirm)。
+    out["slot"] = f"agents/{role}.md"
+    out["content"] = out["内容"]
+    return out
 
 
 REGISTRY: dict[str, ToolSpec] = {
