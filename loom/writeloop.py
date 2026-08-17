@@ -165,7 +165,10 @@ def run_chapter(sess: write_tools.Session, *, max_rounds: int = MAX_ROUNDS,
                                     on_chunk=on_chunk, **kwargs)
         flush()
 
-        say, tools = parse_tool_blocks(raw, valid_names=set(write_tools.REGISTRY))
+        # known_params(终审①critical):白名单外的键立刻停手转 body,防中文对白行(合法的
+        # 「键:值」形状,如「林三：「你来晚了。」」)被 params 扫描误吞、吃掉正文首行。
+        say, tools = parse_tool_blocks(raw, valid_names=set(write_tools.REGISTRY),
+                                       known_params={n: s.params for n, s in write_tools.REGISTRY.items()})
         # critical:say 里可能混入没被选中的「用:」协议行(工具名瞎编、或误触发块排在真工具前)
         # ——绝不许漏到作者屏幕。
         say, botched = strip_protocol_lines(say)

@@ -102,3 +102,36 @@ def test_valid_names_none_keeps_legacy_first_block():
     # 不传 valid_names → 现状:认第一个块不校验名字(向后兼容)
     _, tool = parse_tool_block("用:随便什么\n参数:x")
     assert tool["name"] == "随便什么"
+
+
+# ── 终审①:params 白名单——遇到工具没声明过的键立即停手转 body ────────────────
+# 中文对白行是合法的「键:值」形状(如「林三：「你来晚了。」」),模型漏打分隔空行时,
+# 老的 params 扫描(空行/非kv行/下一个「用:」行才止)会把它当参数吞掉——正文首行消失。
+
+def test_已知参数外的键立即停止params扫描转入body():
+    raw = "用:提交\n产物:本章初稿\n林三：「你来晚了。」\n夜色沉下来,他站在门前。"
+    _, tools = parse_tool_blocks(raw, valid_names={"提交"}, known_params={"提交": ("产物", "内容")})
+    assert tools[0]["params"] == {"产物": "本章初稿"}
+    assert tools[0]["body"] == "林三：「你来晚了。」\n夜色沉下来,他站在门前。"
+
+
+def test_不传已知参数时行为逐字不变():
+    # 向后兼容:不传 known_params → 老行为原样(对白行仍会被当参数吞,既有调用点/测试口径不能变)
+    raw = "用:提交\n产物:本章初稿\n林三：「你来晚了。」"
+    _, tools = parse_tool_blocks(raw, valid_names={"提交"})
+    assert tools[0]["params"] == {"产物": "本章初稿", "林三": "「你来晚了。」"}
+
+
+def test_白名单外的键仍终止参数扫描_即便工具没声明任何参数():
+    # 无参工具(如「查硬设定」)的白名单是空元组——任何 键:值 行都不该被吞进 params
+    raw = "用:查硬设定\n某某:废话"
+    _, tools = parse_tool_blocks(raw, valid_names={"查硬设定"}, known_params={"查硬设定": ()})
+    assert tools[0]["params"] == {}
+    assert tools[0]["body"] == "某某:废话"
+
+
+def test_known_params未覆盖的工具名按无限制处理():
+    # known_params 字典里没有这个工具名 → 视为没有白名单限制(不因漏配而误伤)
+    raw = "用:提设定\n落点:a\n内容:b"
+    _, tools = parse_tool_blocks(raw, valid_names={"提设定"}, known_params={"提交": ("产物", "内容")})
+    assert tools[0]["params"] == {"落点": "a", "内容": "b"}

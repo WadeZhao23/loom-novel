@@ -53,6 +53,21 @@ def test_无正文体的工具块body为空():
     assert tools[0]["body"] == ""
 
 
+def test_对白行不被params扫描吞掉_正文首行不丢(project):
+    """终审①critical:中文对白行「林三：「你来晚了。」」长得像合法的「键:值」,模型漏打
+    参数与正文之间的分隔空行时,以前的 params 扫描(空行/非kv行/下一个「用:」行才止)会把它
+    当参数吞掉——正文第一行从 body 里消失。写章循环现在把 write_tools.REGISTRY 各工具声明过
+    的参数名当白名单传给 parse_tool_blocks,遇到白名单外的键立刻停手转 body,首行不再丢。"""
+    from conftest import ScriptedBackend
+    首行 = "林三：「你来晚了。」"
+    # 故意不留空行分隔——真机复现的形状(模型少打一个空行)
+    reply = f"用:提交\n产物:本章终稿\n{首行}\n{_稿}"
+    be = ScriptedBackend([reply])
+    sess = _sess(project, be, gate_rounds=0)
+    text = writeloop.run_chapter(sess)
+    assert 首行 in text
+
+
 # ── 循环 ────────────────────────────────────────────────────────────────
 
 def test_循环跑到终稿提交即收工(project):

@@ -203,6 +203,20 @@ def test_should_cancel_stops_at_round_boundary(project):
     assert len(be.calls) == 2                     # 只跑两轮 complete,第三轮顶提前 return
 
 
+def test_提设定后紧跟对白行不被误吞导致提案失败(project):
+    """终审①伙伴通道那一半:提设定「内容」后若紧跟一行长得像「键:值」的对白(没空行分隔),
+    以前 params 扫描没有白名单会把它当成一个陌生参数继续吞进去,_handle_tishe 没有 **kwargs
+    兜底、直接 TypeError,提案整个失败。partner.run_turn 现在把 partner_tools.REGISTRY 的
+    参数名一并传给 parse_tool_blocks,那一行不再被吞,提设定照常出候选卡。"""
+    evs, emit = _collect()
+    be = ScriptedBackend([
+        "定了:\n用:提设定\n落点:外置大脑/立项卡.md#分区\n内容:玄幻\n林三：这样如何？"])
+    run_turn(project, "定分区", be, emit=emit, ts="t")
+    proposals = [e for e in evs if e["t"] == "proposal"]
+    assert proposals and proposals[0]["content"] == "玄幻"
+    assert not any(e["t"] == "result" and e.get("error") for e in evs)
+
+
 def test_should_cancel_none_is_unchanged(project):
     evs, emit = _collect()
     be = ScriptedBackend(["用:看地基"] * 10)

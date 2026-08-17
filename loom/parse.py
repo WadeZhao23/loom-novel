@@ -233,15 +233,23 @@ _TOOL_USE_RE = re.compile(r"^\s*(?:\d+[.、]\s*)?[*_#\s（(【\[]*用[*_\s]*[:�
 _TOOL_KV_RE = re.compile(r"^\s*[*_#\s]*([^:：*_]+?)[*_\s]*[:：]\s*(.*?)\s*$")
 
 
-def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[str, list[dict]]:
+def parse_tool_blocks(text: str, valid_names: set[str] | None = None,
+                       known_params: dict[str, tuple[str, ...]] | None = None) -> tuple[str, list[dict]]:
     """(说话段, [工具调用...])。工具调用 = {"name": str, "params": {键:值}, "body": str}。
     FB-B 多候选:一条消息里可连发多个「用:」块,逐块解析成一个工具(领航员想给作者几个方向挑时用)。
 
     `valid_names` 不给(默认):收全文所有「用:」块;给了:只收「名字 ∈ valid_names」的块——
     名字不认识的「用:」行不算触发,当普通文本(防中文里孤立的「用:xxx」说话句被误判)。
-    每块 params 从块行下一行起,到 **空行 / 非kv行 / 下一个「用:」触发行** 止(下一个触发行
-    必须终止上一块,否则 `用:提设定` 会被 `_TOOL_KV_RE` 当成 `用=提设定` 吞进 params)。
-    say=第一个【有效】块之前的文本;有效块之间/之后的散文丢弃(协议行由调用方 _strip 清)。
+    每块 params 从块行下一行起,到 **空行 / 非kv行 / 下一个「用:」触发行 / 白名单外的键** 止
+    (下一个触发行必须终止上一块,否则 `用:提设定` 会被 `_TOOL_KV_RE` 当成 `用=提设定` 吞进
+    params)。say=第一个【有效】块之前的文本;有效块之间/之后的散文丢弃(协议行由调用方 _strip 清)。
+
+    `known_params`(终审①critical:每个工具**声明过的**参数名,{工具名: 参数名元组},调用方从
+    自己的工具注册表 `.params` 派生):给了,params 扫描一遇到不在该工具白名单里的键就立刻停手、
+    把该行连同之后的原文转入 body——**中文对白行是合法的 `键:值` 形状**(如「林三：「你来晚了。」」),
+    模型漏打参数与正文之间的分隔空行时,以前会把对白第一行当参数吞掉,正文首行静默消失。
+    不给(默认 None)/字典里没有这个工具名:该工具不设限制,行为与加这个参数之前逐字一致
+    (向后兼容——不是所有调用点都愿意/能够传白名单)。
 
     **body**(写章通道要的):params 之后、到下一个「用:」触发行或结尾为止的原文。
     `提交` 的「内容」是整章正文——多行散文塞不进一行 `键:值`,故走 body 这条路
@@ -260,6 +268,7 @@ def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[s
     say = "\n".join(lines[:valid[0][0]]).strip()
     tools: list[dict] = []
     for (ui, name) in valid:
+        allowed = known_params.get(name) if known_params is not None else None
         params: dict = {}
         j = ui + 1
         while j < len(lines):
@@ -268,7 +277,10 @@ def parse_tool_blocks(text: str, valid_names: set[str] | None = None) -> tuple[s
             m = _TOOL_KV_RE.match(lines[j])
             if not m:
                 break
-            params[m.group(1).strip(" *_").strip()] = m.group(2).strip(" *_").strip()
+            key = m.group(1).strip(" *_").strip()
+            if allowed is not None and key not in allowed:
+                break                              # 白名单外的键 → 不是参数,转 body(对白行护栏)
+            params[key] = m.group(2).strip(" *_").strip()
             j += 1
         # body:params 之后到下一个「用:」行(或结尾)为止的原文。整章正文走这条路。
         end = next((t for t in sorted(trigger_lines) if t > ui), len(lines))

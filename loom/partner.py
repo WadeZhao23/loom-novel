@@ -103,7 +103,10 @@ def run_turn(root, user_text, backend, *, emit, ts, should_cancel=None) -> None:
         raw = backend.complete(system, user, on_chunk=on_chunk, **complete_kwargs)
         flush()
 
-        say, tools = parse_tool_blocks(raw, valid_names=set(partner_tools.REGISTRY))
+        # known_params(终审①critical,与写章通道 writeloop 同一份纪律):白名单外的键立刻停手
+        # 转 body,防中文对白行(合法的「键:值」形状)被 params 扫描误吞。
+        say, tools = parse_tool_blocks(raw, valid_names=set(partner_tools.REGISTRY),
+                                       known_params={n: s.params for n, s in partner_tools.REGISTRY.items()})
         # critical(spec §5.2):say 里可能混入未被选中的「用:」协议行(工具名瞎编、或
         # 误触发块排在真工具前)——落盘/emit 前必须过滤掉,绝不许漏到作者屏幕。
         say, botched = _strip_protocol_lines(say)
