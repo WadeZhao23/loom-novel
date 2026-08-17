@@ -173,3 +173,39 @@ def test_提交空产物被拒且不进工作区_错误可回喂(project):
     ev = write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": ""})
     assert ev.get("error")
     assert sess.workspace == []
+
+
+def test_伏笔悬空提醒不被终稿提交的截断纪律抹掉(project):
+    """终审③critical:`_note_path` 是「本次跑动首写即清」的截断纪律入口,但伏笔悬空走
+    `agents._flag_stale_foreshadow → _save_gate_remaining`,那条路直接 append、不经过它。
+
+    gate_rounds=0 时提交改稿不跑质检关卡(`_note_touched` 仍是 False),伏笔提醒 append 完
+    之后,提交终稿时 `_note_path` 首次写入会把整个留痕文件截断——提醒被抹掉,作者永远看不到。
+    `_handle_commit` 现在在扫伏笔之前先摸一下 `_note_path(sess)`,把「首写即清」提前触发,
+    伏笔提醒活过之后的终稿提交。
+    """
+    import dataclasses
+
+    from loom.config import load_config
+
+    # 卡章纲:第1章埋了一条伏笔,推进距离(=3)超过 foreshadow_distance(=1)才判悬空
+    卡章纲 = project / "外置大脑/卡章纲.md"
+    卡章纲.parent.mkdir(parents=True, exist_ok=True)
+    卡章纲.write_text(
+        "- 第1章:占位。\n"
+        "    - [埋设] 一块来历不明的青玉牌。\n",
+        encoding="utf-8")
+
+    cfg = dataclasses.replace(load_config(project), gate_rounds=0, foreshadow_distance=1)
+    sess = _sess(project, chapter_n=3, outline=False)
+    sess.config = cfg
+    p = paths.outline_path(project, 3)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("一(约600字):验伤。二(约600字):遇敌。", encoding="utf-8")
+
+    write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": "改稿正文，写满对白与动作。" * 15})
+    note_path = paths.review_note_path(project, 3)
+    assert "伏笔悬空" in note_path.read_text(encoding="utf-8"), "改稿提交后伏笔悬空提醒应该已经落盘"
+
+    write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": "终稿正文，写满对白与动作。" * 15})
+    assert "伏笔悬空" in note_path.read_text(encoding="utf-8"), "终稿提交不该截断掉之前的伏笔悬空提醒"

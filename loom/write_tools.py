@@ -247,6 +247,11 @@ def _handle_commit(sess: Session, 产物: str = "", 内容: str = "") -> dict:
         agents._flag_overlong(sess.root, sess.chapter_n, text,
                               sess.config.chapter_chars, sess.progress)
     if spec.foreshadow_after:
+        # 终审③critical:伏笔悬空走 _flag_stale_foreshadow → _save_gate_remaining 直接 append,
+        # 不像超长提醒那样自己先摸一下 _note_path——必须在这里补上同一份「本次跑动首写即清」
+        # 的截断纪律,否则(gate_rounds=0 时改稿不跑关卡、_note_touched 仍是 False)提醒会在
+        # 之后提交终稿时被 _note_path 的首次截断悄悄抹掉。
+        _note_path(sess)
         agents._flag_stale_foreshadow(sess.root, sess.chapter_n, sess.config, sess.progress)
     if spec.into_workspace:
         sess.workspace.append((spec.name, text))
