@@ -71,3 +71,56 @@ def coverage(root: Path | str) -> dict:
     with_ai = [n for n in nums if paths.snapshot_path(root, n).is_file()]
     return {"已学": len([n for n in with_ai if n in learned]),
             "有稿": len(with_ai), "总章": len(nums)}
+
+
+def fingerprint_view(root: Path | str) -> dict:
+    """写作指纹这一块:来源 + 真规则行条数 + anchor 原句。
+
+    「真规则行」的判据复用 `fingerprint._is_rule`(它已经把页眉说明与占位行排掉了)——
+    不在这里另写一套「什么算一条规则」,否则镜台上的数字会和 learn 后的提示对不上。
+    """
+    from .fingerprint import _anchor_lines, _is_rule
+    root = Path(root)
+    src = load_state(root).get("fingerprint_source", "default")
+    p = root / paths.FINGERPRINT_REL
+    if not p.is_file():
+        return {"来源": src, "规则数": 0, "anchor": []}
+    try:
+        text = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError 继承自 ValueError 而非 OSError,同 `_pair` 那处的坑——
+        # 裸 `except OSError` 抓不到,指纹文件编码损坏时会直接抛穿、砸崩全屏镜台。
+        return {"来源": src, "规则数": 0, "anchor": []}
+    rules = [l for l in text.splitlines() if _is_rule(l)]
+    anchors = [l.strip().lstrip("> ").strip() for l in _anchor_lines(text)]
+    return {"来源": src, "规则数": len(rules), "anchor": anchors}
+
+
+def persona_view(root: Path | str) -> list[dict]:
+    """人格增补这一块:按角色分组,只列**有增补**的角色。
+
+    角色清单从 `artifacts.ARTIFACTS` 派生(产物表是产物侧的单一真相),不手抄五个名字。
+    某个角色的文件缺失/读不了 → 跳过它,其余照常(绝不抛)。
+    """
+    from . import artifacts, persona
+    root = Path(root)
+    out: list[dict] = []
+    for spec in artifacts.ARTIFACTS:
+        if not spec.persona:
+            continue
+        try:
+            extra = persona.split(root, spec.persona)[1]
+        except (FileNotFoundError, OSError, UnicodeDecodeError):
+            # UnicodeDecodeError 继承自 ValueError,同 fingerprint_view 那处的坑——
+            # 人格文件编码损坏时裸 `except OSError` 抓不到,会抛穿砸崩全屏镜台。
+            continue
+        lines = [l.strip() for l in extra.splitlines() if l.strip().startswith("-")]
+        if lines:
+            out.append({"角色": spec.persona, "增补条数": len(lines), "增补": lines})
+    return out
+
+
+def mirror(root: Path | str) -> dict:
+    """一次给全屏的四块。任一块自己兜底,不会因为某一块坏掉而整屏打不开。"""
+    return {"曲线": curve(root), "指纹": fingerprint_view(root),
+            "人格": persona_view(root), "覆盖": coverage(root)}
