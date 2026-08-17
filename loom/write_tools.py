@@ -113,7 +113,9 @@ def _handle_persona(sess: Session, 角色: str = "") -> str:
     role = (角色 or "").strip()
     if not role:
         raise ValueError(f"取人格缺少「角色」参数。可选:{'、'.join(a.persona for a in artifacts.ARTIFACTS if a.persona)}")
-    agent, knowledge = _knowledge_prompt(sess.root, sess.chapter_n, role)
+    # deny_spoiler=True(终审②critical):这次取到的原文会进 writeloop 的 trail、
+    # 每一轮都重新拼进 prompt——冰山真相类反转段绝不能经这条路混进写手落字那次调用(ADR 0010)。
+    agent, knowledge = _knowledge_prompt(sess.root, sess.chapter_n, role, deny_spoiler=True)
     sess.persona = role   # 进度事件按它归属:UI 的五个头像照旧一个个点亮
     sess.progress(events.agent_start(role))
     parts = [f"【人格·{agent.name}】\n{agent.system_prompt}"]

@@ -112,6 +112,21 @@ def test_取人格带上该角色的系统提示词与它要读的设定(project
     assert "写作指纹" in ev["text"]
 
 
+def test_取人格绝不吐冰山真相(project):
+    """终审②critical:ADR 0010 红线的主语是写手——流水线时代靠「每棒各发一次调用」的结构
+    隔离(写手 reads 本就不含世界观)。agent 化后 `_handle_persona` 的返回值进 writeloop 的
+    trail、每一轮都重新拼进 prompt——「取人格:设定师」取到的冰山真相原文会绕过写手自己的
+    reads 边界,躺进它落字那次调用的上下文里。deny 必须把这条路也堵上。"""
+    (project / "外置大脑/世界观/力量体系.md").write_text(
+        "## 力量体系\n凡阶→灵阶→天阶,每阶九品。", encoding="utf-8")
+    (project / "外置大脑/世界观/冰山真相.md").write_text(
+        "## 冰山真相\n师姐才是幕后黑手。", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
+    # 先确认工具真的取到了东西——否则「不含幕后黑手」在空串上恒真,是条假绿
+    assert "凡阶→灵阶→天阶" in ev["text"]
+    assert "幕后黑手" not in ev["text"]
+
+
 def test_产物名写错回可回喂的错误而不是炸掉(project):
     """agent 会把产物名写错(错别字/自己造名)。这必须是一条能自纠的错误,不是崩掉整章。"""
     sess = _sess(project)

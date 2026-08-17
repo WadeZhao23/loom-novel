@@ -374,6 +374,22 @@ def _drop_spoiler_subsections(section: str) -> str:
     return "\n".join(out).rstrip()
 
 
+def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """按反转段 deny 过滤 knowledge 条目(`_knowledge_prompt(deny_spoiler=True)` 专用)。
+
+    与 `_hardfacts_for` 目录形态那条先例同一判据、**复用**同一份 `_SPOILER_KW`/
+    `_drop_spoiler_subsections`,不另写一套关键词(两处 deny 判据只能有一份,否则会漂):
+    文件名(stem)命中 _SPOILER_KW 的条目整份剔除(目录形态,如 冰山真相.md);
+    其余条目再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的反转子块(单文件形态)。
+    """
+    out: list[tuple[str, str]] = []
+    for rel, text in items:
+        if any(s in Path(rel).stem for s in _SPOILER_KW):
+            continue   # 目录形态:整份文件名就是反转(如 冰山真相.md),整份剔除
+        out.append((rel, _drop_spoiler_subsections(text)))
+    return out
+
+
 def _name_roster(card_path: Path) -> str:
     """从人物卡抓「## 类型 · 名字」式专名册——只认带名字分隔符的标题,顺手滤掉 learn 追加的
     「## AI 补充…」段与「## 主角」这类没填名的占位标题:宁可空,也绝不把段名当人名喂写手。"""
@@ -530,11 +546,22 @@ def _knowledge_for(project_root: Path, chapter_n: int, role: str) -> tuple[Agent
     return a, "\n\n".join(f"【{rel}】\n{text.strip()}" for rel, text in items)
 
 
-def _knowledge_prompt(project_root: Path, chapter_n: int, role: str) -> tuple[Agent, str]:
+def _knowledge_prompt(project_root: Path, chapter_n: int, role: str, *,
+                      deny_spoiler: bool = False) -> tuple[Agent, str]:
     """进 prompt 的 knowledge:远章 AI 追加块按预算折叠(budget.py,确定性)。
-    签名仍吃原始文件(_knowledge_items)——折叠是 (文件,章号) 的纯函数,不影响续跑语义。"""
+    签名仍吃原始文件(_knowledge_items)——折叠是 (文件,章号) 的纯函数,不影响续跑语义。
+
+    `deny_spoiler`=True(终审②critical,`write_tools._handle_persona`「取人格」工具专用):
+    knowledge 先过一遍反转段 deny(见 `_deny_spoiler_items`)。旧流水线 `run_pipeline` 的
+    调用点不传这个参数——那边一棒一次调用,写手 reads 本就不含世界观,结构上已经隔离
+    (ADR 0010 红线的主语是写手)。agent 化后 `_handle_persona` 的返回值进 writeloop 的
+    trail、每一轮都重新拼进 prompt——「取人格:设定师」取到的冰山真相原文会绕过写手自己的
+    reads 边界,躺进它落字那次调用的上下文里,这里补上等价保护。
+    """
     from . import budget
     a, items = _knowledge_items(project_root, chapter_n, role)
+    if deny_spoiler:
+        items = _deny_spoiler_items(items)
     blocks = []
     for rel, text in items:
         if rel == paths.CARD_REL:
