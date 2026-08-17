@@ -68,7 +68,10 @@ def _existing_outline(sess: write_tools.Session) -> str:
     try:
         p = paths.outline_path(sess.root, sess.chapter_n)
         return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError 继承自 ValueError 而非 OSError,裸 `except OSError` 抓不到,
+        # 编码损坏的细纲(如作者用 GBK 存过)会直接抛穿、agent 化每一轮 _assemble 都踩到,
+        # 整章跑不了(同 mirror.py 已踩过的坑,这里显式并列,不用裸 except Exception)。
         return ""
 
 

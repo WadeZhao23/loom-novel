@@ -71,3 +71,14 @@ def test_空白差异不算改过(project):
     """尾部空行/换行差异不是「作者改了它」——落盘时补的 \\n 会让每一章都误判成证据。"""
     _lay(project, 1, "一(约400字)。二(约400字)。", "一(约400字)。二(约400字)。\n\n")
     assert evolve.collect(project) == []
+
+
+def test_细纲编码损坏不让collect抛穿(project):
+    """终审④:`UnicodeDecodeError` 继承自 `ValueError` 不是 `OSError`,裸 `except OSError`
+    抓不到它——盘上细纲文件编码损坏时 `collect` 会直接抛穿,整条自进化证据采集链跟着崩。
+    这一章跳过即可(同 OSError 那半:读不了就当没有证据),其余章节照常收。"""
+    trail.record_commit(project, 1, "本章场景骨头(分镜细纲)", "AI 的", "v2:sig1")
+    p = paths.outline_path(project, 1)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"\xff\xfe")   # 非法 UTF-8,读它必抛 UnicodeDecodeError
+    assert evolve.collect(project) == []   # 不该抛穿,这一章当没有证据跳过

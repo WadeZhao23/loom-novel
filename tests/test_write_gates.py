@@ -161,6 +161,18 @@ def test_作者改过的细纲会顶到agent面前(project):
     assert "作者手改的场次" in user
 
 
+def test_细纲编码损坏不拖累assemble出稿(project):
+    """终审④:`UnicodeDecodeError` 继承自 `ValueError` 不是 `OSError`,裸 `except OSError`
+    抓不到它——作者用 GBK 存过 `.细纲/第N章.md`,`_existing_outline` 就会直接抛穿,agent 化
+    每一轮 `_assemble` 都会踩到,整章跑不了。docstring 承诺「读不了就当没有」,这里钉住。"""
+    from loom import writeloop
+    paths.outline_path(project, 1).parent.mkdir(parents=True, exist_ok=True)
+    paths.outline_path(project, 1).write_bytes(b"\xff\xfe")   # 非法 UTF-8,读它必抛 UnicodeDecodeError
+    sess = _sess(project, outline=False)
+    _, user = writeloop._assemble(sess, [])   # 不该抛
+    assert "作者已经给了本章细纲" not in user   # 读不了就当没有,不当成「作者给了细纲」注进 prompt
+
+
 def test_提交留痕落到审稿留痕文件(project):
     """§4:留痕从「编辑棒输出里用哨兵分隔的尾巴」变成独立产物,提交即落 .审稿留痕/。"""
     sess = _sess(project)

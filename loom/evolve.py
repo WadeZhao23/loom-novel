@@ -66,7 +66,10 @@ def collect(root: Path | str, *, persona: str | None = None) -> list[Edit]:
                 continue
             try:
                 author = p.read_text(encoding="utf-8")
-            except OSError:
+            except (OSError, UnicodeDecodeError):
+                # UnicodeDecodeError 继承自 ValueError 而非 OSError,裸 `except OSError`
+                # 抓不到,编码损坏的细纲会让 collect 直接抛穿、砸崩整条自进化证据采集链
+                # (同 mirror.py 已踩过的坑)——这一章当没有证据跳过即可,其余章节照常收。
                 continue
             if _norm(author) and _norm(author) != _norm(ai):
                 out.append(Edit(chapter=n, artifact=name, persona=who,
