@@ -316,6 +316,8 @@ _H2_RE = re.compile(r"^\s{0,3}##\s*(?!#)(.+?)\s*$")
 _H3_RE = re.compile(r"^\s{0,3}###\s*(?!#)(.+?)\s*$")
 # 三级及更深标题行(### ~ ######):剔反转子块时要知道层级,才能"剔到同级/更浅标题为止"。
 _H3PLUS_RE = re.compile(r"^\s{0,3}(#{3,6})\s*(.+?)\s*$")
+# 任意层级标题行(# ~ ######):`_drop_spoiler_h2_sections` 按层级复位要认得比 H2 更浅的 H1。
+_HEAD_RE = re.compile(r"^\s{0,3}(#{1,6})\s*(.+?)\s*$")
 
 # 世界观里【必须逐字照搬】的硬设定小节——按标题(H2,H2 没命中再看其内 H3)含这些词命中,
 # 整段原文透传给大纲师/写手。只圈"规则 + 专名"(境界阶梯/金手指代价/地名势力;历史/都市题材的
@@ -380,13 +382,21 @@ def _drop_spoiler_h2_sections(text: str) -> str:
     (见 loom/sample/agents/设定师.md 的 reads 形状、draft.py 一键起稿模板、
     journey.py 的 slot_order),`_drop_spoiler_subsections` 只认 ### 及更深,
     补上这一层 H2 层 deny(与 `_pick_hardfacts` 的 `if spoiler(head): continue` 同一先例)。
+
+    用层级比较复位(同 `_drop_spoiler_subsections` 口径):skip 记的是命中反转的标题层级,
+    遇到同级或更浅(含 H1)的标题就复位——只认下一个「##」复位会漏掉「##」之后紧跟的「#」,
+    把它连同其后的整块内容一并连坐吞掉。
     """
     out: list[str] = []
-    skip = False
+    skip = 0  # >0 = 正在剔除,值为命中反转的标题层级(此处只会是 2)
     for ln in text.splitlines():
-        m = _H2_RE.match(ln)
+        m = _HEAD_RE.match(ln)
         if m:
-            skip = any(s in m.group(1) for s in _SPOILER_KW)
+            level = len(m.group(1))
+            if skip and level <= skip:
+                skip = 0
+            if not skip and level == 2 and any(s in m.group(2) for s in _SPOILER_KW):
+                skip = level
         if not skip:
             out.append(ln)
     return "\n".join(out).rstrip()

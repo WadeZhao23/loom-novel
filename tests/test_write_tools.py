@@ -146,6 +146,24 @@ def test_取人格单文件形态也不吐冰山真相(project):
     assert "幕后黑手" not in ev["text"]
 
 
+def test_取人格冰山真相后紧跟一级标题不该被连坐吞掉(project):
+    """终审②minor:`_drop_spoiler_h2_sections` 的 skip 此前是 bool,只有下一个「##」能
+    复位、「#」(H1)复位不了——世界观里「## 冰山真相」后紧跟「# 第二部分」,第二部分整块
+    被连坐吞掉。同文件里 `_drop_spoiler_subsections` 早就是按层级复位的正确写法,这里补齐
+    同一口径:任何 <= 命中层级的标题(含更浅的 H1)都该结束 skip。"""
+    (project / "agents/设定师.md").write_text(
+        "---\nname: 设定师\nreads:\n  - 外置大脑/世界观.md\nreads_first_chapter:\n"
+        "produces: 本章设定锚点\n---\n你是设定师。", encoding="utf-8")
+    (project / "外置大脑/世界观.md").write_text(
+        "## 力量体系\n凡阶→灵阶→天阶,每阶九品。\n\n"
+        "## 冰山真相\n师姐才是幕后黑手。\n\n"
+        "# 第二部分\n主线继续,这段不该被连坐吞掉。\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
+    assert "凡阶→灵阶→天阶" in ev["text"]
+    assert "幕后黑手" not in ev["text"]
+    assert "主线继续,这段不该被连坐吞掉" in ev["text"]
+
+
 def test_取人格卡章纲标题带真相不该被株连消失(project):
     """终审①important:`_drop_spoiler_h2_sections` 此前无条件套在每一个 read 条目上——
     卡章纲(paths.CARD_REL)不在世界观目录内,作者/导入器写出「## 第12章 · 真相揭露」这种
