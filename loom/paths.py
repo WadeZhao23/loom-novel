@@ -16,12 +16,14 @@ from pathlib import Path
 BODY_DIR = "正文"                       # 章节正文(作者手改的定稿)
 SNAPSHOT_DIR = f"{BODY_DIR}/.原稿"       # AI 原稿快照 + 续跑账本(只给 learn 的 diff / 断点续跑)
 OUTLINE_DIR = f"{BODY_DIR}/.细纲"        # 每章分镜细纲(可看可改,WYSIWYG)
+TRAIL_DIR = f"{BODY_DIR}/.轨迹"          # agent 模式的写章轨迹(产物级续跑;删了只是下次从头跑)
 HISTORY_DIR = f"{BODY_DIR}/.历史"        # 单章版本历史(覆盖前快照,后悔药)
 TRASH_DIR = f"{BODY_DIR}/.回收站"        # 删章的整章产物落这里,可恢复
 REVIEW_DIR = ".审稿留痕"                 # 编辑留痕 / 关卡残留 / 各类提醒(人可读可改)
 NAV_TRACE_REL = f"{REVIEW_DIR}/领航员留痕.md"   # 领航员出题失败的现场记录(人可读可删,不派生状态)
 PARTNER_DIR = ".伙伴对话"                    # 伙伴对话日志(整书一条;人可读可删,删=失忆书无恙)
 PARTNER_CUR_REL = f"{PARTNER_DIR}/当前.jsonl"
+EVOLVE_DIR = ".进化"                     # 人格增补的落盘前快照(可一键撤销);删了只是撤不了,书不动
 BRAIN_DIR = "外置大脑"                   # 每本书的状态文件(人写主体 + AI 追加子块)
 FP_HISTORY_DIR = f"{BRAIN_DIR}/.指纹历史"  # learn 前的指纹备份(一键撤销)
 DECONSTRUCT_DIR = f"{BRAIN_DIR}/.拆书"    # 拆书隔离草稿区(没有任何 agent 读它)
@@ -92,6 +94,10 @@ def ledger_path(root: Path | str, n: int) -> Path:
     return Path(root) / SNAPSHOT_DIR / f"第{n}章.ledger.json"
 
 
+def trail_path(root: Path | str, n: int) -> Path:
+    return Path(root) / TRAIL_DIR / f"第{n}章.jsonl"
+
+
 def outline_path(root: Path | str, n: int) -> Path:
     return Path(root) / OUTLINE_DIR / f"第{n}章.md"
 
@@ -127,6 +133,8 @@ CHAPTER_ARTIFACTS: list[tuple[str, str, bool]] = [
     (SNAPSHOT_DIR, "第{n}章.md", False),
     (SNAPSHOT_DIR, "第{n}章.ledger.json", False),
     (OUTLINE_DIR, "第{n}章.md", False),
+    # 漏了这行 = 删掉第 3 章后,新的第 3 章会重放【旧第 3 章】的产物(串章)
+    (TRAIL_DIR, "第{n}章.jsonl", False),
     (HISTORY_DIR, "第{n}章", True),
     (REVIEW_DIR, "第{n}章.md", False),
     (FP_HISTORY_DIR, "第{n}章-learn前.md", False),
