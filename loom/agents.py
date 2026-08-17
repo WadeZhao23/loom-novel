@@ -400,16 +400,25 @@ def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
     文件名(stem)命中 _SPOILER_KW 的条目整份剔除——**只对世界观目录内的条目生效**
     (`paths.WORLD_DIR_REL`,如 世界观/冰山真相.md 这种目录形态),与 `_hardfacts_for`
     同一判据同一范围;人物卡/技能卡等其他 read 条目文件名撞上关键词(如
-    外置大脑/人物/配角·秘密情人.md)不该被株连整份消失。其余条目先剔一遍标题命中的
-    H2 节(单文件形态的冰山真相是 `## 冰山真相`),再剔一遍正文里 ### 及更深、
-    标题命中 _SPOILER_KW 的反转子块。
+    外置大脑/人物/配角·秘密情人.md)不该被株连整份消失。
+
+    H2 层 deny(`_drop_spoiler_h2_sections`,单文件形态的冰山真相是 `## 冰山真相`)同理
+    **只对世界观条目生效**(`in_world_dir` 或单文件形态 `rel == paths.WORLD_REL`)——
+    此前无条件套在每一个 read 条目上,卡章纲/人物卡/skills 方法论这些不在世界观里的条目,
+    只要标题撞上反转关键词(如「## 第12章 · 真相揭露」「## 配角 · 秘密情人」「## 怎么埋
+    伏笔」)整节就被静默剔除,同一批修复里 stem-deny 收窄的判词正是「不该套到世界观以外
+    的条目上」,H2 deny 在上一层又犯了一次,这里收进同一范围。
+
+    其余所有条目(不分是否世界观)都再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的
+    反转子块——`_drop_spoiler_subsections` 的范围本次不动。
     """
     out: list[tuple[str, str]] = []
     for rel, text in items:
         in_world_dir = rel.startswith(f"{paths.WORLD_DIR_REL}/")
         if in_world_dir and any(s in Path(rel).stem for s in _SPOILER_KW):
             continue   # 目录形态、且在世界观目录内:整份文件名就是反转(如 冰山真相.md),整份剔除
-        text = _drop_spoiler_h2_sections(text)
+        if in_world_dir or rel == paths.WORLD_REL:
+            text = _drop_spoiler_h2_sections(text)   # H2 层 deny 只对世界观条目生效
         out.append((rel, _drop_spoiler_subsections(text)))
     return out
 

@@ -146,6 +146,31 @@ def test_取人格单文件形态也不吐冰山真相(project):
     assert "幕后黑手" not in ev["text"]
 
 
+def test_取人格卡章纲标题带真相不该被株连消失(project):
+    """终审①important:`_drop_spoiler_h2_sections` 此前无条件套在每一个 read 条目上——
+    卡章纲(paths.CARD_REL)不在世界观目录内,作者/导入器写出「## 第12章 · 真相揭露」这种
+    非规范但合法的章节标题(导入器支持这种形态入库),整节因标题撞上反转关键词被静默剔除,
+    大纲师写第12章时看不到这章要干什么。同一批修复里 stem-deny 收窄的判词正是「不该套到
+    世界观以外的条目上」——H2 deny 在上一层又犯了一次,这里把它也收进世界观条目
+    (`in_world_dir or rel == paths.WORLD_REL`)。"""
+    (project / "外置大脑/卡章纲.md").write_text(
+        "## 第12章 · 真相揭露\n主角识破师姐伪装,当场反杀夺回令牌。\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "大纲师"})
+    assert "当场反杀夺回令牌" in ev["text"]
+
+
+def test_取人格老书人物卡标题带秘密不该被株连消失(project):
+    """同上:老书单文件人物卡(paths.CHARS_REL)也不在世界观目录内,标题「## 配角 · 秘密
+    情人」撞上反转关键词却不该被 H2 deny 整节剔除——人物卡不是反转段。"""
+    (project / "agents/设定师.md").write_text(
+        "---\nname: 设定师\nreads:\n  - 外置大脑/人物卡.md\nreads_first_chapter:\n"
+        "produces: 本章设定锚点\n---\n你是设定师。", encoding="utf-8")
+    (project / "外置大脑/人物卡.md").write_text(
+        "## 配角 · 秘密情人\n- 底线:绝不公开身份\n", encoding="utf-8")
+    ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
+    assert "绝不公开身份" in ev["text"]
+
+
 def test_取人格人物卡文件名含秘密不该被株连消失(project):
     """终审②important:此前 stem-deny 对该人格的**每一个** read 条目都做 stem 匹配,
     包括 外置大脑/人物/、skills/题材 ——作者建一个「配角·秘密情人.md」,文件名撞上
