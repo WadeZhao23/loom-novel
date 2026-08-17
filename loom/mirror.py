@@ -33,7 +33,10 @@ def _pair(root: Path, n: int) -> tuple[str, str] | None:
     try:
         return (strip_title(snap.read_text(encoding="utf-8")),
                 strip_title(out.read_text(encoding="utf-8")))
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # UnicodeDecodeError 继承自 ValueError 而非 OSError,裸 `except OSError` 抓不到,
+        # 快照编码损坏时会直接抛穿、砸崩全书曲线——这里显式并列,不用裸 except Exception
+        # (那会连编程错误一起吞掉,反而更难查)。
         return None
 
 

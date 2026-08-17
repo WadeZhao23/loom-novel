@@ -82,6 +82,39 @@ def test_空书不炸(project):
     assert mirror.coverage(project) == {"已学": 0, "有稿": 0, "总章": 0}
 
 
+def test_快照编码损坏时跳过该章不抛异常(project):
+    """`_pair()` 原来只捕 `OSError`,但 `UnicodeDecodeError` 继承自 `ValueError`,
+    快照写入非法 UTF-8 字节时读取会直接抛出、砸穿「绝不抛」的硬约束、把全书曲线带崩。
+    正确行为是跳过这一章,其余(learn 过、正常的章)照常返回。"""
+    paths.snapshot_path(project, 1).parent.mkdir(parents=True, exist_ok=True)
+    paths.chapter_path(project, 1).parent.mkdir(parents=True, exist_ok=True)
+    paths.snapshot_path(project, 1).write_bytes(b"# \xff\xfe\n\xff\xfe")
+    paths.chapter_path(project, 1).write_text("# 标题\n正文。", encoding="utf-8")
+    mark_learned(project, 1)
+    _chapter(project, 2, "一。二。", "壹。二。")            # 正常且 learn 过的一章
+    rows = mirror.curve(project)                            # 不抛
+    assert [r["章"] for r in rows] == [2]                    # 坏章跳过,好章照常在
+
+
+def test_增删率可以超过1不钳上限(project):
+    """spec 明写增删率理论上可以超过 1(整章推翻重写),不得钳到上限。
+    构造:AI 稿删掉一段(纯 delete)、又加进一段更长的新内容(纯 insert),
+    删的句数 + 加的句数 > AI 稿总句数。"""
+    ai = "锚一。删一。删二。锚二。"                              # AI 稿 4 句
+    edited = "锚一。锚二。加一。加二。加三。加四。加五。"          # 删 2 句、加 5 句
+    _chapter(project, 1, ai, edited)
+    row = mirror.curve(project)[0]
+    assert row["增删率"] > 1.0
+
+
+def test_字数等于作者改后正文去标题去空白的字符数(project):
+    ai = "一。二。"
+    edited = "壹。贰。  叁。\n肆。伍。"                          # 夹带空格与换行
+    _chapter(project, 1, ai, edited)
+    row = mirror.curve(project)[0]
+    assert row["字数"] == 10                                   # 5 个「字+。」,空白不计数
+
+
 def test_镜台与learn共用同一个句级对齐函数():
     """spec §7 的「共用性」:不是「两边算得一样」,是**两边就是同一个对象**。
 
