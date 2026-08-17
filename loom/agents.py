@@ -978,8 +978,14 @@ def regen_outline(project_root: Path, chapter_n: int, backend: Backend,
                      else (spec.short_budget or config.chapter_chars))  # 与主线 run_pipeline 同口径
         if role == "大纲师":
             # 签名必须在 workspace.append 之前算——签的是「产它时的上游」,同
-            # run_pipeline._sig / write_tools.artifact_sig 那一套算法(resume.sig_v2),
-            # 不是为了续跑用(这里不续跑),只为给下面记进轨迹的这笔提交留一个合规的 sig 字段。
+            # run_pipeline._sig / write_tools.artifact_sig 那一套算法(resume.sig_v2)。
+            # 终审⑥订正:这条 sig 不是摆设——writeloop._replay 会读下面记进轨迹的这笔
+            # 提交的 c["sig"],拿它跟 write_tools.artifact_sig 比对,决定要不要把它当
+            # 「上游未变」重放回工作区。这里算它,正是为了让 _replay 的判据有一个合规值
+            # 可比,不是给它编一个没人看的占位。这里算的签名(workspace 里带着设定师产物)
+            # 与 _replay 日后重新核验时的签名(那份设定师产物没进过 trail、workspace 是空的)
+            # 必然对不上——于是 _replay 会判定失配、保守放弃重放,让调用方从头重算,方向安全,
+            # 但绝不是「没人读它」(见 tests/test_writeloop_resume.py 的回归测试)。
             from . import resume as resume_mod
             cfg_bits = {"chapter_chars": config.chapter_chars,
                         "gate_rounds": config.gate_rounds, "title": config.title}

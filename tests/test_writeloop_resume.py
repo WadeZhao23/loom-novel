@@ -113,6 +113,42 @@ def test_重放不再跑质量关卡(project):
     assert be2.systems == [], "重放不该再发任何调用(含复审)"
 
 
+def test_regen_outline记的sig会被replay读到而不是没人读(project):
+    """终审⑥:上一轮实现者在报告(`.superpowers/sdd/final-fix-2-report.md` ②)里断言过
+    "regen_outline 新记的 sig 今天没有任何东西读它"——这是错的:`writeloop._replay`
+    恰恰会读 `c["sig"]`、拿它跟 `write_tools.artifact_sig` 比对。
+
+    这里直接证明该消费点存在:`regen_outline` 记录 sig 时,workspace 里带着设定师的
+    产物;但 `_replay` 重新核验时,那份设定师产物根本没进过 trail(regen_outline 只记了
+    细纲这一笔),workspace 是空的——两次算出的签名必然不同。于是 `_replay` 撞见这第一条
+    commit 就签名失配、原地放弃重放(不是没人读,是读了、判定「上游变了」,保守起见让
+    调用方从头重算——方向安全,但记录这句「没人读」的注释/报告会让下一个人放心去改
+    sig 算法,以为反正没人用)。
+    """
+    from conftest import ScriptedBackend
+
+    from loom import agents, artifacts as artifacts_mod, trail
+    from loom.config import load_config
+
+    be1 = ScriptedBackend(["灵气复苏第三年，主角觉醒逆息体质。",
+                           "一(约600字):验伤。二(约600字):遇敌。"])
+    agents.regen_outline(project, 1, be1, load_config(project))
+
+    commits = trail.read_commits(project, 1)
+    assert len(commits) == 1 and commits[0]["产物"] == "本章场景骨头(分镜细纲)"
+    recorded_sig = commits[0].get("sig")
+    assert recorded_sig                 # regen_outline 确实记了一个非空 sig
+
+    sess = write_tools.Session(root=project, chapter_n=1, config=load_config(project), backend=None)
+    spec = artifacts_mod.spec_for("本章场景骨头(分镜细纲)")
+    # _replay 核验时算出的签名:此刻 sess.workspace 是空的(设定师产物没进过 trail),
+    # 与 regen_outline 记录时(workspace 里带着设定师产物)必然不同
+    assert write_tools.artifact_sig(sess, spec) != recorded_sig
+
+    assert writeloop._replay(sess) is None   # 消费点确实读了 sig、判定失配、保守放弃重放
+    assert sess.workspace == []              # 没有任何产物被误当"上游未变"塞回工作区
+
+
 def _seed_outline(project, n: int = 1) -> None:
     """铺一份细纲。正文稿的提交前置条件(篇幅结构闸)要求它在先——除非这条测试测的正是那个条件。"""
     from loom import paths
