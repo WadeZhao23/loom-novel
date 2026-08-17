@@ -397,14 +397,18 @@ def _deny_spoiler_items(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
     与 `_hardfacts_for` 目录形态那条先例同一判据、**复用**同一份 `_SPOILER_KW`/
     `_drop_spoiler_subsections`,不另写一套关键词(两处 deny 判据只能有一份,否则会漂):
-    文件名(stem)命中 _SPOILER_KW 的条目整份剔除(目录形态,如 冰山真相.md);
-    其余条目先剔一遍标题命中的 H2 节(单文件形态的冰山真相是 `## 冰山真相`),
-    再剔一遍正文里 ### 及更深、标题命中 _SPOILER_KW 的反转子块(单文件形态)。
+    文件名(stem)命中 _SPOILER_KW 的条目整份剔除——**只对世界观目录内的条目生效**
+    (`paths.WORLD_DIR_REL`,如 世界观/冰山真相.md 这种目录形态),与 `_hardfacts_for`
+    同一判据同一范围;人物卡/技能卡等其他 read 条目文件名撞上关键词(如
+    外置大脑/人物/配角·秘密情人.md)不该被株连整份消失。其余条目先剔一遍标题命中的
+    H2 节(单文件形态的冰山真相是 `## 冰山真相`),再剔一遍正文里 ### 及更深、
+    标题命中 _SPOILER_KW 的反转子块。
     """
     out: list[tuple[str, str]] = []
     for rel, text in items:
-        if any(s in Path(rel).stem for s in _SPOILER_KW):
-            continue   # 目录形态:整份文件名就是反转(如 冰山真相.md),整份剔除
+        in_world_dir = rel.startswith(f"{paths.WORLD_DIR_REL}/")
+        if in_world_dir and any(s in Path(rel).stem for s in _SPOILER_KW):
+            continue   # 目录形态、且在世界观目录内:整份文件名就是反转(如 冰山真相.md),整份剔除
         text = _drop_spoiler_h2_sections(text)
         out.append((rel, _drop_spoiler_subsections(text)))
     return out
