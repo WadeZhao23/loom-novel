@@ -193,11 +193,15 @@ def test_取人格人物卡文件名含秘密不该被株连消失(project):
     """终审②important:此前 stem-deny 对该人格的**每一个** read 条目都做 stem 匹配,
     包括 外置大脑/人物/、skills/题材 ——作者建一个「配角·秘密情人.md」,文件名撞上
     「秘密」这个反转关键词,会被整份静默剔除,人物卡凭空消失。对比 `_hardfacts_for`:
-    它的 stem-deny 只作用在 外置大脑/世界观/ 目录内。这里把 stem-deny 收窄到同一范围。"""
+    它的 stem-deny 只作用在 外置大脑/世界观/ 目录内。这里把 stem-deny 收窄到同一范围。
+
+    断言正文里独有的串(`绝不公开身份`)而不是「秘密情人」——后者同时出现在条目展示名
+    `【外置大脑/人物/配角·秘密情人.md】` 里,即便正文被删光、只剩展示名,旧断言也会
+    误判通过,是条假绿。"""
     (project / "外置大脑/人物/配角·秘密情人.md").write_text(
         "# 配角 · 秘密情人\n- 底线:绝不公开身份\n", encoding="utf-8")
     ev = write_tools.run_tool(_sess(project), "取人格", {"角色": "设定师"})
-    assert "秘密情人" in ev["text"]
+    assert "绝不公开身份" in ev["text"]
 
 
 def test_产物名写错回可回喂的错误而不是炸掉(project):
