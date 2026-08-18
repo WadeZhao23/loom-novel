@@ -83,9 +83,32 @@ def prepare_project(case_dir: Path, case: dict, workdir: Path) -> Path:
     return project
 
 
+def _agentic_outputs(project: Path, chapter_n: int) -> dict[str, str]:
+    """agent 模式的「五棒产物」:从轨迹按【产物】读,再翻成角色键。
+
+    agent 模式不写 ledger(没有「棒」这回事),它把每次成功提交记进 `正文/.轨迹/`。
+    产物名↔角色名的映射从 `artifacts.ARTIFACTS` 的 `persona` 派生,不手抄五个名字——
+    产物表改了,这里跟着改。
+
+    同一件产物可能提交多次(agent 会回头重来):取**最后一次**,那才是它最终交出去的。
+    """
+    from loom import artifacts, trail
+    by_name = {a.name: a.persona for a in artifacts.ARTIFACTS if a.persona}
+    out: dict[str, str] = {}
+    for c in trail.read_commits(project, chapter_n):
+        role = by_name.get(c.get("产物", ""))
+        if role:
+            out[role] = c.get("text", "")     # 后写覆盖前写 = 取最后一次
+    return out
+
+
 def collect_steps(project: Path, chapter_n: int, run_dir: Path,
-                  *, bypassed: frozenset[str] = frozenset()) -> dict[str, str | None]:
-    """把 ledger 里五棒的完整产出收进 run_dir/steps/,并落一份 steps.json 记状态。
+                  *, bypassed: frozenset[str] = frozenset(),
+                  agentic: bool = False) -> dict[str, str | None]:
+    """把五棒的完整产出收进 run_dir/steps/,并落一份 steps.json 记状态。
+
+    `agentic=True` 时从**轨迹按产物**读(见 `_agentic_outputs`),否则从 **ledger 按角色**读
+    ——agent 模式没有「棒」这回事,不写 ledger。
 
     run_pipeline 对 PIPELINE 里每个 role 都调了 ledger.record_step(role, output, …),
     output 就是该棒产物原文——机制本来就在,此前只是跑完没人收。
@@ -104,13 +127,19 @@ def collect_steps(project: Path, chapter_n: int, run_dir: Path,
     """
     steps_dir = run_dir / "steps"
     steps_dir.mkdir(parents=True, exist_ok=True)
-    led = load_ledger(project, chapter_n)
-    recorded = led.get("steps", {}) or {}
+    # 两条路产物落在两个地方:流水线写 ledger(角色键)、agent 模式写轨迹(产物键)。
+    # 按【显式的 agentic 参数】取,不靠「哪边非空」猜——同一章先跑流水线、又跑 agent
+    # 模式时两边都有数据,猜会悄悄取到旧的那份。
+    agentic_out = _agentic_outputs(project, chapter_n) if agentic else {}
+    recorded = {} if agentic else (load_ledger(project, chapter_n).get("steps", {}) or {})
     out: dict[str, str | None] = {}
     status: dict[str, str] = {}
     for role in PIPELINE:
-        entry = recorded.get(role)
-        text = (entry or {}).get("output") if isinstance(entry, dict) else None
+        if agentic:
+            text = agentic_out.get(role)
+        else:
+            entry = recorded.get(role)
+            text = (entry or {}).get("output") if isinstance(entry, dict) else None
         if text and role not in bypassed:
             (steps_dir / f"{role}.md").write_text(text, encoding="utf-8")
             out[role] = text
@@ -208,6 +237,7 @@ def write_manifest(run_dir: Path, case_dir: Path, case: dict, cfg, backend_mode:
                    "user_chars": r.user_chars, "output_chars": r.output_chars,
                    "max_chars": r.max_chars, "elapsed_s": r.elapsed_s}
                   for r in metered.records],
+        "engine": "agentic" if getattr(cfg, "agentic", False) else "pipeline",
         "n_calls": len(metered.records),
         "total_elapsed_s": total_s,
         "tokens": None,
@@ -223,7 +253,8 @@ def write_manifest(run_dir: Path, case_dir: Path, case: dict, cfg, backend_mode:
 
 def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
                  provider: str | None = None, model: str | None = None,
-                 runs_dir: Path | None = None, workdir: Path | None = None) -> Path:
+                 runs_dir: Path | None = None, workdir: Path | None = None,
+                 agentic: bool = False) -> Path:
     """跑一个 gen case:固定输入 → 真调五 Agent → 候选落 runs/<run_id>/ → 评分。返回 run 目录。
 
     backend 显式给了就用它(测试注入 ScriptedBackend,mode 记为 injected);
@@ -239,6 +270,9 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
         cfg.provider = provider
     if model:
         cfg.model = model
+    # 【实验·灰度】跑 agent 模式那条路。两条路的护栏一致,只是挂点不同(spec 2026-08-16 §4);
+    # 这个开关就是 A/B 比对的入口——没有它,新架构的生成质量根本量不了。
+    cfg.agentic = bool(agentic)
 
     if backend is not None:
         backend_mode = "injected(测试)"
@@ -270,7 +304,8 @@ def generate_one(case_dir: Path, *, backend=None, backend_mode: str = "demo",
     _path, final = run_pipeline(project, case["chapter_n"], metered, cfg, resume=False)
     total_s = round(time.perf_counter() - t0, 3)
 
-    steps = collect_steps(project, case["chapter_n"], run_dir, bypassed=bypassed)
+    steps = collect_steps(project, case["chapter_n"], run_dir, bypassed=bypassed,
+                          agentic=getattr(cfg, "agentic", False))
     step_report = grade_steps(steps, case)
     (run_dir / "step_report.json").write_text(
         json.dumps(step_report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -342,7 +377,7 @@ def _summary_md(case_id: str, agg: dict, batch_id: str) -> str:
 def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
               backend_factory=None, workdir_root: Path | None = None,
               backend_mode: str = "demo", provider: str | None = None,
-              model: str | None = None) -> Path:
+              model: str | None = None, agentic: bool = False) -> Path:
     """同一个 case 连跑 repeat 次,聚合成分布落 batch 目录。
 
     单次崩了记 infra 继续跑——不能因为第 3 次挂了就丢掉前 2 次。
@@ -371,7 +406,7 @@ def run_batch(case_dir: Path, *, repeat: int = 1, runs_dir: Path | None = None,
                 case_dir,
                 backend=backend_factory() if backend_factory else None,
                 backend_mode=backend_mode, provider=provider, model=model,
-                runs_dir=batch / "runs", workdir=wd)
+                runs_dir=batch / "runs", workdir=wd, agentic=agentic)
             reports.append(json.loads(
                 (run_dir / "step_report.json").read_text(encoding="utf-8")))
         except Exception as e:  # noqa: BLE001 — 单次崩=infra,记下继续,绝不中断整批
@@ -476,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="configured 模式覆写 model")
     ap.add_argument("--cases-dir", type=Path, default=GEN_CASES_DIR)
     ap.add_argument("--runs-dir", type=Path, default=RUNS_DIR)
+    ap.add_argument("--agentic", action="store_true",
+                    help="走 agent 模式那条路(五角色降级为人格、可回头重来);缺省走老流水线")
     ap.add_argument("--repeat", type=int, default=1,
                     help="同一 case 连跑 N 次取分布(对抗 temp=0.9 无 seed 的噪声;N≥2 才有分布)")
     ap.add_argument("--compare", nargs="+", metavar="BATCH",
@@ -550,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.repeat > 1:
             batch = run_batch(d, repeat=args.repeat, runs_dir=args.runs_dir,
                               backend_mode=args.backend, provider=args.provider,
-                              model=args.model)
+                              model=args.model, agentic=args.agentic)
             summ = json.loads((batch / "summary.json").read_text(encoding="utf-8"))
             any_valid = any_valid or summ["n_valid"] > 0
             weak = summ["weakest"] or "(无)"
@@ -558,7 +595,8 @@ def main(argv: list[str] | None = None) -> int:
                   f"{summ['n_total']} 次里 {summ['n_valid']} 次有效  最弱棒={weak}  → {batch}")
         else:
             run_dir = generate_one(d, backend_mode=args.backend, provider=args.provider,
-                                   model=args.model, runs_dir=args.runs_dir)
+                                   model=args.model, runs_dir=args.runs_dir,
+                                   agentic=args.agentic)
             report = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
             sr = json.loads((run_dir / "step_report.json").read_text(encoding="utf-8"))
             any_valid = True

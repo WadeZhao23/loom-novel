@@ -532,6 +532,11 @@ class DemoBackend:
             if "可用工具" in system:
                 return _demo_nav_partner_reply(user)
             return _DEMO["nav"]   # 访谈出题:格式必须合规能解析成卡(问: + 2-4 个候选)
+        # 写章 agent 循环(agent 模式):system 是 writeloop._SYSTEM + 工具契约,
+        # 既有的「按角色名分流」一条都不命中。用契约段独有的「用:提交」当判据,
+        # 与上面领航员那条用「可用工具」分流是同一套路子。
+        if "用:提交" in system:
+            return _demo_write_reply(user)
         for role, key in (("设定师", "anchor"), ("大纲师", "outline"),
                           ("写手", "draft"), ("编辑", "edit"), ("润色师", "final")):
             if role in head:
@@ -646,6 +651,33 @@ def _demo_nav_partner_reply(user: str) -> str:
     if turns_so_far == 2:
         return _DEMO["nav_partner_propose"]
     return _DEMO["nav_partner_wrap"]
+
+
+# 人格 → demo 罐头产物。**顺序与产物名都从 artifacts.ARTIFACTS 派生**(见 _demo_write_reply),
+# 这里只映射「哪个人格产哪份罐头」——产物改名不会让 demo 悄悄失灵。
+_DEMO_BY_PERSONA = {"设定师": "anchor", "大纲师": "outline",
+                    "写手": "draft", "编辑": "edit", "润色师": "final"}
+
+
+def _demo_write_reply(user: str) -> str:
+    """写章 agent 循环的 demo 罐头:按【已提交的产物】推进度,每轮交下一件。
+
+    **无状态**(同 `_demo_nav_partner_reply`):DemoBackend 每请求新建,活不过一轮,
+    所以进度只能从 `writeloop._assemble` 拼进 user 的那行「已提交的产物:…」现推,
+    不依赖任何进程内计数器。
+
+    产物顺序与名字从 `artifacts.ARTIFACTS` 取——产物表改了,demo 跟着改,不会悄悄失灵。
+    正文体走「参数行后空一行再写」的块形态(见 parse.parse_tool_blocks 的 body)。
+    """
+    from . import artifacts   # 函数级 import:artifacts → guard → backends,模块级会成环
+    done = next((l for l in user.splitlines() if l.startswith("已提交的产物:")), "")
+    for spec in artifacts.ARTIFACTS:
+        key = _DEMO_BY_PERSONA.get(spec.persona)
+        if key is None or spec.name in done:
+            continue
+        return (f"(demo)接着交{spec.name}。\n"
+                f"用:提交\n产物:{spec.name}\n\n{_DEMO[key]}")
+    return "(demo)本章已经交完了。"
 
 
 def list_models(provider: str, *, base_url: str = "", api_key: str = "") -> dict:
