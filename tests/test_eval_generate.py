@@ -587,3 +587,32 @@ def test_cli_repeat_flag_returns_2_when_all_infra(tmp_path, monkeypatch):
     case_path.write_text(json.dumps(case, ensure_ascii=False), encoding="utf-8")
     code = main(["--cases-dir", str(gc), "--runs-dir", str(tmp_path / "runs"), "--repeat", "2"])
     assert code == 2
+
+
+def test_agent模式端到端跑通并从轨迹收齐五棒(tmp_path, monkeypatch):
+    """P4:`--agentic` 那条路的整链冒烟(不证明生成质量,只证明【量得了】)。
+
+    钉三件事:
+    ① manifest 记下这一跑走的是哪条引擎——批次之间要分得清,否则 A/B 比的是什么都说不准;
+    ② 五棒产物真的收得到。agent 模式【不写 ledger】,这些产物只可能来自轨迹
+      (`正文/.轨迹/第N章.jsonl`)——收到了就等于产物级归因这条接线是通的;
+    ③ 老流水线那条路一个字没改坏(同一 case 跑两遍,两边都齐)。
+    """
+    monkeypatch.setenv("LOOM_DEMO", "1")
+    src = _write_gen_case(tmp_path)
+    gc = tmp_path / "gc"; gc.mkdir()
+    shutil.copytree(src, gc / "gen_test")
+
+    for agentic, want_engine in ((True, "agentic"), (False, "pipeline")):
+        runs = tmp_path / f"runs-{want_engine}"
+        argv = ["--cases-dir", str(gc), "--runs-dir", str(runs)]
+        if agentic:
+            argv.append("--agentic")
+        assert main(argv) == 0
+        run = next(iter(runs.iterdir()))
+        m = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+        assert m["engine"] == want_engine
+        status = json.loads((run / "steps.json").read_text(encoding="utf-8"))
+        assert status, "steps.json 是空的"
+        assert any(v == "collected" for v in status.values()), \
+            f"{want_engine} 一棒都没收到:{status}"
