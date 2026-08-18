@@ -1006,3 +1006,51 @@ input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-ino
 .tour-tip::before  { border: 1px solid var(--line); }
 .coach-pop.below::before, .tour-tip.below::before { top: -7px; border-right: 0; border-bottom: 0; }
 .coach-pop.above::before, .tour-tip.above::before { bottom: -7px; border-left: 0; border-top: 0; }
+
+/* ---------- 镜台(它有多懂你):手改量双曲线 + 指纹 + 人格增补 ----------
+   §6 朱＝你的痕迹:两条线正好对上产品两轴——【改写率】是 voice(写作指纹那一轴),
+   给朱;【增删率】是 what(外置大脑/人格增补那一轴),给淡墨。于是一屏只有一处红,
+   而且红落在语义上真正属于它的那条线上(自检三问:≤3 色系 ✓ / 红只一处 ✓ / 无国风贴图 ✓)。 */
+.mi-sec { margin-bottom: var(--space-5); }
+.mi-sec:last-child { margin-bottom: 0; }
+.mi-head { display: flex; align-items: baseline; gap: var(--space-2);
+  font-size: var(--fs-sm); color: var(--text-soft); margin-bottom: var(--space-2); }
+.mi-head .mi-sub { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-mute); }
+
+/* 英雄数字:最近一章的两个率。排版即界面——这两个数就是「它有多懂你」的答案 */
+.mi-hero { display: flex; gap: var(--space-5); align-items: flex-end; margin-bottom: var(--space-3); }
+.mi-stat { display: flex; flex-direction: column; gap: 2px; }
+.mi-val { font-family: var(--font-mono); font-size: var(--fs-display); line-height: 1.1; color: var(--text); }
+.mi-val.is-seal { color: var(--seal-ink); }
+.mi-key { font-size: var(--fs-caption); color: var(--text-mute); }
+
+/* 曲线:经纬隐喻落在「结构件」上(原则 8),不贴图 */
+.mi-chart { width: 100%; height: 132px; display: block; }
+.mi-grid { stroke: var(--line-soft); stroke-width: 1; }
+.mi-axis { stroke: var(--line); stroke-width: 1; }
+.mi-line { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.mi-line.is-seal { stroke: var(--seal); }
+.mi-line.is-ink  { stroke: var(--text-mute); stroke-dasharray: 3 3; }
+.mi-dot { r: 2.5; }
+.mi-dot.is-seal { fill: var(--seal); }
+.mi-dot.is-ink  { fill: var(--text-mute); }
+.mi-xlab { font-family: var(--font-mono); font-size: 10px; fill: var(--text-mute); }
+
+.mi-legend { display: flex; gap: var(--space-4); font-size: var(--fs-caption);
+  color: var(--text-mute); margin-top: var(--space-2); }
+.mi-swatch { display: inline-block; width: 14px; height: 0; vertical-align: middle;
+  margin-right: 6px; border-top: 1.5px solid var(--text-mute); }
+.mi-swatch.is-seal { border-top-color: var(--seal); }
+.mi-swatch.is-ink { border-top-style: dashed; }
+
+.mi-cover { font-family: var(--font-mono); font-size: var(--fs-caption);
+  color: var(--text-mute); margin-top: var(--space-2); }
+
+/* anchor 原句:朱批底,同 §6.4「新学进的用 seal-tint 底」 */
+.mi-anchor { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.75;
+  padding: 5px 10px; border-radius: var(--radius-xs); background: var(--seal-tint);
+  margin-bottom: 5px; }
+.mi-extra { font-size: var(--fs-sm); color: var(--text-soft); line-height: 1.8; }
+.mi-role { font-family: var(--font-mono); font-size: var(--fs-caption);
+  color: var(--text-mute); margin-top: var(--space-3); }
+.mi-role:first-child { margin-top: 0; }

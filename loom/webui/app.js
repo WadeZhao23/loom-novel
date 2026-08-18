@@ -204,6 +204,8 @@ function bind() {
   $("btn-doctor").onclick = runDoctor;
   $("doctor-close").onclick = () => $("doctor-overlay").classList.add("hidden");
   $("nav-threads").onclick = () => openStudio("timeline");   // 脉络单入口:弹层自带三 tab,侧栏不占三行
+  $("nav-mirror").onclick = openMirror;                      // 镜台:与脉络平级,脉络投影故事、它投影你
+  $("mirror-close").onclick = () => $("mirror-overlay").classList.add("hidden");
   $("studio-tab-timeline").onclick = () => renderStudio("timeline");
   $("studio-tab-foreshadow").onclick = () => renderStudio("foreshadow");
   $("studio-tab-names").onclick = () => renderStudio("names");
@@ -1473,11 +1475,19 @@ function findConfirmLanded(id) {
 
 // FB-B 模型A:这一格是否已被【同轮兄弟候选】落盘(同槽备选选了一个,其余变灰,不留点了必撞 stale 的死键)
 function slotTakenBySibling(ev) {
+  // 【只适用于替换型落点】外置大脑的一格(如 立项卡#题材)同时只能有一个答案,所以
+  // 兄弟卡落过库之后,这一格的其余候选就该灰掉。
+  //
+  // 「人格增补」不是这种落点:`evolve.confirm` 是把学到的改法【追加】进 agents/<角色>.md
+  // 的个人增补区,本来就允许落多次(学到第二条、第三条改法很正常)。套用替换型的
+  // 「一格只能选一个」语义,会让同一角色的第二张候选卡连按钮都不给——作者再也学不进
+  // 第二条改法。所以这类卡直接不参与互斥。
+  if (ev && ev.kind === "人格增补") return false;
   const events = (PARTNER && PARTNER.events) || [];
   for (const e of events) {
     if (e && e.t === "confirm" && e.id !== ev.id) {
       const prop = events.find((x) => x && x.t === "proposal" && x.id === e.id);
-      if (prop && prop.slot === ev.slot) return true;
+      if (prop && prop.kind !== "人格增补" && prop.slot === ev.slot) return true;
     }
   }
   return false;
@@ -2793,6 +2803,96 @@ function moveCmdSel(d) {
 
 // ---------- 脉络:时间轴 / 伏笔账本 / 专名册(只读投影) ----------
 let _studio = null;
+// ---------- 镜台:它有多懂你 ----------
+// 只读投影,数据一次到位(GET /api/mirror 给全屏四块)。曲线手画 SVG——
+// 本地优先、零外部依赖,不引任何图表库(index.html 里除 iconfont 外没有第三方 script)。
+let _mirror = null;
+
+async function openMirror() {
+  $("mirror-body").innerHTML = `<div class="hint">读取中…</div>`;
+  $("mirror-overlay").classList.remove("hidden");
+  try {
+    _mirror = await jreq("GET", `/api/mirror?root=${encodeURIComponent(DATA.root)}`);
+  } catch (e) { $("mirror-body").innerHTML = `<div class="error">${escHtml(e.message)}</div>`; return; }
+  renderMirror();
+}
+
+// 双线折线图。x=章号(按顺序等距,不按章号数值——跳章不该在图上留空洞),y=比率。
+// 上界取两条线的最大值,地板 0.2:全程低手改时别把一条贴地的线放大成剧烈起伏。
+function mirrorChart(rows) {
+  const W = 496, H = 132, PL = 8, PR = 8, PT = 12, PB = 20;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const top = Math.max(0.2, ...rows.map((r) => Math.max(r.改写率, r.增删率)));
+  const x = (i) => PL + (rows.length === 1 ? iw / 2 : (iw * i) / (rows.length - 1));
+  const y = (v) => PT + ih - (ih * Math.min(v, top)) / top;
+  const path = (key) => rows.map((r, i) => `${x(i)},${y(r[key])}`).join(" ");
+  const dots = (key, cls) => rows.map((r, i) =>
+    `<circle class="mi-dot ${cls}" cx="${x(i)}" cy="${y(r[key])}"/>`).join("");
+  const line = (key, cls) => `<polyline class="mi-line ${cls}" points="${path(key)}"/>`;
+  const firstLab = `第${rows[0].章}章`, lastLab = `第${rows[rows.length - 1].章}章`;
+  return `<svg class="mi-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <line class="mi-grid" x1="${PL}" y1="${PT}" x2="${W - PR}" y2="${PT}"/>
+    <line class="mi-axis" x1="${PL}" y1="${PT + ih}" x2="${W - PR}" y2="${PT + ih}"/>
+    ${line("增删率", "is-ink")}${line("改写率", "is-seal")}
+    ${dots("增删率", "is-ink")}${dots("改写率", "is-seal")}
+    <text class="mi-xlab" x="${PL}" y="${H - 6}">${firstLab}</text>
+    ${rows.length > 1 ? `<text class="mi-xlab" x="${W - PR}" y="${H - 6}" text-anchor="end">${lastLab}</text>` : ""}
+  </svg>`;
+}
+
+function renderMirror() {
+  const box = $("mirror-body"); box.innerHTML = "";
+  if (!_mirror) return;
+  const rows = _mirror.曲线 || [], cov = _mirror.覆盖 || {}, fp = _mirror.指纹 || {}, ps = _mirror.人格 || [];
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const parts = [];
+
+  // —— 曲线(主) ——
+  if (!rows.length) {
+    // 空态顺手把核心循环教一遍:写 → 手改 → learn → 这条线开始长
+    parts.push(`<div class="hint">写一章、按你的意思改、再点「学这章的手改」——这条线就开始长了。<br/>` +
+      `它记的是<b>你还要改多少</b>:改得越少,说明它越懂你。</div>`);
+  } else {
+    const last = rows[rows.length - 1];
+    parts.push(`<div class="mi-sec">
+      <div class="mi-hero">
+        <div class="mi-stat"><span class="mi-val is-seal">${pct(last.改写率)}</span>
+          <span class="mi-key">改写 · 像不像你</span></div>
+        <div class="mi-stat"><span class="mi-val">${pct(last.增删率)}</span>
+          <span class="mi-key">增删 · 懂不懂你要什么</span></div>
+      </div>
+      ${rows.length > 1 ? mirrorChart(rows) + `<div class="mi-legend">
+        <span><i class="mi-swatch is-seal"></i>改写率(它像不像你)</span>
+        <span><i class="mi-swatch is-ink"></i>增删率(它懂不懂你要什么)</span>
+      </div>` : `<div class="hint">这是第 ${last.章} 章的数。再学一章,这里就长出走势线——` +
+        `你要看的不是某一章多少,是它有没有在往下走。</div>`}
+      <div class="mi-cover">这条线画了 ${cov.已学 ?? 0} 章 · 全书 ${cov.总章 ?? 0} 章` +
+        `${(cov.总章 ?? 0) > (cov.已学 ?? 0) ? "(其余还没点过「学这章的手改」)" : ""}</div>
+    </div>`);
+  }
+
+  // —— 写作指纹 ——
+  const srcName = { default: "中性默认(还没懂你)", sample: "你的样本",
+    inherit: "继承自另一本书", reference: "别人的范文(起点)" }[fp.来源] || fp.来源 || "";
+  parts.push(`<div class="mi-sec">
+    <div class="mi-head">写作指纹 <span class="mi-sub">${escHtml(srcName)} · ${fp.规则数 ?? 0} 条规则</span></div>
+    ${(fp.anchor || []).length
+      ? (fp.anchor || []).map((a) => `<div class="mi-anchor">${escHtml(a)}</div>`).join("")
+      : `<div class="hint">还没有 anchor 例句。它们是你亲手写下、被指纹逐字记住的句子。</div>`}
+  </div>`);
+
+  // —— 人格增补 ——
+  parts.push(`<div class="mi-sec">
+    <div class="mi-head">它跟你学到的写法 <span class="mi-sub">${ps.length ? ps.length + " 个人格" : ""}</span></div>
+    ${ps.length
+      ? ps.map((r) => `<div class="mi-role">${escHtml(r.角色)} · ${r.增补条数} 条</div>` +
+          `<div class="mi-extra">${(r.增补 || []).map((l) => escHtml(l)).join("<br/>")}</div>`).join("")
+      : `<div class="hint">还没有。等你反复用同一种改法改细纲,领航员会问你要不要把它记下来。</div>`}
+  </div>`);
+
+  box.innerHTML = parts.join("");
+}
+
 async function openStudio(tab) {
   $("studio-body").innerHTML = `<div class="hint">读取中…</div>`;
   $("studio-overlay").classList.remove("hidden");
