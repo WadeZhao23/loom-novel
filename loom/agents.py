@@ -696,6 +696,24 @@ def _build_user_prompt(chapter_n: int, role: str, agent: Agent, knowledge: str,
     return "\n\n".join(parts)
 
 
+def _record_outline_trail(project_root: Path, chapter_n: int, produces: str, text: str,
+                          system_prompt: str, workspace: list, prev: str, cfg_bits: dict) -> None:
+    """把大纲师刚产出的细纲记进轨迹(供 evolve 拿它当「AI 交的那份」)。
+
+    签名口径与 `write_tools.artifact_sig` 一致(都走 `resume.sig_v2`),两条路记出来的
+    轨迹形状相同——`evolve.collect` 不必关心这一章是哪条路写的。
+
+    任何异常都吞掉:轨迹是学习用的便利,绝不该让一章写不出来(同 `trail.record_commit` 自身的纪律)。
+    """
+    try:
+        from . import resume as resume_mod, trail
+        _a, items = _knowledge_items(project_root, chapter_n, "大纲师")
+        sig = resume_mod.sig_v2(system_prompt, items, list(workspace), prev, cfg_bits)
+        trail.record_commit(project_root, chapter_n, produces, text, sig)
+    except Exception:
+        pass
+
+
 def run_pipeline(
     project_root: Path,
     chapter_n: int,
@@ -799,6 +817,14 @@ def run_pipeline(
             if outline_path:  # 大纲师首次生成 → 落一份可看可改的细纲,之后就读这份
                 atomic_write_text(outline_path, output.strip() + "\n")
                 _check_scene_budget(project_root, chapter_n, output, config.chapter_chars, False, progress)
+                # 同时记一笔轨迹:这才是【AI 交出去的那份】。作者之后改了盘上那份,
+                # 两者的差异就是自进化的证据(evolve.collect)。
+                # 【只记这一支】——上面 WYSIWYG 那支沿用的是作者自己的细纲,记了会把判据
+                # 弄反:拿他自己的稿当「AI 交的」,他后续的改动会被误算成「相对 AI 稿的改动」。
+                # 不记这一笔的后果实测过:默认(流水线)模式下轨迹恒空 → 永远攒不出证据 →
+                # 「学改法」对绝大多数用户是惰性的(agent 模式默认关)。
+                _record_outline_trail(project_root, chapter_n, agent.produces, output.strip(),
+                                      agent.system_prompt, workspace, prev, _cfg_bits)
         if spec.edit_sentinel:
             output, note = _split_edit_note(output)  # 留痕切出,只把干净正文交给下游润色师
             if note:
