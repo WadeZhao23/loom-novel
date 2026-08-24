@@ -153,26 +153,38 @@ class ArtifactSpec:
 
 
 _OUTLINE = "本章场景骨头(分镜细纲)"
+_ANCHOR = "本章设定锚点"
+_DRAFT = "本章初稿"
+_REVISED = "本章改稿"
 
 # 顺序 = 建议的产出顺序(agent 可以不照办、可以回头重来;这里只是建议,不是拓扑约束)。
 ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec("本章设定锚点", "设定师"),
     ArtifactSpec("本章场景骨头(分镜细纲)", "大纲师", contract_fn=_outline_contract,
                  outline_file=True),
-    # 三件正文稿都要求细纲在先。**细纲就是篇幅闸**——`_outline_contract` 的「拆 N 场 +
+    # 三件正文稿都要求【设定锚点 + 细纲】在先。
+    # 锚点:真机 A/B 2026-08-19 抓到 agent 会跳过它直接开写(预置细纲的 case 4/4 全跳、
+    # 无细纲的也有 1/4 跳)——设定师那个人格于是形同虚设。锚点是「压缩后的选择:这一章用
+    # 哪几条设定」,编辑的 12 项自检有四项靠它;缺了它不会立刻表现为可见故障,所以第一版
+    # 漏了前置——正因为它「不报错地坏掉」,才更该由结构闸兜住。
+    # 细纲:**就是篇幅闸**——`_outline_contract` 的「拆 N 场 +
     # 每场约X字 + 总和≈目标」只有在细纲真被产出时才存在。真机 2026-08-16:agent 跳过细纲
     # 直接写,终稿 +35%。这不是把工序顺序焊回来(照样能回头重来:重提细纲 → 重提正文),
     # 是给结构闸补上它的前置条件。
     ArtifactSpec("本章初稿", "写手", chapter_profile, contract_fn=_draft_contract,
-                 requires=(_OUTLINE,)),
+                 requires=(_ANCHOR, _OUTLINE)),
     # 质检挂改稿:今天挂在编辑棒后,语义原样平移。伏笔悬空也在这儿——它读卡章纲,
     # 放到终稿的回炉链上只会空转(质检回炉改的是正文,清不掉卡章纲里的悬空伏笔)。
     ArtifactSpec("本章改稿", "编辑", chapter_profile, gate="质检", foreshadow_after=True,
-                 contract_fn=_revise_contract, requires=(_OUTLINE,)),
+                 contract_fn=_revise_contract, requires=(_ANCHOR, _OUTLINE, _DRAFT)),
     # 去AI味挂终稿,且【只有】它带确定性预筛:预筛抓的是机器腔,与质检抓的硬伤不是一回事,
     # 铺到质检上等于把两套口径混成一套。
+    # 终稿要求改稿在先。真机 2026-08-21:补完锚点前置那一跑,agent 有两次直接从锚点跳到终稿
+    # (7 次调用交稿)——而**质检关卡挂在改稿上**,跳过改稿 = 人物OOC/设定漂移/断钩子/无爽点/
+    # 信息边界/物品与时间连续性七项一次没查。这是「护栏挂在某件产物上、却没人要求它存在」
+    # 这个病根的第三次(前两次:细纲=篇幅闸、锚点=设定选择)。
     ArtifactSpec("本章终稿", "润色师", chapter_profile, gate="去AI味", deslop=True, is_final=True,
-                 contract_fn=_revise_contract, requires=(_OUTLINE,)),
+                 contract_fn=_revise_contract, requires=(_ANCHOR, _OUTLINE, _REVISED)),
     # 审稿留痕:今天是编辑棒输出里用哨兵分隔的尾巴,靠 _edit_stream_filter 切串才不漏到屏幕上。
     # 提成独立产物后,「切漏一次就漏一次」这个风险面直接不存在。into_workspace=False 是它与
     # 稿子链的隔离闸——下游看不到它,于是它进不了终稿/快照/learn 的 diff 源。

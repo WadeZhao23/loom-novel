@@ -18,11 +18,16 @@ from loom.parse import parse_tool_blocks
 _稿 = "他没说话。火把的光爬上矿壁,血顺着指缝往下滴。" * 6
 
 
-def _sess(project, backend=None, *, outline=True, **cfg_over):
+def _sess(project, backend=None, *, outline=True, anchor=None, **cfg_over):
     if outline:
         _seed_outline(project)
     cfg = dataclasses.replace(load_config(project), **cfg_over)
-    return write_tools.Session(root=project, chapter_n=1, config=cfg, backend=backend)
+    sess = write_tools.Session(root=project, chapter_n=1, config=cfg, backend=backend)
+    if anchor is None:
+        anchor = outline          # 缺省跟随:铺了细纲就把锚点也交上(正文稿两个前置都要)
+    if anchor:
+        _seed_anchor(sess)
+    return sess
 
 
 def _submit(产物: str, 内容: str) -> str:
@@ -62,7 +67,7 @@ def test_对白行不被params扫描吞掉_正文首行不丢(project):
     首行 = "林三：「你来晚了。」"
     # 故意不留空行分隔——真机复现的形状(模型少打一个空行)
     reply = f"用:提交\n产物:本章终稿\n{首行}\n{_稿}"
-    be = ScriptedBackend([reply])
+    be = ScriptedBackend([_submit("本章初稿", _稿), _submit("本章改稿", _稿), reply])
     sess = _sess(project, be, gate_rounds=0)
     text = writeloop.run_chapter(sess)
     assert 首行 in text
@@ -74,18 +79,20 @@ def test_循环跑到终稿提交即收工(project):
     from conftest import ScriptedBackend
     be = ScriptedBackend([
         "先看看这本书的硬设定。\n用:查硬设定",
+        _submit("本章初稿", _稿), _submit("本章改稿", _稿),
         "写好了。\n" + _submit("本章终稿", _稿),
     ])
     sess = _sess(project, be, gate_rounds=0)
     assert writeloop.run_chapter(sess) == _稿
-    assert len(be.calls) == 2, "拿到终稿就该停,不该再多问一轮"
+    assert len(be.calls) == 4, "拿到终稿就该停,不该再多问一轮(4=查硬设定+初稿+改稿+终稿)"
 
 
 def test_协议行绝不漏到作者屏幕(project):
     """spec §5.2 critical(伙伴通道那条纪律原样适用):流式转发时,「用:」开头的协议行
     及其参数行一律不许出现在作者看到的字里。"""
     from conftest import ScriptedBackend
-    be = ScriptedBackend(["马上写。\n" + _submit("本章终稿", _稿)], stream=True)
+    be = ScriptedBackend([_submit("本章初稿", _稿), _submit("本章改稿", _稿),
+                          "马上写。\n" + _submit("本章终稿", _稿)], stream=True)
     seen: list[str] = []
     sess = _sess(project, be, gate_rounds=0)
     sess.progress = lambda e: seen.append(e.get("delta", "")) if e.get("type") == "agent_chunk" else None
@@ -99,12 +106,13 @@ def test_提交被打回后把原因回喂给模型(project):
     """§4 第一行的另一半:非空闸不再中断整章,而是把原因回喂——模型要真的看得到它。"""
     from conftest import ScriptedBackend
     be = ScriptedBackend([
+        _submit("本章初稿", _稿), _submit("本章改稿", _稿),
         _submit("本章终稿", ""),          # 空稿,必被打回
         _submit("本章终稿", _稿),          # 改好重交
     ])
     sess = _sess(project, be, gate_rounds=0)
     assert writeloop.run_chapter(sess) == _稿
-    assert "返回空" in be.calls[1][1], "第二轮的 prompt 里要带上被打回的原因"
+    assert "返回空" in be.calls[3][1], "被打回后那一轮的 prompt 里要带上原因"
 
 
 def test_顺跑一章的调用账_与五个头像都点亮(project):
@@ -145,7 +153,9 @@ def test_只读工具的结果完整回喂_不许截断(project):
     """
     from conftest import ScriptedBackend
     from loom.agents import load_agent
-    be = ScriptedBackend(["先取人格。\n用:取人格\n角色:写手", _submit("本章终稿", _稿)])
+    be = ScriptedBackend(["先取人格。\n用:取人格\n角色:写手",
+                          _submit("本章初稿", _稿), _submit("本章改稿", _稿),
+                          _submit("本章终稿", _稿)])
     sess = _sess(project, be, gate_rounds=0)
     writeloop.run_chapter(sess)
     next_prompt = be.calls[1][1]
@@ -170,3 +180,20 @@ def _seed_outline(project, n: int = 1) -> None:
     p = paths.outline_path(project, n)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("一(约600字):验伤。二(约600字):遇敌。", encoding="utf-8")
+
+
+def _seed_anchor(sess) -> None:
+    """把设定锚点交上。正文稿的提交前置要求【锚点 + 细纲】都在——除非这条测试测的正是那个条件。"""
+    from loom import write_tools as _wt
+    _wt.run_tool(sess, "提交", {"产物": "本章设定锚点", "内容": "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"})
+
+def _seed_chain(sess, upto: str) -> None:
+    """把正文链铺到 `upto` 的【上一档】为止。三件正文稿是链式前置(初稿→改稿→终稿),
+    因为质检关卡挂在改稿上——跳过改稿等于整道质检免掉(真机 2026-08-21 实测到)。
+    夹具铺这条链是为了让别的测试能直接测它自己那一件,不必每条都手写三次提交。"""
+    from loom import write_tools as _wt
+    _稿 = "他没说话。火把的光爬上矿壁,血顺着指缝往下滴。" * 6
+    for name in ("本章初稿", "本章改稿"):
+        if name == upto:
+            return
+        _wt.run_tool(sess, "提交", {"产物": name, "内容": _稿})

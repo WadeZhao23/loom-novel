@@ -13,11 +13,16 @@ from loom.config import load_config
 _稿 = "他没说话。火把的光爬上矿壁,血顺着指缝往下滴。" * 6   # 过 chapter_profile 的实字门槛
 
 
-def _sess(project, backend=None, *, outline=True, **cfg_over):
+def _sess(project, backend=None, *, outline=True, anchor=None, **cfg_over):
     if outline:
         _seed_outline(project)
     cfg = dataclasses.replace(load_config(project), **cfg_over)
-    return write_tools.Session(root=project, chapter_n=1, config=cfg, backend=backend)
+    sess = write_tools.Session(root=project, chapter_n=1, config=cfg, backend=backend)
+    if anchor is None:
+        anchor = outline          # 缺省跟随:铺了细纲就把锚点也交上(正文稿两个前置都要)
+    if anchor:
+        _seed_anchor(sess)
+    return sess
 
 
 class _RecordingBackend:
@@ -37,6 +42,7 @@ def test_提交改稿跑质检关卡(project):
     但复审员必须真的被调到,否则等于关卡静默消失。"""
     be = _RecordingBackend()
     sess = _sess(project, be)
+    _seed_chain(sess, "本章改稿")
     write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": _稿})
     assert any("独立质检员" in s for s in be.systems)
 
@@ -44,6 +50,7 @@ def test_提交改稿跑质检关卡(project):
 def test_提交终稿跑去AI味关卡(project):
     be = _RecordingBackend()
     sess = _sess(project, be)
+    _seed_chain(sess, "本章终稿")
     write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": _稿})
     assert any("独立审读" in s for s in be.systems)
 
@@ -61,6 +68,7 @@ def test_轮数为0时关卡整个关掉(project):
     """ADR-0006:`[gate]轮数=0` = 关。作者关了就一次复审都不该发。"""
     be = _RecordingBackend()
     sess = _sess(project, be, gate_rounds=0)
+    _seed_chain(sess, "本章终稿")
     write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": _稿})
     assert be.systems == []
 
@@ -72,6 +80,8 @@ def test_关卡回炉后进工作区的是回炉稿(project):
     # 复审挑出一条硬伤 → 触发回炉;回炉这一次 complete 返回的就是新稿
     be.reply = "- 人物OOC | 主角性格不符 | 证据:\"他笑了\""
     sess = _sess(project, be, gate_rounds=2)
+    _seed_chain(sess, "本章改稿")
+    be.systems.clear()
     write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": _稿})
     assert sess.workspace, "改稿该进工作区"
     assert sess.workspace[-1][1] != _稿, "进工作区的应是回炉后的稿,不是原稿"
@@ -82,6 +92,7 @@ def test_关卡跑满仍残留的硬伤追加进审稿留痕(project):
     绝不拦着不让出稿。"""
     be = _RecordingBackend("- 人物OOC | 主角性格不符 | 证据:\"他笑了\"")
     sess = _sess(project, be)
+    _seed_chain(sess, "本章改稿")
     write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": _稿})
     note = paths.review_note_path(project, 1)
     assert note.is_file() and "人物OOC" in note.read_text(encoding="utf-8")
@@ -101,6 +112,7 @@ def test_提交细纲没标每场字数会发提醒(project):
 def test_提交终稿超长进留痕提醒(project):
     """字数五螺丝③:终稿超目标 1.25 倍 → 留痕提醒可能注水。ADR-0006:纯提示、绝不拦稿。"""
     sess = _sess(project, gate_rounds=0)
+    _seed_chain(sess, "本章终稿")
     write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": "他没说话。" * 400})
     assert "篇幅提醒" in paths.review_note_path(project, 1).read_text(encoding="utf-8")
     assert sess.workspace, "超长只留痕,稿照样进工作区"
@@ -121,8 +133,62 @@ def test_没有细纲就不许提交正文稿(project):
     assert sess.workspace == []
 
 
+def test_没有设定锚点也不许提交正文稿(project):
+    """真机 A/B 2026-08-19 抓到的:agent 会跳过设定锚点直接开写。
+    gen_01(预置细纲)**4/4 全跳**、gen_02(无细纲)也有 1/4 跳——设定师这个人格在
+    预置细纲的书上形同虚设。
+
+    根因:初稿的 requires 此前只有细纲,而细纲由盘上文件满足时,没有任何东西要求先立锚点。
+    锚点是「**压缩后的选择**——这一章用哪几条设定」,编辑的 12 项自检里有四项靠它;
+    缺了它不会立刻表现为可见故障,所以第一版没进前置——这正是它值得补的理由。
+    """
+    sess = _sess(project, anchor=False)   # 细纲有、锚点没有
+    ev = write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": _稿})
+    assert ev.get("error") and "锚点" in ev["error"]
+    assert sess.workspace == []
+
+
+def test_锚点与细纲齐了才放行(project):
+    sess = _sess(project)          # 细纲已由夹具铺好
+    write_tools.run_tool(sess, "提交", {"产物": "本章设定锚点",
+                                       "内容": "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"})
+    assert write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": _稿})["t"] == "committed"
+
+
+def test_没有改稿就不许提交终稿_否则质检整道免掉(project):
+    """真机 2026-08-21(补锚点前置后那一跑):agent 有两次直接从锚点跳到终稿,
+    7 次调用就交稿——而**质检关卡挂在改稿上**,跳过改稿 = 人物OOC/设定漂移/断钩子/
+    无爽点/信息边界/物品与时间连续性,七项一次都没查。
+
+    这是同一族病根的第三次:护栏挂在某件产物上,却没有任何东西要求那件产物必须存在
+    (前两次是细纲=篇幅闸、锚点=设定选择)。修法一致——把「必须存在」写进前置。
+
+    这不违背「顺序是建议不是拓扑」:agent 照样能回头重来(重提初稿→重提改稿→重提终稿),
+    只是每一档至少得发生过一次。**活下来的自由是「可回头」,不是「可跳过」**——
+    我们观察到的每一次跳过,丢的都是一道护栏。
+    """
+    sess = _sess(project)
+    write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": _稿})
+    ev = write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": _稿})
+    assert ev.get("error") and "改稿" in ev["error"]
+
+
+def test_没有初稿就不许提交改稿(project):
+    sess = _sess(project)
+    ev = write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": _稿})
+    assert ev.get("error") and "初稿" in ev["error"]
+
+
+def test_整条正文链齐了才放终稿(project):
+    sess = _sess(project, gate_rounds=0)
+    for name in ("本章初稿", "本章改稿", "本章终稿"):
+        ev = write_tools.run_tool(sess, "提交", {"产物": name, "内容": _稿})
+        assert ev.get("t") == "committed", f"{name} 被拦:{ev.get('error')}"
+
+
 def test_有细纲之后正文稿放行(project):
     sess = _sess(project, outline=False)
+    _seed_anchor(sess)
     write_tools.run_tool(sess, "提交", {"产物": "本章场景骨头(分镜细纲)",
                                        "内容": "一(约600字):验伤。二(约600字):遇敌。"})
     ev = write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": _稿})
@@ -134,6 +200,8 @@ def test_作者手写的细纲文件也算数(project):
     paths.outline_path(project, 1).parent.mkdir(parents=True, exist_ok=True)
     paths.outline_path(project, 1).write_text("一(约1200字):作者手写。", encoding="utf-8")
     sess = _sess(project, outline=False)
+    _seed_anchor(sess)
+    _seed_chain(sess, "本章终稿")
     assert write_tools.run_tool(sess, "提交", {"产物": "本章终稿", "内容": _稿}).get("t") == "committed"
 
 
@@ -187,3 +255,20 @@ def _seed_outline(project, n: int = 1) -> None:
     p = paths.outline_path(project, n)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("一(约600字):验伤。二(约600字):遇敌。", encoding="utf-8")
+
+
+def _seed_anchor(sess) -> None:
+    """把设定锚点交上。正文稿的提交前置要求【锚点 + 细纲】都在——除非这条测试测的正是那个条件。"""
+    from loom import write_tools as _wt
+    _wt.run_tool(sess, "提交", {"产物": "本章设定锚点", "内容": "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"})
+
+def _seed_chain(sess, upto: str) -> None:
+    """把正文链铺到 `upto` 的【上一档】为止。三件正文稿是链式前置(初稿→改稿→终稿),
+    因为质检关卡挂在改稿上——跳过改稿等于整道质检免掉(真机 2026-08-21 实测到)。
+    夹具铺这条链是为了让别的测试能直接测它自己那一件,不必每条都手写三次提交。"""
+    from loom import write_tools as _wt
+    _稿 = "他没说话。火把的光爬上矿壁,血顺着指缝往下滴。" * 6
+    for name in ("本章初稿", "本章改稿"):
+        if name == upto:
+            return
+        _wt.run_tool(sess, "提交", {"产物": name, "内容": _稿})

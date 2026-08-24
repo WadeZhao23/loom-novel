@@ -10,12 +10,15 @@ from loom import paths, write_tools
 from loom.config import load_config
 
 
-def _sess(project, chapter_n: int = 1, *, outline=True):
+def _sess(project, chapter_n: int = 1, *, outline=True, anchor=False):
     if outline:   # 正文稿的提交前置条件要求细纲在先(篇幅结构闸)
         p = paths.outline_path(project, chapter_n)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("一(约600字):验伤。二(约600字):遇敌。", encoding="utf-8")
-    return write_tools.Session(root=project, chapter_n=chapter_n, config=load_config(project))
+    sess = write_tools.Session(root=project, chapter_n=chapter_n, config=load_config(project))
+    if anchor:    # 正文稿的前置还要求设定锚点在先(只给真交正文稿的用例)
+        write_tools.run_tool(sess, "提交", {"产物": "本章设定锚点", "内容": "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"})
+    return sess
 
 
 def test_契约段列出注册表里的每一个工具():
@@ -277,7 +280,7 @@ def test_看工作区不下传被改稿取代的旧全文稿(project):
     """
     import dataclasses
     cfg = dataclasses.replace(load_config(project), chapter_chars=100)   # 压低门槛,免得测试要写 240 字
-    _sess(project)   # 铺细纲:正文稿的提交前置条件
+    _sess(project, anchor=True)   # 铺细纲 + 锚点:正文稿的两个提交前置
     sess = write_tools.Session(root=project, chapter_n=1, config=cfg)
     write_tools.run_tool(sess, "提交", {"产物": "本章设定锚点", "内容": "锚点:主角觉醒逆息体质,濒死才能爆发。"})
     write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": "初稿甲" * 20})
@@ -326,6 +329,11 @@ def test_伏笔悬空提醒不被终稿提交的截断纪律抹掉(project):
     p = paths.outline_path(project, 3)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("一(约600字):验伤。二(约600字):遇敌。", encoding="utf-8")
+    # 改稿/终稿的两个提交前置:细纲(上面那份)+ 设定锚点
+    write_tools.run_tool(sess, "提交", {"产物": "本章设定锚点",
+                                       "内容": "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"})
+    # 改稿的前置还要求初稿(质检挂改稿上,跳过初稿→改稿这一链等于免掉整道质检)
+    write_tools.run_tool(sess, "提交", {"产物": "本章初稿", "内容": "初稿正文，写满对白与动作。" * 15})
 
     write_tools.run_tool(sess, "提交", {"产物": "本章改稿", "内容": "改稿正文，写满对白与动作。" * 15})
     note_path = paths.review_note_path(project, 3)

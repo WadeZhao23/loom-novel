@@ -37,6 +37,7 @@ def test_agent模式跑完一章_收尾动作与老流水线一致(project):
         "先取设定师。\n用:取人格\n角色:设定师",
         _submit("本章设定锚点", "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"),
         _submit("本章场景骨头(分镜细纲)", "一(约400字):验伤。二(约400字):遇敌。"),
+        _submit("本章初稿", _稿), _submit("本章改稿", _稿),
         _submit("本章终稿", _稿),
         "废矿里的火光",          # 自动起标题(附赠动作,与老流水线同一个调用点)
     ])
@@ -57,7 +58,9 @@ def test_agent模式在默认gate轮数下跑通(project):
     """
     from conftest import ScriptedBackend
     be = ScriptedBackend([
+        _submit("本章设定锚点", "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"),
         _submit("本章场景骨头(分镜细纲)", "一(约600字):验伤。二(约600字):遇敌。"),
+        _submit("本章初稿", _稿),
         _submit("本章改稿", _稿),
         "通过",                    # 质检复审(挂在提交改稿上)
         _submit("本章终稿", _稿),
@@ -74,7 +77,9 @@ def test_agent模式也发chapter_done事件(project):
     """前端靠它收尾渲染。agent 化只换了中间怎么跑,对外的完成信号一模一样。"""
     from conftest import ScriptedBackend
     be = ScriptedBackend([
+        _submit("本章设定锚点", "灵气复苏第三年,主角觉醒逆息体质,濒死才能爆发。"),
         _submit("本章场景骨头(分镜细纲)", "一(约600字):验伤。二(约600字):遇敌。"),
+        _submit("本章初稿", _稿), _submit("本章改稿", _稿),
         _submit("本章终稿", _稿), "废矿里的火光"])
     cfg = dataclasses.replace(load_config(project), agentic=True, gate_rounds=0,
                               continuity_scan=False)
