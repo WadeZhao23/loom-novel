@@ -1495,9 +1495,17 @@ function slotTakenBySibling(ev) {
 
 // 还有没有【可点】的候选卡(自己没确认、且这一格没被兄弟占)——落盘后自动接一轮的门(FB-B #3):
 // 同槽挑一个 → 其余变灰、无 pending → 前进;异槽逐个决 → 还有卡没决就不前进,等决完。
+// 只看【当前轮】——最后一条 user 之后的提案。用户实报 2026-08-23:历史轮里被作者手动打字
+// 越过、从没决过的旧提案会永远留在 events 里,这道门于是恒为 true,「落盘后自动接一轮」
+// 从此一次都不再触发,领航员卡住不往下引。
 function hasActionableProposal() {
   const events = (PARTNER && PARTNER.events) || [];
-  return events.some((ev) => ev && ev.t === "proposal"
+  let lastUser = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i] && events[i].t === "user") { lastUser = i; break; }
+  }
+  const round = lastUser >= 0 ? events.slice(lastUser + 1) : events;
+  return round.some((ev) => ev && ev.t === "proposal"
     && !findConfirmLanded(ev.id) && !slotTakenBySibling(ev));
 }
 
@@ -1531,7 +1539,14 @@ async function partnerConfirm(id, btnEl) {
     // bug4下一步:落盘后自动接一轮,领航员按固定顺序引下一格(空 text→后端见末事件=confirm 放行,
     // 不落假 user 气泡)。不 await:确认路径立即返回,引导轮自行流式上屏。
     // FB-B #3:仅当没有还能点的候选卡时才前进——同槽挑完(兄弟变灰)就走,异槽还有卡没决就等决完。
-    if (!_partnerBusy && !hasActionableProposal()) partnerSay("");
+    // 同一实报的另一半:上一轮的流刚收尾时 _partnerBusy 可能还没落回 false,这一下就被吞了。
+    // 试一次,不成再退让两拍——只是等状态 settle,拿不到就安静放弃(作者照样能手打)。
+    const tryAdvance = () => {
+      if (_partnerBusy || hasActionableProposal()) return false;
+      partnerSay("");
+      return true;
+    };
+    if (!tryAdvance()) setTimeout(() => { if (!tryAdvance()) setTimeout(tryAdvance, 300); }, 150);
   } catch (e) {
     if (!DATA || DATA.root !== root) return;
     toast(e.message, true);

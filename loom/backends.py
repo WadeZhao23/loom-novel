@@ -323,6 +323,41 @@ class OpenAICompatBackend:
     def _empty(self) -> LoomBackendError:
         return LoomBackendError(render(self._empty_code, detail=f"model={self.model}"), code=self._empty_code)
 
+    def _call_once(self, messages: list[dict], max_tokens: int) -> tuple[str, str, str]:
+        """一次非流式调用,回 (正文, finish_reason, 思考文本)。"""
+        resp = self._client.chat.completions.create(
+            model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
+        )
+        ch = resp.choices[0]
+        return ((ch.message.content or "").strip(),
+                getattr(ch, "finish_reason", None) or "",
+                (getattr(ch.message, "reasoning_content", None) or "").strip())
+
+    def _complete_nonstream(self, messages: list[dict], max_tokens: int) -> str:
+        """非流式取全文,带两道空响应兜底——只在【正文为空】时才动,正常路径零额外开销。
+
+        用户实报(2026-08-23,自建 OpenAI 兼容端点接本地思考型模型):200 回来 content 是空的。
+        两种成因必须分开处理,合并会把思维链当正文交上去:
+
+        ① `finish_reason == "length"`:reasoning 也吃 max_tokens,思考没说完就被腰斩,正文一个字
+           还没开始写。这时 reasoning_content 里躺的是【半截思维链】——拿它当正文入库,等于把
+           「嗯,这一章应该先写验伤……」写进作者的书里,比报错更糟。正确动作是【补一次满预算】。
+           不给 openai_compat 直接挂 thinking_budget,是因为那会让所有自定义端点都恒发 65536,
+           上限低的模型(不少是 4096/8192)会当场 400——按需重试只在真被腰斩时多花这一次。
+        ② `finish_reason == "stop"` 且正文空、思考非空:模型把整段回答放错字段了(部分本地部署
+           的 GLM/Qwen 是这个行为)。这时 reasoning_content 就是正文,采信它。
+        """
+        text, finish, think = self._call_once(messages, max_tokens)
+        if text:
+            return text
+        if finish == "length" and max_tokens < _THINK_BUDGET:
+            text, finish, think = self._call_once(messages, _THINK_BUDGET)   # ① 补满预算重来
+            if text:
+                return text
+        if think and finish != "length":       # ② 正文放错字段
+            return think
+        return ""
+
     def complete(self, system: str, user: str, *, max_chars: int | None = None,
                  on_chunk: OnChunk | None = None, on_reasoning: OnChunk | None = None,
                  agent_mode: bool = False) -> str:
@@ -364,11 +399,14 @@ class OpenAICompatBackend:
                 if buf:
                     on_chunk(buf)
                 text = "".join(parts).strip()
+                if not text:
+                    # 流式空响应:有的端点流里只发 reasoning、正文帧一条不发。回退非流式重取一次
+                    # (走上面那两道兜底);拿到了就补发给前端,别让作者停在一片空白上。
+                    text = self._complete_nonstream(messages, max_tokens)
+                    if text:
+                        on_chunk(text)
             else:
-                resp = self._client.chat.completions.create(
-                    model=self.model, messages=messages, max_tokens=max_tokens, temperature=0.9,
-                )
-                text = (resp.choices[0].message.content or "").strip()
+                text = self._complete_nonstream(messages, max_tokens)
         except Exception as e:  # 网络/限流/鉴权/余额 —— 映射成可操作的友好错误
             raise self._map(e) from e
         if not text:  # 200 空响应(多半模型名不对)→ 报错,绝不把空串往下传去覆盖用户数据
