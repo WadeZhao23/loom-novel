@@ -154,7 +154,8 @@ def propose(root: Path | str, persona_name: str, backend, *, min_edits: int = 3)
 
 
 def _snapshot_path(root: Path | str, persona_name: str) -> Path:
-    return Path(root) / paths.EVOLVE_DIR / "历史" / f"{persona_name}-增补前.md"
+    # 同样拼进文件名 → 同样过 persona.check_name(revert 只碰快照、不碰 agents/,单靠 _path 那道闸兜不住)
+    return Path(root) / paths.EVOLVE_DIR / "历史" / f"{_persona_mod().check_name(persona_name)}-增补前.md"
 
 
 def confirm(root: Path | str, persona_name: str, text: str) -> Path:

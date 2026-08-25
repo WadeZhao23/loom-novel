@@ -29,11 +29,26 @@ from pathlib import Path
 from .fsutil import atomic_write_text
 
 EXTRA_HEAD = "## 个人增补"
-_EXTRA_HINT = "(这一段由「让它更懂你」写入,记录你反复做的改法。可以手改,也可以一键清空回出厂。)"
+_EXTRA_HINT = "(这一段由「让它更懂你」写入,记录你反复做的改法。想反悔就直接删掉这一段——上面的基座不要动。)"
+
+
+# 人格名会被拼进 `agents/<角色>.md` 的文件名。全仓其余接受路径片段的写端点都过 `fsutil.safe_join`,
+# 这里是唯一的例外——`POST /api/evolve/revert` 的「角色」直通到这儿,传 `../../别处/我的日记`
+# 就能改写书目录外的任意 .md(只监听 127.0.0.1 + CSRF/Host 双闸,权限增量为零,但没有理由留着)。
+# 用字符级白名单而不是「必须是已知的五个角色」:领航员不在 artifacts.ARTIFACTS 里,枚举会误伤它。
+_BAD_IN_NAME = ("/", "\\", "\x00")
+
+
+def check_name(role: str) -> str:
+    """人格名必须是【纯名字】——不含路径分隔符、不是 `..`、不是绝对路径。越界抛 ValueError。"""
+    role = (role or "").strip()
+    if not role or role in (".", "..") or any(c in role for c in _BAD_IN_NAME):
+        raise ValueError(f"人格名不合法,拒绝访问:{role!r}")
+    return role
 
 
 def _path(root: Path | str, role: str) -> Path:
-    p = Path(root) / "agents" / f"{role}.md"
+    p = Path(root) / "agents" / f"{check_name(role)}.md"
     if not p.is_file():
         raise FileNotFoundError(f"找不到人格文件:{p}")
     return p
