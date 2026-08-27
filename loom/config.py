@@ -95,12 +95,24 @@ def _set_env_var(project_root: Path, name: str, value: str) -> None:
 
 
 def _env_var_set(project_root: Path, name: str) -> bool:
-    env = project_root / ".env"
-    if not env.exists():
-        return False
-    for line in env.read_text(encoding="utf-8").splitlines():
-        if line.strip().startswith(f"{name}="):
-            return bool(line.split("=", 1)[1].strip())
+    """这个 key 配了没有——**与 `load_config` 认的范围一致:项目 .env 或用户级 ~/.loom/.env**。
+
+    只看项目 .env 是个真机实测到的假警报(2026-08-26):用户级默认 key 与它的自检漏洞是
+    同一个 commit(b3adc02「接入优先 onboarding」)一起发的。作者按那个功能的设计
+    「连一次全局记住,不用每本重填」配好 key、写章也确实跑得通,但每开一本书点「自检」
+    都被告知「DEEPSEEK_API_KEY ✗ .env 里没读到」,修复提示还让他去项目 .env 加一行
+    ——**正是那个功能要免掉的动作**。自检的职责是照出真问题,不是造一个。
+    """
+    for env in (project_root / ".env", user_env_path()):
+        try:
+            lines = env.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue          # 不存在/读不了/编码坏了:当这一处没有,继续看下一处
+        for line in lines:
+            if line.strip().startswith(f"{name}="):
+                if line.split("=", 1)[1].strip():
+                    return True
+                break         # 这一处显式写了空值 → 这一处不算配,但用户级还可能有
     return False
 
 

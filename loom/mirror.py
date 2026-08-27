@@ -104,7 +104,7 @@ def persona_view(root: Path | str) -> list[dict]:
     角色清单从 `artifacts.ARTIFACTS` 派生(产物表是产物侧的单一真相),不手抄五个名字。
     某个角色的文件缺失/读不了 → 跳过它,其余照常(绝不抛)。
     """
-    from . import artifacts, persona
+    from . import artifacts, evolve, persona
     root = Path(root)
     out: list[dict] = []
     for spec in artifacts.ARTIFACTS:
@@ -118,7 +118,11 @@ def persona_view(root: Path | str) -> list[dict]:
             continue
         lines = [l.strip() for l in extra.splitlines() if l.strip().startswith("-")]
         if lines:
-            out.append({"角色": spec.persona, "增补条数": len(lines), "增补": lines})
+            # 「可撤销」由后端算,前端不猜:撤销靠的是 `.进化/历史/` 里那份快照,而它是
+            # 一次性的(撤完即清,见 evolve.revert)。作者手写进增补区的条目从来没有快照,
+            # 灰着按钮比点了才说「没有可撤销的备份」诚实。
+            out.append({"角色": spec.persona, "增补条数": len(lines), "增补": lines,
+                        "可撤销": evolve.has_snapshot(root, spec.persona)})
     return out
 
 

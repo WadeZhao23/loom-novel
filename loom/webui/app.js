@@ -2900,12 +2900,37 @@ function renderMirror() {
   parts.push(`<div class="mi-sec">
     <div class="mi-head">它跟你学到的写法 <span class="mi-sub">${ps.length ? ps.length + " 个人格" : ""}</span></div>
     ${ps.length
-      ? ps.map((r) => `<div class="mi-role">${escHtml(r.角色)} · ${r.增补条数} 条</div>` +
+      ? ps.map((r) => `<div class="mi-role">${escHtml(r.角色)} · ${r.增补条数} 条` +
+            (r.可撤销
+              ? `<button class="mi-revert" data-role="${escHtml(r.角色)}">撤销最近一次</button>`
+              : "") +
+          `</div>` +
           `<div class="mi-extra">${(r.增补 || []).map((l) => escHtml(l)).join("<br/>")}</div>`).join("")
       : `<div class="hint">还没有。等你反复用同一种改法改细纲,领航员会问你要不要把它记下来。</div>`}
   </div>`);
 
   box.innerHTML = parts.join("");
+  // 撤销键在这一屏里是【唯一的写操作】——镜台其余部分是只读投影,别把它做成整屏可编辑。
+  box.querySelectorAll(".mi-revert").forEach((b) => { b.onclick = () => revertPersonaExtra(b.dataset.role, b); });
+}
+
+// 撤销某人格最近一次「学改法」落盘。后端 `.进化/历史/` 的快照是【一次性】的(撤完即清),
+// 所以只撤得回最近那一次——文案要说清,别让作者以为有回退栈。
+async function revertPersonaExtra(role, btnEl) {
+  if (!DATA || !DATA.root || !role) return;
+  if (!confirm(`撤销「${role}」最近一次学到的写法?\n\n只撤最近这一次(更早的学到的会留着),基座提示词不受影响。`)) return;
+  const root = DATA.root;
+  if (btnEl) btnEl.disabled = true;
+  try {
+    await jreq("POST", "/api/evolve/revert", { root, 角色: role });
+    if (!DATA || DATA.root !== root) return;   // 已换书:迟到的响应绝不上屏
+    toast(`已撤销「${role}」最近一次学到的写法`);
+    await openMirror();                        // 重开一屏:曲线/覆盖/增补一起刷新
+  } catch (e) {
+    if (!DATA || DATA.root !== root) return;
+    toast(e.message, true);
+    if (btnEl) btnEl.disabled = false;
+  }
 }
 
 async function openStudio(tab) {

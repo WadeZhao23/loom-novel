@@ -159,13 +159,24 @@ def _handle_xuegaifa(root: Path, 角色: str = "", *, backend=None) -> dict:
     """
     from . import evolve
     role = str(角色 or "").strip()
+    learnable = sorted(evolve.learnable_personas())
     if not role:
-        raise ValueError("学改法缺少「角色」参数(设定师/大纲师/写手/编辑/润色师)。")
+        raise ValueError(f"学改法缺少「角色」参数(今天能学的:{'/'.join(learnable)})。")
+    # 能学的人格是【结构性】的:判据只能是「作者实际改成了什么」,所以那个人格必须有一件
+    # 盘上可比对的产物(evolve._COMPARABLE,今天只有大纲师的细纲)。真机 2026-08-26 实测:
+    # 对另外四个人格,ripe 恒 False、collect 恒 0——旧文案却回「再写几章再说」,
+    # 那是一句作者照做一百章也不会兑现的话。**说不出口的能力就别把它列成合法参数。**
+    if role not in learnable:
+        raise ValueError(
+            f"「{role}」今天学不了:学改法比对的是「AI 交的那份」和「你改成的那份」,"
+            f"而这个人格没有你能在盘上直接改的产物。今天能学的只有:{'/'.join(learnable)}。")
     if backend is None:
         raise ValueError("这一步要发一次模型调用,但当前通道没有可用后端。")
     if not evolve.ripe(root, role):
         n = len(evolve.collect(root, persona=role))
-        raise ValueError(f"「{role}」目前只攒到 {n} 章证据,还不够归纳出稳定的改法——再写几章再说。")
+        raise ValueError(
+            f"「{role}」目前只攒到 {n} 章证据,还不够归纳出稳定的改法。"
+            f"再写一两章、并且动手改改它交的细纲(照单全收的那章没有可比对的差异),之后再来。")
     prop = evolve.propose(root, role, backend)
     if prop is None:
         raise ValueError(f"这次没从「{role}」的证据里归纳出反复出现的改法。")
@@ -197,7 +208,8 @@ REGISTRY: dict[str, ToolSpec] = {
     "学改法": ToolSpec(
         name="学改法", params=("角色",),
         desc="把作者反复改成什么样,蒸成这个人格的写法增补(候选卡,作者拍板才落)。"
-             "只在环境快照提示某个人格「攒够证据」时才用。",
+             "只在环境快照提示某个人格「攒够证据」时才用;别对快照没提到的人格试——"
+             "今天只有大纲师有盘上可比对的产物,别的人格调了必然失败。",
         handler=_handle_xuegaifa, mutates=True,
     ),
     "提设定": ToolSpec(

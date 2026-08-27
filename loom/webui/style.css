@@ -1054,3 +1054,11 @@ input.flash { border-color: var(--seal); animation: key-flash .5s var(--ease-ino
 .mi-role { font-family: var(--font-mono); font-size: var(--fs-caption);
   color: var(--text-mute); margin-top: var(--space-3); }
 .mi-role:first-child { margin-top: 0; }
+
+/* 镜台里唯一的写操作:撤销最近一次学到的写法。做成行内幽灵键,别让它抢走只读投影的调子。 */
+.mi-role { display: flex; align-items: baseline; gap: var(--space-2); }
+.mi-revert { margin-left: auto; font-family: var(--font-ui); font-size: var(--fs-caption);
+  padding: 1px 8px; border: 1px solid var(--rule); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-mute); cursor: pointer; }
+.mi-revert:hover:not(:disabled) { border-color: var(--seal); color: var(--seal); }
+.mi-revert:disabled { opacity: .45; cursor: default; }

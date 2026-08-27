@@ -27,6 +27,16 @@ _COMPARABLE: dict[str, str] = {
 }
 
 
+def learnable_personas() -> set[str]:
+    """今天「学改法」学得了的人格 —— 由 `_COMPARABLE` 派生,不手抄。
+
+    结构性限制,不是「证据还不够」:判据只能是「作者实际改成了什么」(ADR 0002/0006 红线),
+    所以那个人格必须有一件**盘上可比对**的产物。今天只有大纲师的细纲是这个形状。
+    将来某件产物也变成本地可编辑,`_COMPARABLE` 加一行,这里和文案自动跟着变。
+    """
+    return set(_COMPARABLE.values())
+
+
 @dataclass(frozen=True)
 class Edit:
     """一条证据:某一章里,agent 交的那份 vs 作者改成的那份。"""
@@ -80,12 +90,15 @@ def collect(root: Path | str, *, persona: str | None = None) -> list[Edit]:
 _REFINE_SYSTEM = """你在维护一位作者的【个人增补】——记录他在这本书上**反复做的改法**,
 好让下次这个角色直接照他的习惯来。
 
-我给你:① 这个角色的出厂写法要求(基座,**只读**);② 现有的个人增补;③ 若干章的证据,
-每章两份原文——AI 交出去的那份、和作者改成的那份。
+我给你:① 这个角色的出厂写法要求(基座,**只读**);② 现有的个人增补;③ 若干章的证据。
+证据是**已经算好的逐行 diff**——作者删掉了哪些行、加上了哪些行、把哪行改写成了什么。
+你不必自己去比对原文,那一步我已经替你做完了。
 
 两步走,别跳:
-第一步,逐章比对两份原文,只找出【跨多章反复出现】的改法。只在一章出现过的差异是这一章特殊,
-不是习惯,一律忽略。也忽略纯错别字、标点、以及与这个角色职责无关的改动。
+第一步,横着看这几章的 diff,找出【跨多章反复出现】的改法。判据就是重复:同一类改动在
+两章及以上出现过,才算习惯。只在一章出现过的是那一章特殊,一律忽略;纯错别字、标点、
+以及与这个角色职责无关的改动也忽略。
+**别因为「不确定」就一条都不给**——真有跨章重复就写出来;确实每章都各改各的,才回「无」。
 第二步,把这些改法写成给这个角色的**执行性规则**(一条一行,以「- 」起头,说清「做什么/不做什么」,
 不要解释你的推理过程)。
 
@@ -99,6 +112,66 @@ _REFINE_SYSTEM = """你在维护一位作者的【个人增补】——记录他
 确实没有可归纳的反复改法时,只回一行:无。"""
 
 _NO_PATTERN = ("无", "无。", "(无)", "（无）")
+
+
+_MAX_DIFF_LINES = 20      # 每章每类最多列这么多行,再多就截断并明说(别把 prompt 撑爆)
+
+
+def _diff_lines(ai: str, author: str) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+    """行级 diff:(作者删掉的, 作者加上的, 作者改写的[(前,后)])。**确定性,不经模型。**
+
+    v0.3.7「字数五螺丝」的教训在这里原样适用:**LLM 自己数不准 = 授权无牙**,那一版把
+    「数字数」从模型手里拿回代码手里。这里是同一件事换了个形状——真机 2026-08-26 实测,
+    旧写法把两份各 1400 字的原文丢给模型、让它自己「逐章比对」,而真正的差异是 40 行里的
+    1~3 行:三章证据里作者一共删了 5 处「情绪:」行、2 处「许的承诺」行,这么干净的重复模式,
+    refine 回的是「无」。diff 是确定性的、difflib 三行就算得出来,没有理由让模型去大海捞针。
+    """
+    import difflib
+    a = [l.rstrip() for l in (ai or "").splitlines() if l.strip()]
+    b = [l.rstrip() for l in (author or "").splitlines() if l.strip()]
+    dropped: list[str] = []
+    added: list[str] = []
+    changed: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag == "delete":
+            dropped += a[i1:i2]
+        elif tag == "insert":
+            added += b[j1:j2]
+        elif tag == "replace":
+            # 成对的算「改写」,落单的归到删/加——别把一次改写谎报成一删一加
+            for k in range(max(i2 - i1, j2 - j1)):
+                before = a[i1 + k] if i1 + k < i2 else None
+                after = b[j1 + k] if j1 + k < j2 else None
+                if before is not None and after is not None:
+                    changed.append((before, after))
+                elif before is not None:
+                    dropped.append(before)
+                elif after is not None:
+                    added.append(after)
+    return dropped, added, changed
+
+
+def _fmt(label: str, rows: list[str]) -> str:
+    if not rows:
+        return f"{label}:(无)"
+    shown = rows[:_MAX_DIFF_LINES]
+    more = f"\n  …另有 {len(rows) - len(shown)} 行同类,已省略" if len(rows) > len(shown) else ""
+    return f"{label}({len(rows)} 行):\n" + "\n".join(f"  {r}" for r in shown) + more
+
+
+def _evidence_block(e: "Edit") -> str:
+    """一章的证据 = 【算好的 diff】,不是两份原文。见 `_diff_lines` 的注释。"""
+    dropped, added, changed = _diff_lines(e.ai, e.author)
+    parts = [f"### 第{e.chapter}章(AI 交 {len(e.ai)} 字 → 作者改成 {len(e.author)} 字)",
+             _fmt("作者删掉的行", dropped), _fmt("作者加上的行", added)]
+    if changed:
+        shown = changed[:_MAX_DIFF_LINES]
+        rows = "\n".join(f"  「{b}」→「{a}」" for b, a in shown)
+        more = f"\n  …另有 {len(changed) - len(shown)} 处,已省略" if len(changed) > len(shown) else ""
+        parts.append(f"作者改写的行({len(changed)} 处):\n{rows}{more}")
+    else:
+        parts.append("作者改写的行:(无)")
+    return "\n".join(parts)
 
 
 def refine(root: Path | str, persona_name: str, backend, *, min_edits: int = 3,
@@ -118,7 +191,7 @@ def refine(root: Path | str, persona_name: str, backend, *, min_edits: int = 3,
     if len(edits) < min_edits:
         return None
     base, extra = _persona_mod().split(root, persona_name)
-    blocks = [f"### 第{e.chapter}章\n【AI 交的】\n{e.ai}\n\n【作者改成的】\n{e.author}" for e in edits]
+    blocks = [_evidence_block(e) for e in edits]
     user = (f"## 角色\n{persona_name}\n\n## 出厂写法要求(基座,只读,不要改写它)\n{base}\n\n"
             f"## 现有的个人增补\n{extra or '(还没有)'}\n\n"
             f"## 证据({len(edits)} 章)\n" + "\n\n".join(blocks) +
@@ -128,7 +201,8 @@ def refine(root: Path | str, persona_name: str, backend, *, min_edits: int = 3,
     if reasons:
         raise LoomBackendError(render("model_output_invalid", detail="；".join(reasons)),
                                code="model_output_invalid")
-    out = out.strip()
+    # 逐行去尾空白:模型爱在行尾留两个空格(markdown 换行),原样落进 agents/<角色>.md 是噪声
+    out = "\n".join(l.rstrip() for l in out.strip().splitlines()).strip()
     return None if out in _NO_PATTERN else out
 
 
@@ -170,6 +244,14 @@ def confirm(root: Path | str, persona_name: str, text: str) -> Path:
     snap.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(snap, p.split(root, persona_name)[1])
     return p.write_extra(root, persona_name, text)
+
+
+def has_snapshot(root: Path | str, persona_name: str) -> bool:
+    """还撤得回去吗——`.进化/历史/` 里那份一次性快照还在不在(镜台据此决定按钮灰不灰)。"""
+    try:
+        return _snapshot_path(root, persona_name).is_file()
+    except ValueError:      # 人格名不合法(persona.check_name)→ 当然没有快照,不抛给只读投影
+        return False
 
 
 def revert(root: Path | str, persona_name: str) -> Path | None:

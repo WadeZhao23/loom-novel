@@ -114,9 +114,13 @@ def test_学改法候选卡带slot与content供webui渲染(project, monkeypatch)
     `prop.slot === ev.slot` 判「这一格是否已被同伴占了」——两张卡的 slot 都是 undefined 时,
     `undefined === undefined` 恒真,第二张会被误灰成「这一格已选了其他方向」。
 
-    这里直接 monkeypatch `evolve.ripe`/`evolve.propose`(不必真凑两个人格各自的证据——今天
-    只有大纲师这一件产物可比对,见 evolve.py 的 `_COMPARABLE`),模拟两个不同人格各自出一张
-    候选卡,断言两者的 slot 都指向各自的 `agents/<角色>.md` 且互不相等。
+    这里直接 monkeypatch `evolve.ripe`/`evolve.propose`/`evolve.learnable_personas`,模拟两个
+    不同人格各自出一张候选卡,断言两者的 slot 都指向各自的 `agents/<角色>.md` 且互不相等。
+
+    **今天这是个将来态**:`evolve._COMPARABLE` 结构性只有大纲师一项(判据只能是「作者实际
+    改成了什么」,那个人格就必须有一件盘上可比对的产物),所以真实运行时同屏只可能有一张卡,
+    误灰不会发生。但 `_COMPARABLE` 加第二行的那天它就会发生——那一行不该同时是这道
+    渲染闸的第一次真实曝光。故意用 monkeypatch 把将来态提前钉住。
     """
     from conftest import FakeBackend, const
 
@@ -128,6 +132,8 @@ def test_学改法候选卡带slot与content供webui渲染(project, monkeypatch)
 
     monkeypatch.setattr(evolve, "ripe", lambda root, persona, **kw: True)
     monkeypatch.setattr(evolve, "propose", fake_propose)
+    # 连它一起模拟:真实的 learnable_personas() 今天只回 {"大纲师"},第二张卡根本出不来
+    monkeypatch.setattr(evolve, "learnable_personas", lambda: {"大纲师", "写手"})
 
     ev1 = partner_tools.run_tool(project, "学改法", {"角色": "大纲师"}, ts="t1",
                                  backend=FakeBackend(const("x")))
